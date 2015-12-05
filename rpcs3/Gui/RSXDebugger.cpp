@@ -1,9 +1,11 @@
+#include "stdafx.h"
 #include "stdafx_gui.h"
 
 #include "RSXDebugger.h"
 
 #include "Utilities/rPlatform.h"
 #include "Utilities/Log.h"
+#include "Utilities/File.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 #include "Emu/state.h"
@@ -16,7 +18,6 @@
 #include "MemoryViewer.h"
 
 #include <wx/notebook.h>
-#include <fstream>
 
 // TODO: Clear the object when restarting the emulator
 std::vector<RSXDebuggerProgram> m_debug_programs;
@@ -28,7 +29,7 @@ enum GCMEnumTypes
 };
 
 RSXDebugger::RSXDebugger(wxWindow* parent) 
-	: wxFrame(parent, wxID_ANY, "RSX Debugger", wxDefaultPosition, wxSize(700, 450))
+	: wxDialog(parent, wxID_ANY, "RSX Debugger", wxDefaultPosition, wxSize(700, 450))
 	, m_item_count(37)
 	, m_addr(0x0)
 	, m_cur_texture(0)
@@ -323,6 +324,23 @@ void RSXDebugger::OnScrollMemory(wxMouseEvent& event)
 	event.Skip();
 }
 
+namespace
+{
+	void display_buffer(wxWindow *parent, const wxImage &img)
+	{
+//		wxString title = wxString::Format("Raw Image @ 0x%x", addr);
+		size_t width = img.GetWidth(), height = img.GetHeight();
+		wxFrame* f_image_viewer = new wxFrame(parent, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+			wxSYSTEM_MENU | wxMINIMIZE_BOX | wxCLOSE_BOX | wxCAPTION | wxCLIP_CHILDREN);
+		f_image_viewer->SetBackgroundColour(wxColour(240, 240, 240)); //This fix the ugly background color under Windows
+		f_image_viewer->SetAutoLayout(true);
+		f_image_viewer->SetClientSize(wxSize(width, height));
+		f_image_viewer->Show();
+		wxClientDC dc_canvas(f_image_viewer);
+		dc_canvas.DrawBitmap(img, 0, 0, false);
+	}
+}
+
 void RSXDebugger::OnClickBuffer(wxMouseEvent& event)
 {
 	if (!RSXReady()) return;
@@ -341,10 +359,15 @@ void RSXDebugger::OnClickBuffer(wxMouseEvent& event)
 		return; \
 	} \
 
-	if (event.GetId() == p_buffer_colorA->GetId()) SHOW_BUFFER(0);
+/*	if (event.GetId() == p_buffer_colorA->GetId()) SHOW_BUFFER(0);
 	if (event.GetId() == p_buffer_colorB->GetId()) SHOW_BUFFER(1);
 	if (event.GetId() == p_buffer_colorC->GetId()) SHOW_BUFFER(2);
-	if (event.GetId() == p_buffer_colorD->GetId()) SHOW_BUFFER(3);
+	if (event.GetId() == p_buffer_colorD->GetId()) SHOW_BUFFER(3);*/
+
+	if (event.GetId() == p_buffer_colorA->GetId()) display_buffer(this, buffer_img[0]);
+	if (event.GetId() == p_buffer_colorB->GetId()) display_buffer(this, buffer_img[1]);
+	if (event.GetId() == p_buffer_colorC->GetId()) display_buffer(this, buffer_img[2]);
+	if (event.GetId() == p_buffer_colorD->GetId()) display_buffer(this, buffer_img[3]);
 	if (event.GetId() == p_buffer_tex->GetId())
 	{
 		u8 location = render.textures[m_cur_texture].location();
@@ -396,11 +419,11 @@ void RSXDebugger::OnClickDrawCalls(wxMouseEvent& event)
 		if (width && height)
 		{
 			unsigned char *orig_buffer = frame_debug.draw_calls[draw_id].color_buffer[i].data.data();
-			wxImage img(width, height, convert_to_wximage_buffer(orig_buffer, width, height));
+			buffer_img[i] = wxImage(width, height, convert_to_wximage_buffer(orig_buffer, width, height));
 			wxClientDC dc_canvas(p_buffers[i]);
 
-			if (img.IsOk())
-				dc_canvas.DrawBitmap(img.Scale(m_panel_width, m_panel_height), 0, 0, false);
+			if (buffer_img[i].IsOk())
+				dc_canvas.DrawBitmap(buffer_img[i].Scale(m_panel_width, m_panel_height), 0, 0, false);
 		}
 	}
 
@@ -536,20 +559,22 @@ void RSXDebugger::GetMemory()
 			m_list_commands->SetItem(i, 1, "????????");
 		}
 	}
-	std::ofstream command_dump;
-	command_dump.open("command_dump.log");
+
+	std::string dump;
+
 	for (u32 i = 0; i < frame_debug.command_queue.size(); i++)
 	{
-		std::string str = rsx::get_pretty_printing_function(frame_debug.command_queue[i].first)(frame_debug.command_queue[i].second);
+		const std::string& str = rsx::get_pretty_printing_function(frame_debug.command_queue[i].first)(frame_debug.command_queue[i].second);
 		m_list_captured_frame->SetItem(i, 0, str);
-		command_dump << str << "\n";
+
+		dump += str;
+		dump += '\n';
 	}
-	command_dump.close();
+
+	fs::file("command_dump.log", fom::rewrite) << dump;
 
 	for (u32 i = 0;i < frame_debug.draw_calls.size(); i++)
 		m_list_captured_draw_calls->InsertItem(i, frame_debug.draw_calls[i].name);
-
-
 }
 
 void RSXDebugger::GetBuffers()

@@ -3,9 +3,7 @@
 #include "Loader/Loader.h"
 #include "DbgCommand.h"
 
-//just for frame_type
-//TODO: provide better way
-#include "Emu/RSX/GSRender.h"
+enum class frame_type;
 
 struct EmuCallbacks
 {
@@ -16,6 +14,7 @@ struct EmuCallbacks
 	std::function<std::unique_ptr<class MouseHandlerBase>()> get_mouse_handler;
 	std::function<std::unique_ptr<class PadHandlerBase>()> get_pad_handler;
 	std::function<std::unique_ptr<class GSFrameBase>(frame_type)> get_gs_frame;
+	std::function<std::shared_ptr<class GSRender>()> get_gs_render;
 	std::function<std::unique_ptr<class MsgDialogBase>()> get_msg_dialog;
 	std::function<std::unique_ptr<class SaveDialogBase>()> get_save_dialog;
 };
@@ -125,19 +124,28 @@ public:
 		m_cb.send_dbg_command(cmd, thread);
 	}
 
-	// returns a future object associated with the result of the function called from the GUI thread
-	template<typename F, typename RT = std::result_of_t<F()>> inline std::future<RT> CallAfter(F&& func) const
+	// Returns a future object associated with the result of the function called from the GUI thread
+	template<typename F>
+	std::future<void> CallAfter(F&& func) const
 	{
-		// create task
-		auto task = std::make_shared<std::packaged_task<RT()>>(std::forward<F>(func));
+		// Make "shared" promise to workaround std::function limitation
+		auto spr = std::make_shared<std::promise<void>>();
 
-		// get future
-		std::future<RT> future = task->get_future();
+		// Get future
+		std::future<void> future = spr->get_future();
 
-		// run asynchronously in GUI thread
-		m_cb.call_after([=]
+		// Run asynchronously in GUI thread
+		m_cb.call_after([spr = std::move(spr), task = std::forward<F>(func)]()
 		{
-			(*task)();
+			try
+			{
+				task();
+				spr->set_value();
+			}
+			catch (...)
+			{
+				spr->set_exception(std::current_exception());
+			}
 		});
 
 		return future;

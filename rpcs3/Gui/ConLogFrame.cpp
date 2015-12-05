@@ -1,8 +1,8 @@
+#include "stdafx.h"
 #include "stdafx_gui.h"
 
 #include <wx/listctrl.h>
 #include <wx/clipbrd.h>
-#include <fstream>
 
 #include "Emu/state.h"
 #include "Utilities/Log.h"

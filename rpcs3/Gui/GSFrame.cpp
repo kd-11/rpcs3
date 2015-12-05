@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #include "stdafx_gui.h"
 #include "GSFrame.h"
 #include "Emu/System.h"
@@ -6,10 +7,6 @@
 #include "rpcs3.h"
 #include "Utilities/Timer.h"
 
-#ifndef _WIN32
-#include "frame_icon.xpm"
-#endif
-
 BEGIN_EVENT_TABLE(GSFrame, wxFrame)
 	EVT_PAINT(GSFrame::OnPaint)
 	EVT_SIZE(GSFrame::OnSize)
@@ -17,7 +14,7 @@ END_EVENT_TABLE()
 
 GSFrame::GSFrame(const wxString& title) : wxFrame(nullptr, wxID_ANY, "GSFrame[" + title + "]")
 {
-	SetIcon(wxICON(frame_icon));
+	SetIcon(wxGetApp().m_MainFrame->GetIcon());
 
 	CellVideoOutResolution res = ResolutionTable[ResolutionIdToNum((u32)rpcs3::state.config.rsx.resolution.value())];
 	SetClientSize(res.width, res.height);

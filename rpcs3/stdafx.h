@@ -8,6 +8,10 @@
 
 #define NOMINMAX
 
+#ifndef __STDC_CONSTANT_MACROS
+#define __STDC_CONSTANT_MACROS
+#endif
+
 #if defined(MSVC_CRT_MEMLEAK_DETECTION) && defined(_DEBUG) && !defined(DBG_NEW)
 	#define DBG_NEW new ( _NORMAL_BLOCK , __FILE__ , __LINE__ )
 	#include "define_new_memleakdetect.h"
@@ -54,26 +58,13 @@ using namespace std::chrono_literals;
 #define CHECK_SIZE_ALIGN(type, size, align) CHECK_SIZE(type, size); CHECK_ALIGN(type, align)
 #define CHECK_ASCENDING(constexpr_array) static_assert(::is_ascending(constexpr_array), #constexpr_array " is not sorted in ascending order")
 
-using uint = unsigned int;
-
-using u8 = std::uint8_t;
-using u16 = std::uint16_t;
-using u32 = std::uint32_t;
-using u64 = std::uint64_t;
-
-using s8 = std::int8_t;
-using s16 = std::int16_t;
-using s32 = std::int32_t;
-using s64 = std::int64_t;
-
-using f32 = float;
-using f64 = double;
-
 #ifndef _MSC_VER
 using u128 = __uint128_t;
 #endif
 
 CHECK_SIZE_ALIGN(u128, 16, 16);
+
+#include "Utilities/types.h"
 
 // bool type replacement for PS3/PSV
 class b8
@@ -164,17 +155,19 @@ template<typename T1, typename T2, typename T3 = const char*> struct triplet_t
 // return 32 bit .size() for container
 template<typename T> inline auto size32(const T& container) -> decltype(static_cast<u32>(container.size()))
 {
-	return container.size() <= UINT32_MAX ? static_cast<u32>(container.size()) : throw std::length_error(__FUNCTION__);
+	const auto size = container.size();
+	return size >= 0 && size <= UINT32_MAX ? static_cast<u32>(size) : throw std::length_error(__FUNCTION__);
 }
 
 // return 32 bit size for an array
 template<typename T, std::size_t Size> constexpr u32 size32(const T(&)[Size])
 {
-	return Size <= UINT32_MAX ? static_cast<u32>(Size) : throw std::length_error(__FUNCTION__);
+	return Size >= 0 && Size <= UINT32_MAX ? static_cast<u32>(Size) : throw std::length_error(__FUNCTION__);
 }
 
 #define WRAP_EXPR(expr) [&]{ return expr; }
 #define COPY_EXPR(expr) [=]{ return expr; }
+#define PURE_EXPR(expr) [] { return expr; }
 #define EXCEPTION(text, ...) fmt::exception(__FILE__, __LINE__, __FUNCTION__, text, ##__VA_ARGS__)
 #define VM_CAST(value) vm::impl_cast(value, __FILE__, __LINE__, __FUNCTION__)
 #define IS_INTEGRAL(t) (std::is_integral<t>::value || std::is_same<std::decay_t<t>, u128>::value)
@@ -183,6 +176,7 @@ template<typename T, std::size_t Size> constexpr u32 size32(const T(&)[Size])
 #define CHECK_ASSERTION(expr) if (expr) {} else throw EXCEPTION("Assertion failed: " #expr)
 #define CHECK_SUCCESS(expr) if (s32 _r = (expr)) throw EXCEPTION(#expr " failed (0x%x)", _r)
 
+// Some forward declarations for the ID manager
 template<typename T> struct id_traits;
 
 #define _PRGNAME_ "RPCS3"

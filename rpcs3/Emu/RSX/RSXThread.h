@@ -1,4 +1,5 @@
 #pragma once
+
 #include "GCM.h"
 #include "RSXTexture.h"
 #include "RSXVertexProgram.h"
@@ -8,8 +9,6 @@
 #include "Utilities/Semaphore.h"
 #include "Utilities/Thread.h"
 #include "Utilities/Timer.h"
-#include "Utilities/types.h"
-
 
 extern u64 get_system_time();
 
@@ -121,10 +120,95 @@ namespace rsx
 
 	extern u32 method_registers[0x10000 >> 2];
 
-	u32 get_address(u32 offset, u32 location);
-	u32 linear_to_swizzle(u32 x, u32 y, u32 z, u32 log2_width, u32 log2_height, u32 log2_depth);
-
 	u32 get_vertex_type_size(u32 type);
+
+	u32 get_address(u32 offset, u32 location);
+
+	template<typename T>
+	void pad_texture(void* inputPixels, void* outputPixels, u16 inputWidth, u16 inputHeight, u16 outputWidth, u16 outputHeight) 
+	{
+		T *src, *dst;
+		src = static_cast<T*>(inputPixels);
+		dst = static_cast<T*>(outputPixels);
+
+		for (u16 h = 0; h < inputHeight; ++h)
+		{
+			const u32 padded_pos = h * outputWidth;
+			const u32 pos = h * inputWidth;
+			for (u16 w = 0; w < inputWidth; ++w)
+			{
+				dst[padded_pos + w] = src[pos + w];
+			}
+		}
+	}
+
+	/*   Note: What the ps3 calls swizzling in this case is actually z-ordering / morton ordering of pixels
+	*       - Input can be swizzled or linear, bool flag handles conversion to and from
+	*       - It will handle any width and height that are a power of 2, square or non square
+	*	 Restriction: It has mixed results if the height or width is not a power of 2
+	*/
+	template<typename T>
+	void convert_linear_swizzle(void* inputPixels, void* outputPixels, u16 width, u16 height, bool inputIsSwizzled)
+	{
+		u32 log2width, log2height;
+
+		log2width = log2(width);
+		log2height = log2(height);
+
+		// Max mask possible for square texture
+		u32 x_mask = 0x55555555;
+		u32 y_mask = 0xAAAAAAAA;
+
+		// We have to limit the masks to the lower of the two dimensions to allow for non-square textures
+		u32 limit_mask = (log2width < log2height) ? log2width : log2height;
+		// double the limit mask to account for bits in both x and y
+		limit_mask = 1 << (limit_mask << 1);
+
+		//x_mask, bits above limit are 1's for x-carry
+		x_mask = (x_mask | ~(limit_mask - 1));
+		//y_mask. bits above limit are 0'd, as we use a different method for y-carry over
+		y_mask = (y_mask & (limit_mask - 1));
+
+		u32 offs_y = 0;
+		u32 offs_x = 0;
+		u32 offs_x0 = 0; //total y-carry offset for x
+		u32 y_incr = limit_mask;
+
+		T *src, *dst;
+
+		if (!inputIsSwizzled)
+		{
+			for (int y = 0; y < height; ++y) 
+			{
+				src = static_cast<T*>(inputPixels) + y*width;
+				dst = static_cast<T*>(outputPixels) + offs_y;
+				offs_x = offs_x0;
+				for (int x = 0; x < width; ++x) 
+				{
+					dst[offs_x] = src[x];
+					offs_x = (offs_x - x_mask) & x_mask;
+				}
+				offs_y = (offs_y - y_mask) & y_mask;
+				if (offs_y == 0) offs_x0 += y_incr;
+			}
+		}
+		else 
+		{
+			for (int y = 0; y < height; ++y) 
+			{
+				src = static_cast<T*>(inputPixels) + offs_y;
+				dst = static_cast<T*>(outputPixels) + y*width;
+				offs_x = offs_x0;
+				for (int x = 0; x < width; ++x) 
+				{
+					dst[x] = src[offs_x];
+					offs_x = (offs_x - x_mask) & x_mask;
+				}
+				offs_y = (offs_y - y_mask) & y_mask;
+				if (offs_y == 0) offs_x0 += y_incr;
+			}
+		}
+	}
 
 	struct surface_info
 	{
@@ -170,7 +254,7 @@ namespace rsx
 		}
 	};
 
-	class thread : protected named_thread_t
+	class thread : public named_thread_t
 	{
 	protected:
 		std::stack<u32> m_call_stack;
@@ -242,18 +326,19 @@ namespace rsx
 	protected:
 		virtual ~thread() {}
 
+		virtual void on_task() override;
+
 	public:
+		virtual std::string get_name() const override;
+
 		virtual void begin();
 		virtual void end();
 
-		virtual void oninit() = 0;
-		virtual void oninit_thread() = 0;
-		virtual void onexit_thread() = 0;
-		virtual bool domethod(u32 cmd, u32 value) { return false; }
+		virtual void on_init() = 0;
+		virtual void on_init_thread() = 0;
+		virtual bool do_method(u32 cmd, u32 value) { return false; }
 		virtual void flip(int buffer) = 0;
 		virtual u64 timestamp() const;
-
-		void task();
 
 		/**
 		 * Fill buffer with 4x4 scale offset matrix.

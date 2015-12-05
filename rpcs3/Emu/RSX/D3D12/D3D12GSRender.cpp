@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #include "stdafx_d3d12.h"
 #ifdef _MSC_VER
 #include "D3D12GSRender.h"
@@ -232,11 +233,11 @@ D3D12GSRender::~D3D12GSRender()
 	release_d2d_structures();
 }
 
-void D3D12GSRender::onexit_thread()
+void D3D12GSRender::on_exit()
 {
 }
 
-bool D3D12GSRender::domethod(u32 cmd, u32 arg)
+bool D3D12GSRender::do_method(u32 cmd, u32 arg)
 {
 	switch (cmd)
 	{

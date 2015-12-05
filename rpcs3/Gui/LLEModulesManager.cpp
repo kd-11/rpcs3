@@ -1,3 +1,4 @@
+#include "stdafx.h"
 #include "stdafx_gui.h"
 #include "Utilities/Log.h"
 #include "Loader/ELF64.h"
@@ -8,7 +9,8 @@
 #include "Emu/state.h"
 #include "Emu/FS/VFS.h"
 
-LLEModulesManagerFrame::LLEModulesManagerFrame(wxWindow* parent) : wxFrame(parent, wxID_ANY, "LLEModulesManagerFrame")
+LLEModulesManagerFrame::LLEModulesManagerFrame(wxWindow* parent)
+	: wxDialog(parent, wxID_ANY, "LLEModulesManagerFrame", wxDefaultPosition, wxSize(480, 640))
 {
 	wxBoxSizer *s_panel = new wxBoxSizer(wxVERTICAL);
 	wxBoxSizer *s_p_panel = new wxBoxSizer(wxVERTICAL);

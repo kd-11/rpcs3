@@ -122,22 +122,19 @@ void GLTexture::init(rsx::texture& tex)
 		if (is_swizzled)
 		{
 			u32 *src, *dst;
-			u32 log2width, log2height;
+			u16 height = tex.height();
+			u16 width = tex.width();
 
-			unswizzledPixels = (u8*)malloc(tex.width() * tex.height() * 4);
+			unswizzledPixels = (u8*)malloc(width * height * 4);
 			src = (u32*)pixels;
 			dst = (u32*)unswizzledPixels;
-
-			log2width = (u32)log2(tex.width());
-			log2height = (u32)log2(tex.height());
-
-			for (int i = 0; i < tex.height(); i++)
+			
+			if ((height & (height - 1)) || (width & (width - 1)))
 			{
-				for (int j = 0; j < tex.width(); j++)
-				{
-					dst[(i*tex.height()) + j] = src[rsx::linear_to_swizzle(j, i, 0, log2width, log2height, 0)];
-				}
+				LOG_ERROR(RSX, "Swizzle Texture: Width or height not power of 2! (h=%d,w=%d).", height, width);
 			}
+
+			rsx::convert_linear_swizzle<u32>(src, dst, width, height, true);
 		}
 
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tex.width(), tex.height(), 0, GL_BGRA, GL_UNSIGNED_INT_8_8_8_8, is_swizzled ? unswizzledPixels : pixels);
@@ -586,11 +583,11 @@ void GLGSRender::begin()
 	__glcheck glDepthMask(rsx::method_registers[NV4097_SET_DEPTH_MASK]);
 	__glcheck glStencilMask(rsx::method_registers[NV4097_SET_STENCIL_MASK]);
 
-	//int viewport_x = int(rsx::method_registers[NV4097_SET_VIEWPORT_HORIZONTAL] & 0xffff);
-	//int viewport_y = int(rsx::method_registers[NV4097_SET_VIEWPORT_VERTICAL] & 0xffff);
-	//int viewport_w = int(rsx::method_registers[NV4097_SET_VIEWPORT_HORIZONTAL] >> 16);
-	//int viewport_h = int(rsx::method_registers[NV4097_SET_VIEWPORT_VERTICAL] >> 16);
-	//glViewport(viewport_x, viewport_y, viewport_w, viewport_h);
+	int viewport_x = int(rsx::method_registers[NV4097_SET_VIEWPORT_HORIZONTAL] & 0xffff);
+	int viewport_y = int(rsx::method_registers[NV4097_SET_VIEWPORT_VERTICAL] & 0xffff);
+	int viewport_w = int(rsx::method_registers[NV4097_SET_VIEWPORT_HORIZONTAL] >> 16);
+	int viewport_h = int(rsx::method_registers[NV4097_SET_VIEWPORT_VERTICAL] >> 16);
+	glViewport(viewport_x, viewport_y, viewport_w, viewport_h);
 
 	//scissor test is always enabled
 	glEnable(GL_SCISSOR_TEST);
@@ -671,15 +668,14 @@ void GLGSRender::begin()
 			rsx::method_registers[NV4097_SET_STENCIL_FUNC_MASK]);
 		__glcheck glStencilOp(rsx::method_registers[NV4097_SET_STENCIL_OP_FAIL], rsx::method_registers[NV4097_SET_STENCIL_OP_ZFAIL],
 			rsx::method_registers[NV4097_SET_STENCIL_OP_ZPASS]);
-	}
 
-	if (__glcheck enable(rsx::method_registers[NV4097_SET_TWO_SIDED_STENCIL_TEST_ENABLE], GL_STENCIL_TEST_TWO_SIDE_EXT))
-	{
-		__glcheck glStencilMaskSeparate(GL_BACK, rsx::method_registers[NV4097_SET_BACK_STENCIL_MASK]);
-		__glcheck glStencilFuncSeparate(GL_BACK, rsx::method_registers[NV4097_SET_BACK_STENCIL_FUNC],
-			rsx::method_registers[NV4097_SET_BACK_STENCIL_FUNC_REF], rsx::method_registers[NV4097_SET_BACK_STENCIL_FUNC_MASK]);
-		__glcheck glStencilOpSeparate(GL_BACK, rsx::method_registers[NV4097_SET_BACK_STENCIL_OP_FAIL],
-			rsx::method_registers[NV4097_SET_BACK_STENCIL_OP_ZFAIL], rsx::method_registers[NV4097_SET_BACK_STENCIL_OP_ZPASS]);
+		if (rsx::method_registers[NV4097_SET_TWO_SIDED_STENCIL_TEST_ENABLE]) {
+			__glcheck glStencilMaskSeparate(GL_BACK, rsx::method_registers[NV4097_SET_BACK_STENCIL_MASK]);
+			__glcheck glStencilFuncSeparate(GL_BACK, rsx::method_registers[NV4097_SET_BACK_STENCIL_FUNC],
+				rsx::method_registers[NV4097_SET_BACK_STENCIL_FUNC_REF], rsx::method_registers[NV4097_SET_BACK_STENCIL_FUNC_MASK]);
+			__glcheck glStencilOpSeparate(GL_BACK, rsx::method_registers[NV4097_SET_BACK_STENCIL_OP_FAIL],
+				rsx::method_registers[NV4097_SET_BACK_STENCIL_OP_ZFAIL], rsx::method_registers[NV4097_SET_BACK_STENCIL_OP_ZPASS]);
+		}
 	}
 
 	__glcheck glShadeModel(rsx::method_registers[NV4097_SET_SHADE_MODE]);
@@ -1050,9 +1046,9 @@ void GLGSRender::end()
 	rsx::thread::end();
 }
 
-void GLGSRender::oninit_thread()
+void GLGSRender::on_init_thread()
 {
-	GSRender::oninit_thread();
+	GSRender::on_init_thread();
 
 	gl::init();
 	LOG_NOTICE(Log::RSX, (const char*)glGetString(GL_VERSION));
@@ -1065,15 +1061,17 @@ void GLGSRender::oninit_thread()
 	m_ebo.create();
 	m_scale_offset_buffer.create(16 * sizeof(float));
 	m_vertex_constants_buffer.create(512 * 4 * sizeof(float));
+	m_fragment_constants_buffer.create();
 
 	glBindBufferBase(GL_UNIFORM_BUFFER, 0, m_scale_offset_buffer.id());
 	glBindBufferBase(GL_UNIFORM_BUFFER, 1, m_vertex_constants_buffer.id());
+	glBindBufferBase(GL_UNIFORM_BUFFER, 2, m_fragment_constants_buffer.id());
 
 	m_vao.array_buffer = m_vbo;
 	m_vao.element_array_buffer = m_ebo;
 }
 
-void GLGSRender::onexit_thread()
+void GLGSRender::on_exit()
 {
 	glDisable(GL_VERTEX_PROGRAM_POINT_SIZE);
 
@@ -1103,6 +1101,15 @@ void GLGSRender::onexit_thread()
 
 	if (m_vao)
 		m_vao.remove();
+
+	if (m_scale_offset_buffer)
+		m_scale_offset_buffer.remove();
+
+	if (m_vertex_constants_buffer)
+		m_vertex_constants_buffer.remove();
+
+	if (m_fragment_constants_buffer)
+		m_fragment_constants_buffer.remove();
 
 	m_prog_buffer.clear();
 }
@@ -1186,7 +1193,7 @@ static const std::unordered_map<u32, rsx_method_impl_t> g_gl_method_tbl =
 	{ NV4097_CLEAR_SURFACE, nv4097_clear_surface }
 };
 
-bool GLGSRender::domethod(u32 cmd, u32 arg)
+bool GLGSRender::do_method(u32 cmd, u32 arg)
 {
 	auto found = g_gl_method_tbl.find(cmd);
 
@@ -1275,17 +1282,12 @@ bool GLGSRender::load_program()
 	fill_vertex_program_constants_data(buffer);
 	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
-	for (u32 constant_offset : m_prog_buffer.getFragmentConstantOffsetsCache(&fragment_program))
-	{
-		auto data = vm::ps3::_ptr<u32>(fragment_program.addr + constant_offset);
-
-		u32 c0 = (data[0] >> 16 | data[0] << 16);
-		u32 c1 = (data[1] >> 16 | data[1] << 16);
-		u32 c2 = (data[2] >> 16 | data[2] << 16);
-		u32 c3 = (data[3] >> 16 | data[3] << 16);
-
-		m_program->uniforms["fc" + std::to_string(constant_offset)] = color4f{ (f32&)c0, (f32&)c1, (f32&)c2, (f32&)c3 };
-	}
+	glBindBuffer(GL_UNIFORM_BUFFER, m_fragment_constants_buffer.id());
+	size_t buffer_size = m_prog_buffer.get_fragment_constants_buffer_size(&fragment_program);
+	glBufferData(GL_UNIFORM_BUFFER, buffer_size, nullptr, GL_STATIC_DRAW);
+	buffer = glMapBuffer(GL_UNIFORM_BUFFER, GL_WRITE_ONLY);
+	m_prog_buffer.fill_fragment_constans_buffer(buffer, &fragment_program);
+	glUnmapBuffer(GL_UNIFORM_BUFFER);
 
 	return true;
 }

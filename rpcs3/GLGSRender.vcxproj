@@ -23,9 +23,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{FAC9B17B-F4B8-4B75-8AEB-C8C7CB92B078}</ProjectGuid>
-    <RootNamespace>D3D12GSRender</RootNamespace>
+    <RootNamespace>GLGSRender</RootNamespace>
     <WindowsTargetPlatformVersion>8.1</WindowsTargetPlatformVersion>
+    <ProjectGuid>{3384223A-6D97-4799-9862-359F85312892}</ProjectGuid>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
@@ -62,36 +62,32 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <ItemGroup>
-    <ClInclude Include="Emu\RSX\D3D12\D3D12Utils.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12CommonDecompiler.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12Formats.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12FragmentProgramDecompiler.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12GSRender.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12MemoryHelpers.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12PipelineState.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12RenderTargetSets.h" />
-    <ClInclude Include="Emu\RSX\D3D12\D3D12VertexProgramDecompiler.h" />
-    <ClInclude Include="Emu\RSX\D3D12\d3dx12.h" />
-    <ClInclude Include="stdafx_d3d12.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="Emu\RSX\D3D12\D3D12Buffer.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12CommonDecompiler.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12Formats.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12FragmentProgramDecompiler.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12GSRender.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12MemoryHelpers.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12Overlay.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12PipelineState.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12RenderTargetSets.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12Texture.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12Utils.cpp" />
-    <ClCompile Include="Emu\RSX\D3D12\D3D12VertexProgramDecompiler.cpp" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="emucore.vcxproj">
       <Project>{c4a10229-4712-4bd2-b63e-50d93c67a038}</Project>
     </ProjectReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Emu\RSX\GL\GLBuffers.h" />
+    <ClInclude Include="Emu\RSX\GL\GLCommonDecompiler.h" />
+    <ClInclude Include="Emu\RSX\GL\GLFragmentProgram.h" />
+    <ClInclude Include="Emu\RSX\GL\GLGSRender.h" />
+    <ClInclude Include="Emu\RSX\GL\GLProcTable.h" />
+    <ClInclude Include="Emu\RSX\GL\GLProgram.h" />
+    <ClInclude Include="Emu\RSX\GL\GLProgramBuffer.h" />
+    <ClInclude Include="Emu\RSX\GL\GLVertexProgram.h" />
+    <ClInclude Include="Emu\RSX\GL\gl_helpers.h" />
+    <ClInclude Include="Emu\RSX\GL\OpenGL.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Emu\RSX\GL\GLBuffers.cpp" />
+    <ClCompile Include="Emu\RSX\GL\GLCommonDecompiler.cpp" />
+    <ClCompile Include="Emu\RSX\GL\GLFragmentProgram.cpp" />
+    <ClCompile Include="Emu\RSX\GL\GLGSRender.cpp" />
+    <ClCompile Include="Emu\RSX\GL\GLProgram.cpp" />
+    <ClCompile Include="Emu\RSX\GL\GLProgramBuffer.cpp" />
+    <ClCompile Include="Emu\RSX\GL\GLVertexProgram.cpp" />
+    <ClCompile Include="Emu\RSX\GL\gl_helpers.cpp" />
+    <ClCompile Include="Emu\RSX\GL\OpenGL.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

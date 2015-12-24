@@ -1,8 +1,6 @@
 #include "stdafx.h"
 #include "config.h"
 
-#include "Utilities/File.h"
-
 namespace rpcs3
 {
 	config_t::config_t(const std::string &path_)
@@ -33,7 +31,7 @@ namespace rpcs3
 
 	void config_t::load()
 	{
-		fs::file file(m_path);
+		fs::file file(m_path, fom::create | fom::read);
 
 		if (file)
 			from_string((const std::string)file);

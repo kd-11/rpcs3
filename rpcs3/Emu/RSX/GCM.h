@@ -23,16 +23,18 @@ enum
 	CELL_GCM_DISPLAY_FREQUENCY_DISABLE = 3,
 };
 
-enum
+enum class Vertex_base_type
 {
-	CELL_GCM_VERTEX_S1      = 1,
-	CELL_GCM_VERTEX_F       = 2,
-	CELL_GCM_VERTEX_SF      = 3,
-	CELL_GCM_VERTEX_UB      = 4,
-	CELL_GCM_VERTEX_S32K    = 5,
-	CELL_GCM_VERTEX_CMP     = 6,
-	CELL_GCM_VERTEX_UB256   = 7,
+	s1, ///< signed byte
+	f, ///< float
+	sf, ///< half float
+	ub, ///< unsigned byte
+	s32k, ///< signed 32bits int
+	cmp, ///< compressed aka X11G11Z10 and always 1. W.
+	ub256,
 };
+
+Vertex_base_type to_vertex_base_type(u8 in);
 
 enum
 {
@@ -451,7 +453,17 @@ enum
 	CELL_GCM_POLYGON_MODE_FILL = 0x1B02,
 
 	CELL_GCM_TRUE = 1,
-	CELL_GCM_FALSE = 0
+	CELL_GCM_FALSE = 0,
+
+	CELL_GCM_WINDOW_ORIGIN_TOP = 0,
+	CELL_GCM_WINDOW_ORIGIN_BOTTOM = 1,
+
+	CELL_GCM_WINDOW_PIXEL_CENTER_HALF = 0,
+	CELL_GCM_WINDOW_PIXEL_CENTER_INTEGER = 1,
+
+	CELL_GCM_USER_CLIP_PLANE_DISABLE = 0,
+	CELL_GCM_USER_CLIP_PLANE_ENABLE_LT = 1,
+	CELL_GCM_USER_CLIP_PLANE_ENABLE_GE = 2,
 };
 
 enum

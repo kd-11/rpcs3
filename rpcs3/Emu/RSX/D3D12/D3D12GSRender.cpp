@@ -10,6 +10,7 @@
 #include <d3d11on12.h>
 #include "Emu/state.h"
 #include "D3D12Formats.h"
+#include "../rsx_methods.h"
 
 PFN_D3D12_CREATE_DEVICE wrapD3D12CreateDevice;
 PFN_D3D12_GET_DEBUG_INTERFACE wrapD3D12GetDebugInterface;
@@ -264,19 +265,15 @@ void D3D12GSRender::end()
 
 	std::chrono::time_point<std::chrono::system_clock> vertex_index_duration_start = std::chrono::system_clock::now();
 
-	if (!vertex_index_array.empty() || vertex_draw_count)
-		upload_and_set_vertex_index_data(get_current_resource_storage().command_list.Get());
+	size_t vertex_count;
+	bool indexed_draw;
+	std::tie(indexed_draw, vertex_count) = upload_and_set_vertex_index_data(get_current_resource_storage().command_list.Get());
 
 	std::chrono::time_point<std::chrono::system_clock> vertex_index_duration_end = std::chrono::system_clock::now();
 	m_timers.m_vertex_index_duration += std::chrono::duration_cast<std::chrono::microseconds>(vertex_index_duration_end - vertex_index_duration_start).count();
 
 	std::chrono::time_point<std::chrono::system_clock> program_load_start = std::chrono::system_clock::now();
-	if (!load_program())
-	{
-		LOG_ERROR(RSX, "LoadProgram failed.");
-		Emu.Pause();
-		return;
-	}
+	load_program();
 	std::chrono::time_point<std::chrono::system_clock> program_load_end = std::chrono::system_clock::now();
 	m_timers.m_program_load_duration += std::chrono::duration_cast<std::chrono::microseconds>(program_load_end - program_load_start).count();
 
@@ -301,12 +298,6 @@ void D3D12GSRender::end()
 	{
 		upload_and_bind_textures(get_current_resource_storage().command_list.Get(), currentDescriptorIndex + 3, std::get<2>(*m_current_pso) > 0);
 
-		ID3D12DescriptorHeap *descriptors[] =
-		{
-			get_current_resource_storage().descriptors_heap.Get(),
-			get_current_resource_storage().sampler_descriptor_heap[get_current_resource_storage().sampler_descriptors_heap_index].Get(),
-		};
-		get_current_resource_storage().command_list->SetDescriptorHeaps(2, descriptors);
 
 		get_current_resource_storage().command_list->SetGraphicsRootDescriptorTable(0,
 			CD3DX12_GPU_DESCRIPTOR_HANDLE(get_current_resource_storage().descriptors_heap->GetGPUDescriptorHandleForHeapStart())
@@ -352,10 +343,10 @@ void D3D12GSRender::end()
 
 	get_current_resource_storage().command_list->IASetPrimitiveTopology(get_primitive_topology(draw_mode));
 
-	if (m_rendering_info.m_indexed)
-		get_current_resource_storage().command_list->DrawIndexedInstanced((UINT)m_rendering_info.m_count, 1, 0, 0, 0);
+	if (indexed_draw)
+		get_current_resource_storage().command_list->DrawIndexedInstanced((UINT)vertex_count, 1, 0, 0, 0);
 	else
-		get_current_resource_storage().command_list->DrawInstanced((UINT)m_rendering_info.m_count, 1, 0, 0);
+		get_current_resource_storage().command_list->DrawInstanced((UINT)vertex_count, 1, 0, 0);
 
 	vertex_index_array.clear();
 	std::chrono::time_point<std::chrono::system_clock> end_duration = std::chrono::system_clock::now();
@@ -369,7 +360,6 @@ void D3D12GSRender::end()
 		get_current_resource_storage().set_new_command_list();
 	}
 	m_first_count_pairs.clear();
-	m_rendering_info.m_indexed = false;
 	thread::end();
 }
 

@@ -7,6 +7,7 @@
 #include "Emu/System.h"
 #include "Emu/state.h"
 #include "Emu/RSX/GSRender.h"
+#include "../rsx_methods.h"
 
 #include "D3D12.h"
 #include "D3D12GSRender.h"
@@ -272,7 +273,7 @@ ID3D12Resource *render_targets::bind_address_as_render_targets(ID3D12Device *dev
 	{
 		ComPtr<ID3D12Resource> rtt;
 		rtt = It->second.Get();
-		if (rtt->GetDesc().Format == dxgi_format)
+		if (rtt->GetDesc().Format == dxgi_format && rtt->GetDesc().Width == width && rtt->GetDesc().Height == height)
 		{
 			cmdList->ResourceBarrier(1, &CD3DX12_RESOURCE_BARRIER::Transition(rtt.Get(), D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_RENDER_TARGET));
 			return rtt.Get();

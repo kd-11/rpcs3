@@ -148,158 +148,20 @@ namespace rsx
 		static std::string path_to_root();
 	};
 
-	//TODO
-	union alignas(4) method_registers_t
-	{
-		u8 _u8[0x10000];
-		u32 _u32[0x10000 >> 2];
-/*
-		struct alignas(4)
-		{
-			u8 pad[NV4097_SET_TEXTURE_OFFSET - 4];
-
-			struct alignas(4) texture_t
-			{
-				u32 offset;
-
-				union format_t
-				{
-					u32 _u32;
-
-					struct
-					{
-						u32: 1;
-						u32 location : 1;
-						u32 cubemap : 1;
-						u32 border_type : 1;
-						u32 dimension : 4;
-						u32 format : 8;
-						u32 mipmap : 16;
-					};
-				} format;
-
-				union address_t
-				{
-					u32 _u32;
-
-					struct
-					{
-						u32 wrap_s : 4;
-						u32 aniso_bias : 4;
-						u32 wrap_t : 4;
-						u32 unsigned_remap : 4;
-						u32 wrap_r : 4;
-						u32 gamma : 4;
-						u32 signed_remap : 4;
-						u32 zfunc : 4;
-					};
-				} address;
-
-				u32 control0;
-				u32 control1;
-				u32 filter;
-				u32 image_rect;
-				u32 border_color;
-			} textures[limits::textures_count];
-		};
-*/
-		u32& operator[](int index)
-		{
-			return _u32[index >> 2];
-		}
-	};
-
-	extern u32 method_registers[0x10000 >> 2];
-
-	u32 get_vertex_type_size(u32 type);
+	u32 get_vertex_type_size_on_host(Vertex_base_type type, u32 size);
 
 	u32 get_address(u32 offset, u32 location);
 
-	template<typename T>
-	void pad_texture(void* inputPixels, void* outputPixels, u16 inputWidth, u16 inputHeight, u16 outputWidth, u16 outputHeight) 
+	struct tiled_region
 	{
-		T *src, *dst;
-		src = static_cast<T*>(inputPixels);
-		dst = static_cast<T*>(outputPixels);
+		u32 address;
+		u32 base;
+		GcmTileInfo *tile;
+		u8 *ptr;
 
-		for (u16 h = 0; h < inputHeight; ++h)
-		{
-			const u32 padded_pos = h * outputWidth;
-			const u32 pos = h * inputWidth;
-			for (u16 w = 0; w < inputWidth; ++w)
-			{
-				dst[padded_pos + w] = src[pos + w];
-			}
-		}
-	}
-
-	/*   Note: What the ps3 calls swizzling in this case is actually z-ordering / morton ordering of pixels
-	*       - Input can be swizzled or linear, bool flag handles conversion to and from
-	*       - It will handle any width and height that are a power of 2, square or non square
-	*	 Restriction: It has mixed results if the height or width is not a power of 2
-	*/
-	template<typename T>
-	void convert_linear_swizzle(void* inputPixels, void* outputPixels, u16 width, u16 height, bool inputIsSwizzled)
-	{
-		u32 log2width, log2height;
-
-		log2width = log2(width);
-		log2height = log2(height);
-
-		// Max mask possible for square texture
-		u32 x_mask = 0x55555555;
-		u32 y_mask = 0xAAAAAAAA;
-
-		// We have to limit the masks to the lower of the two dimensions to allow for non-square textures
-		u32 limit_mask = (log2width < log2height) ? log2width : log2height;
-		// double the limit mask to account for bits in both x and y
-		limit_mask = 1 << (limit_mask << 1);
-
-		//x_mask, bits above limit are 1's for x-carry
-		x_mask = (x_mask | ~(limit_mask - 1));
-		//y_mask. bits above limit are 0'd, as we use a different method for y-carry over
-		y_mask = (y_mask & (limit_mask - 1));
-
-		u32 offs_y = 0;
-		u32 offs_x = 0;
-		u32 offs_x0 = 0; //total y-carry offset for x
-		u32 y_incr = limit_mask;
-
-		T *src, *dst;
-
-		if (!inputIsSwizzled)
-		{
-			for (int y = 0; y < height; ++y) 
-			{
-				src = static_cast<T*>(inputPixels) + y*width;
-				dst = static_cast<T*>(outputPixels) + offs_y;
-				offs_x = offs_x0;
-				for (int x = 0; x < width; ++x) 
-				{
-					dst[offs_x] = src[x];
-					offs_x = (offs_x - x_mask) & x_mask;
-				}
-				offs_y = (offs_y - y_mask) & y_mask;
-				if (offs_y == 0) offs_x0 += y_incr;
-			}
-		}
-		else 
-		{
-			for (int y = 0; y < height; ++y) 
-			{
-				src = static_cast<T*>(inputPixels) + offs_y;
-				dst = static_cast<T*>(outputPixels) + y*width;
-				offs_x = offs_x0;
-				for (int x = 0; x < width; ++x) 
-				{
-					dst[x] = src[offs_x];
-					offs_x = (offs_x - x_mask) & x_mask;
-				}
-				offs_y = (offs_y - y_mask) & y_mask;
-				if (offs_y == 0) offs_x0 += y_incr;
-			}
-		}
-	}
+		void write(const void *src, u32 width, u32 height, u32 pitch);
+		void read(void *dst, u32 width, u32 height, u32 pitch);
+	};
 
 	struct surface_info
 	{
@@ -333,15 +195,14 @@ namespace rsx
 		u16 frequency = 0;
 		u8 stride = 0;
 		u8 size = 0;
-		u8 type = CELL_GCM_VERTEX_F;
-		bool array = false;
+		Vertex_base_type type = Vertex_base_type::f;
 
-		void unpack(u32 data_array_format)
+		void unpack_array(u32 data_array_format)
 		{
 			frequency = data_array_format >> 16;
 			stride = (data_array_format >> 8) & 0xff;
 			size = (data_array_format >> 4) & 0xf;
-			type = data_array_format & 0xf;
+			type = to_vertex_base_type(data_array_format & 0xf);
 		}
 	};
 
@@ -363,6 +224,25 @@ namespace rsx
 		rsx::texture textures[limits::textures_count];
 		rsx::vertex_texture vertex_textures[limits::vertex_textures_count];
 
+
+		/**
+		 * RSX can sources vertex attributes from 2 places:
+		 * - Immediate values passed by NV4097_SET_VERTEX_DATA*_M + ARRAY_ID write.
+		 * For a given ARRAY_ID the last command of this type defines the actual type of the immediate value.
+		 * Since there can be only a single value per ARRAY_ID passed this way, all vertex in the draw call
+		 * shares it.
+		 * - Vertex array values passed by offset/stride/size/format description.
+		 *
+		 * A given ARRAY_ID can have both an immediate value and a vertex array enabled at the same time
+		 * (See After Burner Climax intro cutscene). In such case the vertex array has precedence over the
+		 * immediate value. As soon as the vertex array is disabled (size set to 0) the immediate value
+		 * must be used if the vertex attrib mask request it.
+		 *
+		 * Note that behavior when both vertex array and immediate value system are disabled but vertex attrib mask
+		 * request inputs is unknow.
+		 */
+		data_array_format_info register_vertex_info[limits::vertex_count];
+		std::vector<u8> register_vertex_data[limits::vertex_count];
 		data_array_format_info vertex_arrays_info[limits::vertex_count];
 		std::vector<u8> vertex_arrays[limits::vertex_count];
 		std::vector<u8> vertex_index_array;
@@ -395,10 +275,20 @@ namespace rsx
 		u32 ctxt_addr;
 		u32 report_main_addr;
 		u32 label_addr;
+		enum class Draw_command
+		{
+			draw_command_array,
+			draw_command_inlined_array,
+			draw_command_indexed,
+		} draw_command;
 		u32 draw_mode;
 
 		u32 local_mem_addr, main_mem_addr;
 		bool strict_ordering[0x1000];
+
+
+		bool draw_inline_vertex_array;
+		std::vector<u32> inline_vertex_array;
 
 	public:
 		u32 draw_array_count;
@@ -447,6 +337,13 @@ namespace rsx
 		void fill_vertex_program_constants_data(void *buffer);
 
 		/**
+		* Write inlined array data to buffer.
+		* The storage of inlined data looks different from memory stored arrays.
+		* There is no swapping required except for 4 u8 (according to Bleach Soul Resurection)
+		*/
+		void write_inline_array_to_buffer(void *dst_buffer);
+
+		/**
 		 * Copy rtt values to buffer.
 		 * TODO: It's more efficient to combine multiple call of this function into one.
 		 */
@@ -468,6 +365,9 @@ namespace rsx
 	public:
 		void reset();
 		void init(const u32 ioAddress, const u32 ioSize, const u32 ctrlAddress, const u32 localAddress);
+
+		tiled_region get_tiled_address(u32 offset, u32 location);
+		GcmTileInfo *find_tile(u32 offset, u32 location);
 
 		u32 ReadIO32(u32 addr);
 		void WriteIO32(u32 addr, u32 value);

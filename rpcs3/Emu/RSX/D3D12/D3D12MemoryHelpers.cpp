@@ -14,8 +14,9 @@ void data_cache::store_and_protect_data(u64 key, u32 start, size_t size, u8 form
 void data_cache::protect_data(u64 key, u32 start, size_t size)
 {
 	/// align start to 4096 byte
-	u32 protected_range_start = align(start, 4096);
-	u32 protected_range_size = (u32)align(size, 4096);
+	static const u32 memory_page_size = 4096;
+	u32 protected_range_start = start & ~(memory_page_size - 1);
+	u32 protected_range_size = (u32)align(size, memory_page_size);
 	m_protected_ranges.push_back(std::make_tuple(key, protected_range_start, protected_range_size));
 	vm::page_protect(protected_range_start, protected_range_size, 0, 0, vm::page_writable);
 }
@@ -85,6 +86,13 @@ void resource_storage::reset()
 void resource_storage::set_new_command_list()
 {
 	CHECK_HRESULT(command_list->Reset(command_allocator.Get(), nullptr));
+
+	ID3D12DescriptorHeap *descriptors[] =
+	{
+		descriptors_heap.Get(),
+		sampler_descriptor_heap[sampler_descriptors_heap_index].Get(),
+	};
+	command_list->SetDescriptorHeaps(2, descriptors);
 }
 
 void resource_storage::init(ID3D12Device *device)

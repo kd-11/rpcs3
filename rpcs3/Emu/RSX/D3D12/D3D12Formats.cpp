@@ -38,8 +38,8 @@ D3D12_BLEND get_blend_factor(u16 factor)
 	case CELL_GCM_DST_COLOR: return D3D12_BLEND_DEST_COLOR;
 	case CELL_GCM_ONE_MINUS_DST_COLOR: return D3D12_BLEND_INV_DEST_COLOR;
 	case CELL_GCM_SRC_ALPHA_SATURATE: return D3D12_BLEND_SRC_ALPHA_SAT;
-	case CELL_GCM_CONSTANT_COLOR:
-	case CELL_GCM_ONE_MINUS_CONSTANT_COLOR:
+	case CELL_GCM_CONSTANT_COLOR: return D3D12_BLEND_DEST_COLOR;
+	case CELL_GCM_ONE_MINUS_CONSTANT_COLOR: return D3D12_BLEND_INV_DEST_COLOR;
 	case CELL_GCM_CONSTANT_ALPHA:
 	case CELL_GCM_ONE_MINUS_CONSTANT_ALPHA:
 		break;
@@ -292,8 +292,7 @@ D3D12_PRIMITIVE_TOPOLOGY_TYPE get_primitive_topology_type(u8 draw_mode)
 	case CELL_GCM_PRIMITIVE_QUADS: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	case CELL_GCM_PRIMITIVE_QUAD_STRIP: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
 	case CELL_GCM_PRIMITIVE_POLYGON: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
-	case CELL_GCM_PRIMITIVE_LINE_LOOP:
-		break;
+	case CELL_GCM_PRIMITIVE_LINE_LOOP: return D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE;
 	}
 	throw EXCEPTION("Invalid or unsupported draw mode (0x%x)", draw_mode);
 }
@@ -303,9 +302,11 @@ DXGI_FORMAT get_color_surface_format(u8 format)
 	switch (format)
 	{
 	case CELL_GCM_SURFACE_R5G6B5: return DXGI_FORMAT_B5G6R5_UNORM;
+	case CELL_GCM_SURFACE_X8R8G8B8_O8R8G8B8: return DXGI_FORMAT_B8G8R8X8_UNORM; //BIT.TRIP Runner2 use this
 	case CELL_GCM_SURFACE_A8R8G8B8: return DXGI_FORMAT_R8G8B8A8_UNORM;
 	case CELL_GCM_SURFACE_F_W16Z16Y16X16: return DXGI_FORMAT_R16G16B16A16_FLOAT;
 	case CELL_GCM_SURFACE_F_X32: return DXGI_FORMAT_R32_FLOAT;
+	case CELL_GCM_SURFACE_A8B8G8R8: return DXGI_FORMAT_R8G8B8A8_UNORM;
 	}
 	throw EXCEPTION("Invalid format (0x%x)", format);
 }
@@ -371,11 +372,11 @@ DXGI_FORMAT get_index_type(u8 index_type)
 	throw EXCEPTION("Invalid index_type (0x%x)", index_type);
 }
 
-DXGI_FORMAT get_vertex_attribute_format(u8 type, u8 size)
+DXGI_FORMAT get_vertex_attribute_format(Vertex_base_type type, u8 size)
 {
 	switch (type)
 	{
-	case CELL_GCM_VERTEX_S1:
+	case Vertex_base_type::s1:
 	{
 		switch (size)
 		{
@@ -386,7 +387,7 @@ DXGI_FORMAT get_vertex_attribute_format(u8 type, u8 size)
 		}
 		break;
 	}
-	case CELL_GCM_VERTEX_F:
+	case Vertex_base_type::f:
 	{
 		switch (size)
 		{
@@ -397,7 +398,7 @@ DXGI_FORMAT get_vertex_attribute_format(u8 type, u8 size)
 		}
 		break;
 	}
-	case CELL_GCM_VERTEX_SF:
+	case Vertex_base_type::sf:
 	{
 		switch (size)
 		{
@@ -408,7 +409,7 @@ DXGI_FORMAT get_vertex_attribute_format(u8 type, u8 size)
 		}
 		break;
 	}
-	case CELL_GCM_VERTEX_UB:
+	case Vertex_base_type::ub:
 	{
 		switch (size)
 		{
@@ -419,7 +420,7 @@ DXGI_FORMAT get_vertex_attribute_format(u8 type, u8 size)
 		}
 		break;
 	}
-	case CELL_GCM_VERTEX_S32K:
+	case Vertex_base_type::s32k:
 	{
 		switch (size)
 		{
@@ -430,18 +431,18 @@ DXGI_FORMAT get_vertex_attribute_format(u8 type, u8 size)
 		}
 		break;
 	}
-	case CELL_GCM_VERTEX_CMP:
+	case Vertex_base_type::cmp:
 	{
 		switch (size)
 		{
-		case 1: return DXGI_FORMAT_R32_FLOAT;
-		case 2: return DXGI_FORMAT_R32G32_FLOAT;
-		case 3: return DXGI_FORMAT_R32G32B32_FLOAT;
-		case 4: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+		case 1: return DXGI_FORMAT_R16G16B16A16_SNORM;
+		case 2:
+		case 3:
+		case 4: throw EXCEPTION("Unsupported CMP vertex format with size > 1");
 		}
 		break;
 	}
-	case CELL_GCM_VERTEX_UB256:
+	case Vertex_base_type::ub256:
 	{
 		switch (size)
 		{

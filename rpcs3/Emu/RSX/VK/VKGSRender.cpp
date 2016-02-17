@@ -67,16 +67,22 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	m_thread_context.makeCurrentInstance(1);
 
 	std::vector<vk::device> gpus = m_thread_context.enumerateDevices();
-	m_swap_chain = &m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
+	m_swap_chain = m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
 
+	m_device = (vk::render_device *)(&m_swap_chain->get_device());
+	
 	vk::set_current_thread_ctx(m_thread_context);
 	vk::set_current_renderer(m_swap_chain->get_device());
+
+	m_swap_chain->init_swapchain(m_frame->client_size().width, m_frame->client_size().height);
 }
 
 VKGSRender::~VKGSRender()
 {
 	m_swap_chain->destroy();
 	m_thread_context.close();
+
+	delete m_swap_chain;
 }
 
 u32 VKGSRender::enable(u32 condition, u32 cap)
@@ -809,6 +815,7 @@ void VKGSRender::flip(int buffer)
 	present.pImageIndices = &current;
 
 	m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present);
+	vkDestroySemaphore((*m_device), vk_present_semaphore, nullptr);
 
 	m_frame->flip(m_context);
 }

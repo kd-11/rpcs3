@@ -221,15 +221,18 @@ void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 void VKVertexProgram::Compile()
 {
 	const char *glsl_shader = shader.data();
-	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(glsl_shader);
+	fs::file(fs::get_config_dir() + "VertexProgram.vert", fom::rewrite).write(glsl_shader);
 
-	system("glslangValidator.exe -V -o frag.spv FragmentProgram.frag");
+	system("glslangValidator.exe -G -o vert.spv VertexProgram.vert > vs_compile_log.log");
 
-	std::string spir_v;
-	fs::file(fs::get_config_dir() + "frag.spv", fom::read).read(spir_v);
+	fs::file spv_file = fs::file(fs::get_config_dir() + "vert.spv", fom::read);
+	u64 spir_v_length = spv_file.size();
+
+	std::vector<u8> spir_v(spir_v_length);
+	spv_file.read(spir_v);
 
 	VkShaderModuleCreateInfo vs_info;
-	vs_info.codeSize = spir_v.length();
+	vs_info.codeSize = (size_t)spir_v_length;
 	vs_info.pNext = nullptr;
 	vs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 	vs_info.pCode = (uint32_t*)spir_v.data();

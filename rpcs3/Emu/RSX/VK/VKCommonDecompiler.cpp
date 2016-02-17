@@ -110,13 +110,13 @@ void insert_glsl_legacy_function(std::ostream& OS)
 	OS << "vec4 lit_legacy(vec4 val)";
 	OS << "{\n";
 	OS << "	vec4 clamped_val = val;\n";
-	OS << "	clamped_val.x = max(val.x, 0);\n";
-	OS << "	clamped_val.y = max(val.y, 0);\n";
+	OS << "	clamped_val.x = max(val.x, 0.f);\n";
+	OS << "	clamped_val.y = max(val.y, 0.f);\n";
 	OS << "	vec4 result;\n";
 	OS << "	result.x = 1.0;\n";
 	OS << "	result.w = 1.;\n";
 	OS << "	result.y = clamped_val.x;\n";
-	OS << "	result.z = clamped_val.x > 0.0 ? exp(clamped_val.w * log(max(clamped_val.y, 1.E-10))) : 0.0;\n";
+	OS << "	result.z = clamped_val.x > 0.f ? exp(clamped_val.w * log(max(clamped_val.y, 1.E-10))) : 0.f;\n";
 	OS << "	return result;\n";
 	OS << "}\n\n";
 }

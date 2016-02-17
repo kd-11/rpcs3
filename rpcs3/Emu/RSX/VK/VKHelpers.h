@@ -239,18 +239,18 @@ namespace vk
 	{
 		vk::render_device dev;
 
-		uint32_t m_present_queue;
-		uint32_t m_graphics_queue;
+		uint32_t m_present_queue = 0xFFFF;
+		uint32_t m_graphics_queue = 0xFFFF;
 
-		VkQueue vk_graphics_queue;
-		VkQueue vk_present_queue;
+		VkQueue vk_graphics_queue = nullptr;
+		VkQueue vk_present_queue = nullptr;
 
 		/* WSI surface information */
-		VkSurfaceKHR m_surface;
+		VkSurfaceKHR m_surface = nullptr;
 		VkFormat m_surface_format;
 		VkColorSpaceKHR m_color_space;
 
-		VkSwapchainKHR m_vk_swapchain;
+		VkSwapchainKHR m_vk_swapchain = nullptr;
 		std::vector<vk::swap_chain_image> m_swap_images;
 
 	public:
@@ -526,7 +526,7 @@ namespace vk
 			return devices;
 		}
 
-		vk::swap_chain& createSwapChain(HINSTANCE hInstance, HWND hWnd, vk::device &dev)
+		vk::swap_chain* createSwapChain(HINSTANCE hInstance, HWND hWnd, vk::device &dev)
 		{
 			VkWin32SurfaceCreateInfoKHR createInfo;
 			createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
@@ -613,7 +613,7 @@ namespace vk
 
 			color_space = surfFormats[0].colorSpace;
 
-			return swap_chain(dev, presentQueueNodeIndex, graphicsQueueNodeIndex, format, surface, color_space);
+			return new swap_chain(dev, presentQueueNodeIndex, graphicsQueueNodeIndex, format, surface, color_space);
 		}
 	};
 

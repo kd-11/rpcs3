@@ -188,10 +188,15 @@ void VKFragmentProgram::Compile()
 	const char *glsl_shader = shader.data();
 	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(glsl_shader);
 
-	system("glslangValidator.exe -G -o frag.spv FragmentProgram.frag");
+	system("glslangValidator.exe -G -o frag.spv FragmentProgram.frag > fs_compile_log.log");
 	
-	std::vector<u8> spir_v(32768);
-	u64 spir_v_length = fs::file(fs::get_config_dir() + "frag.spv", fom::read).read(spir_v);
+	fs::file spv_file = fs::file(fs::get_config_dir() + "frag.spv", fom::read);
+	u64 spir_v_length = spv_file.size();
+
+	if (!spir_v_length) throw EXCEPTION("Failed to load Spir-V shader");
+
+	std::vector<u8> spir_v(spir_v_length);
+	spv_file.read(spir_v);
 
 	//Create the object and compile
 	VkShaderModuleCreateInfo fs_info;

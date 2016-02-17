@@ -228,6 +228,8 @@ void VKVertexProgram::Compile()
 	fs::file spv_file = fs::file(fs::get_config_dir() + "vert.spv", fom::read);
 	u64 spir_v_length = spv_file.size();
 
+	if (!spir_v_length) throw EXCEPTION("Failed to load Spir-V shader");
+
 	std::vector<u8> spir_v(spir_v_length);
 	spv_file.read(spir_v);
 

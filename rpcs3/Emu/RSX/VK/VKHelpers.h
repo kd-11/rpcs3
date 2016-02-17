@@ -1,5 +1,6 @@
 #pragma once
 
+#include "stdafx.h"
 #include <exception>
 #include <string>
 #include <functional>
@@ -21,6 +22,7 @@ namespace rsx
 namespace vk
 {
 #define __vkcheck
+#define CHECK_RESULT(expr) if (expr != VK_SUCCESS) throw EXCEPTION("Assertion failed!")
 
 	VKAPI_ATTR void *VKAPI_CALL mem_realloc(void *pUserData, void *pOriginal, size_t size, size_t alignment, VkSystemAllocationScope allocationScope);
 	VKAPI_ATTR void *VKAPI_CALL mem_alloc(void *pUserData, size_t size, size_t alignment, VkSystemAllocationScope allocationScope);
@@ -435,6 +437,7 @@ namespace vk
 			}
 
 			m_instance = nullptr;
+			m_vk_instances.resize(0);
 		}
 
 		uint32_t createInstance(const char *app_name)

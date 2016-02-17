@@ -806,15 +806,16 @@ void VKGSRender::flip(int buffer)
 	vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, vk_present_semaphore, nullFence, &current);
 
 	VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);
-	
 	VkPresentInfoKHR present;
 	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 	present.pNext = nullptr;
 	present.swapchainCount = 1;
 	present.pSwapchains = &swap_chain;
 	present.pImageIndices = &current;
+	present.pWaitSemaphores = &vk_present_semaphore;
+	present.waitSemaphoreCount = 1;
 
-	m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present);
+	CHECK_RESULT(m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present));
 	vkDestroySemaphore((*m_device), vk_present_semaphore, nullptr);
 
 	m_frame->flip(m_context);

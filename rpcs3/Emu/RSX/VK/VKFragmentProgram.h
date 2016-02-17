@@ -43,6 +43,7 @@ public:
 
 	ParamArray parr;
 	VkShaderModule handle = nullptr;
+	int id;
 	std::string shader;
 	std::vector<size_t> FragmentConstantOffsetCache;
 

@@ -199,8 +199,8 @@ public:
 		}
 
 		LOG_NOTICE(RSX, "Add program :");
-		LOG_NOTICE(RSX, "*** vp id = %d", vertex_program.id);
-		LOG_NOTICE(RSX, "*** fp id = %d", fragment_program.id);
+		LOG_NOTICE(RSX, "*** vp id = %X", vertex_program.id);
+		LOG_NOTICE(RSX, "*** fp id = %X", fragment_program.id);
 
 		m_storage[key] = backend_traits::build_pipeline(vertex_program, fragment_program, pipelineProperties, std::forward<Args>(args)...);
 		return m_storage[key];

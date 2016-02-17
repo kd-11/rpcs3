@@ -33,7 +33,7 @@ struct VKTraits
 	static
 	pipeline_storage_type build_pipeline(const vertex_program_type &vertexProgramData, const fragment_program_type &fragmentProgramData, const pipeline_properties &pipelineProperties)
 	{
-		pipeline_storage_type result;
+		pipeline_storage_type result(*vk::get_current_renderer());
 		__vkcheck result.attachVertexProgram(vertexProgramData.handle)
 			.attachFragmentProgram(fragmentProgramData.handle)
 			.bind_fragment_data_location("ocol0", 0)
@@ -42,7 +42,6 @@ struct VKTraits
 			.bind_fragment_data_location("ocol3", 3)
 			.make();
 
-		__vkcheck result.use();
 		return result;
 	}
 };

@@ -209,52 +209,14 @@ VKVertexProgram::VKVertexProgram()
 
 VKVertexProgram::~VKVertexProgram()
 {
-	//if (m_decompiler_thread)
-	//{
-	//	Wait();
-	//	if (m_decompiler_thread->IsAlive())
-	//	{
-	//		m_decompiler_thread->Stop();
-	//	}
-
-	//	delete m_decompiler_thread;
-	//	m_decompiler_thread = nullptr;
-	//}
-
 	Delete();
 }
-
-//void VKVertexProgram::Wait()
-//{
-//	if (m_decompiler_thread && m_decompiler_thread->IsAlive())
-//	{
-//		m_decompiler_thread->Join();
-//	}
-//}
 
 void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 {
 	VKVertexDecompilerThread decompiler(prog, shader, parr);
 	decompiler.Task();
 }
-
-//void VKVertexProgram::DecompileAsync(RSXVertexProgram& prog)
-//{
-//	if (m_decompiler_thread)
-//	{
-//		Wait();
-//		if (m_decompiler_thread->IsAlive())
-//		{
-//			m_decompiler_thread->Stop();
-//		}
-//
-//		delete m_decompiler_thread;
-//		m_decompiler_thread = nullptr;
-//	}
-//
-//	m_decompiler_thread = new VKVertexDecompilerThread(prog.data, shader, parr);
-//	m_decompiler_thread->Start();
-//}
 
 void VKVertexProgram::Compile()
 {

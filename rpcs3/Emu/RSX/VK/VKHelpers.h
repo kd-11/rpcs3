@@ -116,7 +116,7 @@ namespace vk
 
 	class render_device
 	{
-		vk::device *gpu;
+		vk::device *pgpu;
 		VkDevice dev;
 
 	public:
@@ -124,7 +124,7 @@ namespace vk
 		render_device()
 		{
 			dev = nullptr;
-			gpu = nullptr;
+			pgpu = nullptr;
 		}
 
 		render_device(vk::device &pdev, uint32_t graphics_queue_idx)
@@ -132,7 +132,7 @@ namespace vk
 			VkResult err;
 
 			float queue_priorities[1] = { 0.f };
-			gpu = &pdev;
+			pgpu = &pdev;
 
 			VkDeviceQueueCreateInfo queue;
 			queue.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
@@ -158,7 +158,7 @@ namespace vk
 			device.ppEnabledExtensionNames = requested_extensions;
 			device.pEnabledFeatures = nullptr;
 
-			err = vkCreateDevice(*gpu, &device, nullptr, &dev);
+			err = vkCreateDevice(*pgpu, &device, nullptr, &dev);
 			if (err != VK_SUCCESS) throw;
 		}
 
@@ -168,7 +168,7 @@ namespace vk
 
 		void destroy()
 		{
-			if (dev && gpu)
+			if (dev && pgpu)
 			{
 				VkAllocationCallbacks callbacks;
 				callbacks.pfnAllocation = vk::mem_alloc;
@@ -180,9 +180,58 @@ namespace vk
 			}
 		}
 
+		const vk::device& gpu()
+		{
+			return *pgpu;
+		}
+
 		operator VkDevice()
 		{
 			return dev;
+		}
+	};
+
+	class swap_chain_image
+	{
+		VkImageView view;
+		VkImage image;
+
+	public:
+		swap_chain_image()
+		{
+			image = nullptr;
+			view = nullptr;
+		}
+
+		void create(vk::render_device &dev, VkImage &swap_image, VkFormat format)
+		{
+			VkImageViewCreateInfo color_image_view;
+			
+			color_image_view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+			color_image_view.pNext = nullptr;
+			color_image_view.format = format;
+
+			color_image_view.components.r = VK_COMPONENT_SWIZZLE_R;
+			color_image_view.components.g = VK_COMPONENT_SWIZZLE_G;
+			color_image_view.components.b = VK_COMPONENT_SWIZZLE_B;
+			color_image_view.components.a = VK_COMPONENT_SWIZZLE_A;
+
+			color_image_view.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			color_image_view.subresourceRange.baseMipLevel = 0;
+			color_image_view.subresourceRange.levelCount = 1;
+			color_image_view.subresourceRange.baseArrayLayer = 0;
+			color_image_view.subresourceRange.layerCount = 1;
+
+			color_image_view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+			color_image_view.flags = 0;
+
+			color_image_view.image = swap_image;
+			vkCreateImageView(dev, &color_image_view, nullptr, &view);
+		}
+
+		void discard(vk::render_device &dev)
+		{
+			vkDestroyImageView(dev, view, nullptr);
 		}
 	};
 
@@ -193,12 +242,6 @@ namespace vk
 		uint32_t m_present_queue;
 		uint32_t m_graphics_queue;
 
-		PFN_vkCreateSwapchainKHR createSwapchainKHR;
-		PFN_vkDestroySwapchainKHR destroySwapchainKHR;
-		PFN_vkGetSwapchainImagesKHR getSwapchainImagesKHR;
-		PFN_vkAcquireNextImageKHR acquireNextImageKHR;
-		PFN_vkQueuePresentKHR queuePresentKHR;
-
 		VkQueue vk_graphics_queue;
 		VkQueue vk_present_queue;
 
@@ -207,7 +250,16 @@ namespace vk
 		VkFormat m_surface_format;
 		VkColorSpaceKHR m_color_space;
 
+		VkSwapchainKHR m_vk_swapchain;
+		std::vector<vk::swap_chain_image> m_swap_images;
+
 	public:
+
+		PFN_vkCreateSwapchainKHR createSwapchainKHR;
+		PFN_vkDestroySwapchainKHR destroySwapchainKHR;
+		PFN_vkGetSwapchainImagesKHR getSwapchainImagesKHR;
+		PFN_vkAcquireNextImageKHR acquireNextImageKHR;
+		PFN_vkQueuePresentKHR queuePresentKHR;
 
 		swap_chain(vk::device &gpu, uint32_t _present_queue, uint32_t _graphics_queue, VkFormat format, VkSurfaceKHR surface, VkColorSpaceKHR color_space)
 		{
@@ -234,10 +286,118 @@ namespace vk
 
 		void destroy()
 		{
-			if ((VkDevice)dev)
+			if (VkDevice pdev = (VkDevice)dev)
 			{
+				if (m_vk_swapchain)
+				{
+					if (m_swap_images.size())
+					{
+						for (vk::swap_chain_image &img : m_swap_images)
+							img.discard(dev);
+					}
+				}
+
 				dev.destroy();
 			}
+		}
+
+		void init_swapchain(u32 width, u32 height)
+		{
+			VkSwapchainKHR old_swapchain = m_vk_swapchain;
+
+			uint32_t num_modes;
+			vk::device& gpu = const_cast<vk::device&>(dev.gpu());
+			__vkcheck vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, &num_modes, NULL);
+
+			std::vector<VkPresentModeKHR> present_mode_descriptors(num_modes);
+			__vkcheck vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, &num_modes, present_mode_descriptors.data());
+
+			VkSurfaceCapabilitiesKHR surface_descriptors;
+			__vkcheck vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpu, m_surface, &surface_descriptors);
+
+			VkExtent2D swapchainExtent;
+			
+			if (surface_descriptors.currentExtent.width == (uint32_t)-1)
+			{
+				swapchainExtent.width = width;
+				swapchainExtent.height = height;
+			}
+			else
+			{
+				swapchainExtent = surface_descriptors.currentExtent;
+				width = surface_descriptors.currentExtent.width;
+				height = surface_descriptors.currentExtent.height;
+			}
+
+			VkPresentModeKHR swapchain_present_mode = VK_PRESENT_MODE_IMMEDIATE_KHR;
+			uint32_t nb_swap_images = surface_descriptors.minImageCount + 1;
+
+			if ((surface_descriptors.maxImageCount > 0) && (nb_swap_images > surface_descriptors.maxImageCount))
+			{
+				// Application must settle for fewer images than desired:
+				nb_swap_images = surface_descriptors.maxImageCount;
+			}
+
+			VkSurfaceTransformFlagBitsKHR pre_transform = surface_descriptors.currentTransform;
+			if (surface_descriptors.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
+				pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+
+			VkSwapchainCreateInfoKHR swap_info;
+			swap_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+			swap_info.pNext = nullptr;
+			swap_info.surface = m_surface;
+			swap_info.minImageCount = nb_swap_images;
+			swap_info.imageFormat = m_surface_format;
+			swap_info.imageColorSpace = m_color_space;
+
+			swap_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+			swap_info.preTransform = pre_transform;
+			swap_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+			swap_info.imageArrayLayers = 1;
+			swap_info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+			swap_info.queueFamilyIndexCount = 0;
+			swap_info.pQueueFamilyIndices = nullptr;
+			swap_info.presentMode = swapchain_present_mode;
+			swap_info.oldSwapchain = old_swapchain;
+			swap_info.clipped = true;
+
+			swap_info.imageExtent.width = width;
+			swap_info.imageExtent.height = height;
+
+			createSwapchainKHR(dev, &swap_info, nullptr, &m_vk_swapchain);
+
+			if (old_swapchain)
+				destroySwapchainKHR(dev, old_swapchain, nullptr);
+
+			nb_swap_images = 0;
+			getSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, nullptr);
+			
+			if (!nb_swap_images) throw;
+
+			std::vector<VkImage> swap_images;
+			swap_images.resize(nb_swap_images);
+			getSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, swap_images.data());
+
+			m_swap_images.resize(nb_swap_images);
+			for (u32 i = 0; i < nb_swap_images; ++i)
+			{
+				m_swap_images[i].create(dev, swap_images[i], m_surface_format);
+			}
+		}
+
+		const vk::render_device& get_device()
+		{
+			return dev;
+		}
+
+		const VkQueue& get_present_queue()
+		{
+			return vk_graphics_queue;
+		}
+
+		operator const VkSwapchainKHR()
+		{
+			return m_vk_swapchain;
 		}
 	};
 
@@ -462,7 +622,8 @@ namespace vk
 		class program
 		{
 			VkGraphicsPipelineCreateInfo pipeline;
-			VkPipelineCacheCreateInfo pipelineCache;
+			VkPipelineCacheCreateInfo pipeline_cache_desc;
+			VkPipelineCache pipeline_cache;
 			VkPipelineVertexInputStateCreateInfo vi;
 			VkPipelineInputAssemblyStateCreateInfo ia;
 			VkPipelineRasterizationStateCreateInfo rs;
@@ -470,18 +631,24 @@ namespace vk
 			VkPipelineDepthStencilStateCreateInfo ds;
 			VkPipelineViewportStateCreateInfo vp;
 			VkPipelineMultisampleStateCreateInfo ms;
-			VkDynamicState dynamicStateEnables[VK_DYNAMIC_STATE_RANGE_SIZE];
-			VkPipelineDynamicStateCreateInfo dynamicState;
+			VkDynamicState dynamic_state_descriptors[VK_DYNAMIC_STATE_RANGE_SIZE];
+			VkPipelineDynamicStateCreateInfo dynamic_state;
 
+			VkPipelineShaderStageCreateInfo shader_stages[2];
+			VkRenderPass render_pass = nullptr;
 			VkShaderModule vs, fs;
+			VkPipeline pipeline_handle = nullptr;
+
+			vk::render_device *device = nullptr;
+			bool dirty;
 
 		public:
 			program()
 			{
-				memset(dynamicStateEnables, 0, sizeof dynamicStateEnables);
-				memset(&dynamicState, 0, sizeof dynamicState);
-				dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-				dynamicState.pDynamicStates = dynamicStateEnables;
+				memset(dynamic_state_descriptors, 0, sizeof dynamic_state_descriptors);
+				memset(&dynamic_state, 0, sizeof dynamic_state);
+				dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+				dynamic_state.pDynamicStates = dynamic_state_descriptors;
 
 				memset(&pipeline, 0, sizeof(pipeline));
 				pipeline.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -515,10 +682,10 @@ namespace vk
 				memset(&vp, 0, sizeof(vp));
 				vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 				vp.viewportCount = 1;
-				dynamicStateEnables[dynamicState.dynamicStateCount++] =
+				dynamic_state_descriptors[dynamic_state.dynamicStateCount++] =
 					VK_DYNAMIC_STATE_VIEWPORT;
 				vp.scissorCount = 1;
-				dynamicStateEnables[dynamicState.dynamicStateCount++] =
+				dynamic_state_descriptors[dynamic_state.dynamicStateCount++] =
 					VK_DYNAMIC_STATE_SCISSOR;
 
 				memset(&ds, 0, sizeof(ds));
@@ -540,9 +707,117 @@ namespace vk
 
 				fs = nullptr;
 				vs = nullptr;
+				dirty = true;
+
+				pipeline.stageCount = 2;
+				memset(&shader_stages, 0, 2 * sizeof(VkPipelineShaderStageCreateInfo));
+
+				shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+				shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+				shader_stages[0].module = nullptr;
+				shader_stages[0].pName = "main";
+
+				shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+				shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+				shader_stages[1].module = nullptr;
+				shader_stages[1].pName = "main";
+
+				memset(&pipeline_cache_desc, 0, sizeof(pipeline_cache_desc));
+				pipeline_cache_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+			}
+
+			program(vk::render_device &renderer)
+			{
+				memset(dynamic_state_descriptors, 0, sizeof dynamic_state_descriptors);
+				memset(&dynamic_state, 0, sizeof dynamic_state);
+				dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+				dynamic_state.pDynamicStates = dynamic_state_descriptors;
+
+				memset(&pipeline, 0, sizeof(pipeline));
+				pipeline.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+				pipeline.layout = nullptr;
+
+				memset(&vi, 0, sizeof(vi));
+				vi.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+				memset(&ia, 0, sizeof(ia));
+				ia.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+				ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+				memset(&rs, 0, sizeof(rs));
+				rs.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+				rs.polygonMode = VK_POLYGON_MODE_FILL;
+				rs.cullMode = VK_CULL_MODE_BACK_BIT;
+				rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+				rs.depthClampEnable = VK_FALSE;
+				rs.rasterizerDiscardEnable = VK_FALSE;
+				rs.depthBiasEnable = VK_FALSE;
+
+				memset(&cb, 0, sizeof(cb));
+				cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+				VkPipelineColorBlendAttachmentState att_state[1];
+				memset(att_state, 0, sizeof(att_state));
+				att_state[0].colorWriteMask = 0xf;
+				att_state[0].blendEnable = VK_FALSE;
+				cb.attachmentCount = 1;
+				cb.pAttachments = att_state;
+
+				memset(&vp, 0, sizeof(vp));
+				vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+				vp.viewportCount = 1;
+				dynamic_state_descriptors[dynamic_state.dynamicStateCount++] =
+					VK_DYNAMIC_STATE_VIEWPORT;
+				vp.scissorCount = 1;
+				dynamic_state_descriptors[dynamic_state.dynamicStateCount++] =
+					VK_DYNAMIC_STATE_SCISSOR;
+
+				memset(&ds, 0, sizeof(ds));
+				ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+				ds.depthTestEnable = VK_TRUE;
+				ds.depthWriteEnable = VK_TRUE;
+				ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+				ds.depthBoundsTestEnable = VK_FALSE;
+				ds.back.failOp = VK_STENCIL_OP_KEEP;
+				ds.back.passOp = VK_STENCIL_OP_KEEP;
+				ds.back.compareOp = VK_COMPARE_OP_ALWAYS;
+				ds.stencilTestEnable = VK_FALSE;
+				ds.front = ds.back;
+
+				memset(&ms, 0, sizeof(ms));
+				ms.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+				ms.pSampleMask = NULL;
+				ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+				fs = nullptr;
+				vs = nullptr;
+				dirty = true;
+
+				pipeline.stageCount = 2;
+				memset(&shader_stages, 0, 2 * sizeof(VkPipelineShaderStageCreateInfo));
+
+				shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+				shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+				shader_stages[0].module = nullptr;
+				shader_stages[0].pName = "main";
+
+				shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+				shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+				shader_stages[1].module = nullptr;
+				shader_stages[1].pName = "main";
+
+				memset(&pipeline_cache_desc, 0, sizeof(pipeline_cache_desc));
+				pipeline_cache_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+
+				device = &renderer;
+				__vkcheck vkCreatePipelineCache(renderer, &pipeline_cache_desc, NULL, &pipeline_cache);
 			}
 
 			~program() {}
+
+			program& attach_device(vk::render_device &dev)
+			{
+				device = &dev;
+			}
 
 			program& attachFragmentProgram(VkShaderModule prog)
 			{
@@ -558,19 +833,68 @@ namespace vk
 
 			program& bind_fragment_data_location(const char *name, int location)
 			{
+				return *this;
 			}
 
 			program& bind_vertex_program_location(const char *name, int location)
 			{
+				return *this;
+			}
+
+			void set_depth_state_enable(VkBool32 state)
+			{
+				if (ds.depthTestEnable != state)
+				{
+					ds.depthTestEnable = state;
+					dirty = true;
+				}
+			}
+
+			void set_depth_compare_op(VkCompareOp op)
+			{
+				if (ds.depthCompareOp != op)
+				{
+					ds.depthCompareOp = op;
+					dirty = true;
+				}
+			}
+
+			void set_depth_write_mask(VkBool32 write_enable)
+			{
+				if (ds.depthWriteEnable != write_enable)
+				{
+					ds.depthWriteEnable = write_enable;
+					dirty = true;
+				}
 			}
 
 			void make()
 			{
-
 			}
 
 			void use()
 			{
+				if (dirty)
+				{
+					if (pipeline_handle)
+						vkDestroyPipeline((*device), pipeline_handle, nullptr);
+
+					//Reconfigure this..
+					pipeline.pVertexInputState = &vi;
+					pipeline.pInputAssemblyState = &ia;
+					pipeline.pRasterizationState = &rs;
+					pipeline.pColorBlendState = &cb;
+					pipeline.pMultisampleState = &ms;
+					pipeline.pViewportState = &vp;
+					pipeline.pDepthStencilState = &ds;
+					pipeline.pStages = shader_stages;
+					pipeline.renderPass = render_pass;
+					pipeline.pDynamicState = &dynamic_state;
+
+					pipeline.renderPass = render_pass;
+
+					__vkcheck vkCreateGraphicsPipelines((*device), pipeline_cache, 1, &pipeline, NULL, &pipeline_handle);
+				}
 			}
 		};
 	}

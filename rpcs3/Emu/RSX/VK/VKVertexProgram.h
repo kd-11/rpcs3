@@ -40,6 +40,7 @@ public:
 
 	ParamArray parr;
 	VkShaderModule handle = nullptr;
+	int id;
 	std::string shader;
 
 	void Decompile(const RSXVertexProgram& prog);

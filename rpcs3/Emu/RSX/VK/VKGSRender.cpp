@@ -32,6 +32,30 @@ namespace
 	}
 }
 
+namespace vk
+{
+	VkCompareOp compare_op(u32 gl_name)
+	{
+		switch (gl_name)
+		{
+		case CELL_GCM_GREATER:
+			return VK_COMPARE_OP_GREATER;
+		case CELL_GCM_LESS:
+			return VK_COMPARE_OP_LESS;
+		case CELL_GCM_LEQUAL:
+			return VK_COMPARE_OP_LESS_OR_EQUAL;
+		case CELL_GCM_GEQUAL:
+			return VK_COMPARE_OP_EQUAL;
+		case CELL_GCM_EQUAL:
+			return VK_COMPARE_OP_EQUAL;
+		case CELL_GCM_ALWAYS:
+			return VK_COMPARE_OP_ALWAYS;
+		default:
+			throw EXCEPTION("Unsupported compare op: 0x%X", gl_name);
+		}
+	}
+}
+
 VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 {
 	shaders_cache.load(rsx::shader_language::glsl);
@@ -39,17 +63,17 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	HINSTANCE hInstance = NULL;
 	HWND hWnd = (HWND)m_frame->handle();
 
-//	m_thread_context.createInstance("RPCS3");
-//	m_thread_context.makeCurrentInstance(1);
+	m_thread_context.createInstance("RPCS3");
+	m_thread_context.makeCurrentInstance(1);
 
-//	std::vector<vk::device> gpus = m_thread_context.enumerateDevices();
-//	m_swap_chain = &m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
+	std::vector<vk::device> gpus = m_thread_context.enumerateDevices();
+	m_swap_chain = &m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
 }
 
 VKGSRender::~VKGSRender()
 {
-//	m_swap_chain->destroy();
-//	m_thread_context.close();
+	m_swap_chain->destroy();
+	m_thread_context.close();
 }
 
 u32 VKGSRender::enable(u32 condition, u32 cap)
@@ -85,13 +109,14 @@ void VKGSRender::begin()
 	u32 depth_mask = rsx::method_registers[NV4097_SET_DEPTH_MASK];
 	u32 stencil_mask = rsx::method_registers[NV4097_SET_STENCIL_MASK];
 
-/*	if (__vkcheck enable(rsx::method_registers[NV4097_SET_DEPTH_TEST_ENABLE], GL_DEPTH_TEST))
+	if (rsx::method_registers[NV4097_SET_DEPTH_TEST_ENABLE])
 	{
-		__vkcheck glDepthFunc(rsx::method_registers[NV4097_SET_DEPTH_FUNC]);
-		__vkcheck glDepthMask(rsx::method_registers[NV4097_SET_DEPTH_MASK]);
+		m_program->set_depth_state_enable(VK_TRUE);
+		m_program->set_depth_compare_op(vk::compare_op(rsx::method_registers[NV4097_SET_DEPTH_FUNC]));
+		m_program->set_depth_write_mask(rsx::method_registers[NV4097_SET_DEPTH_MASK]);
 	}
 
-	if (glDepthBoundsEXT && (__vkcheck enable(rsx::method_registers[NV4097_SET_DEPTH_BOUNDS_TEST_ENABLE], GL_DEPTH_BOUNDS_TEST_EXT)))
+/*	if (glDepthBoundsEXT && (__vkcheck enable(rsx::method_registers[NV4097_SET_DEPTH_BOUNDS_TEST_ENABLE], GL_DEPTH_BOUNDS_TEST_EXT)))
 	{
 		__vkcheck glDepthBoundsEXT((f32&)rsx::method_registers[NV4097_SET_DEPTH_BOUNDS_MIN], (f32&)rsx::method_registers[NV4097_SET_DEPTH_BOUNDS_MAX]);
 	}
@@ -628,8 +653,7 @@ bool VKGSRender::load_program()
 	RSXFragmentProgram fragment_program = get_current_fragment_program();
 
 	//Load current program from buffer
-//	__vkcheck m_program = &m_prog_buffer.getGraphicPipelineState(vertex_program, fragment_program, nullptr);
-//	__vkcheck m_program->use();
+	__vkcheck m_program = &m_prog_buffer.getGraphicPipelineState(vertex_program, fragment_program, nullptr);
 
 	//Update constant buffers..
 	//1. Update scale-offset matrix
@@ -719,6 +743,16 @@ void VKGSRender::write_buffers()
 
 void VKGSRender::flip(int buffer)
 {
+	VkSemaphore vk_present_semaphore;
+	VkSemaphoreCreateInfo semaphore_info;
+	semaphore_info.flags = 0;
+	semaphore_info.pNext = nullptr;
+	semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+	vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &vk_present_semaphore);
+
+	VkFence nullFence = VK_NULL_HANDLE;
+
 	//LOG_NOTICE(Log::RSX, "flip(%d)", buffer);
 	u32 buffer_width = gcm_buffers[buffer].width;
 	u32 buffer_height = gcm_buffers[buffer].height;
@@ -759,6 +793,19 @@ void VKGSRender::flip(int buffer)
 	//TODO
 	//Clear old screen
 	//Blit contents to surface
+	u32 current;
+	vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, vk_present_semaphore, nullFence, &current);
+
+	VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);
+	
+	VkPresentInfoKHR present;
+	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	present.pNext = nullptr;
+	present.swapchainCount = 1;
+	present.pSwapchains = &swap_chain;
+	present.pImageIndices = &current;
+
+	m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present);
 
 	m_frame->flip(m_context);
 }

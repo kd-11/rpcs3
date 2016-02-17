@@ -18,7 +18,7 @@ private:
 	vk::texture m_textures[rsx::limits::textures_count];
 	vk::texture m_vertex_textures[rsx::limits::vertex_textures_count];
 
-	//vk::glsl::program *m_program;
+	vk::glsl::program *m_program;
 	vk::context m_thread_context;
 
 	rsx::surface_info m_surface;
@@ -34,11 +34,12 @@ public:
 	//vk::fbo draw_fbo;
 
 private:
-	//VKProgramBuffer m_prog_buffer;
+	VKProgramBuffer m_prog_buffer;
 
 	vk::texture m_draw_tex_color[rsx::limits::color_buffers_count];
 	vk::texture m_draw_tex_depth_stencil;
 
+	vk::render_device *m_device;
 	vk::swap_chain* m_swap_chain;
 	//buffer
 
@@ -46,9 +47,7 @@ private:
 	vk::buffer m_vertex_constants_buffer;
 	vk::buffer m_fragment_constants_buffer;
 
-	vk::buffer m_vbo;
-	vk::buffer m_ebo;
-	//vk::vao m_vao;
+	vk::buffer m_index_buffer;
 
 public:
 	VKGSRender();

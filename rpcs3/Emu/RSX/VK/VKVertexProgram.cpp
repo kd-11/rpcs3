@@ -220,15 +220,25 @@ void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 
 void VKVertexProgram::Compile()
 {
+	const char *glsl_shader = shader.data();
+	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(glsl_shader);
+
+	system("glslangValidator.exe -V -o frag.spv FragmentProgram.frag");
+
+	std::string spir_v;
+	fs::file(fs::get_config_dir() + "frag.spv", fom::read).read(spir_v);
+
 	VkShaderModuleCreateInfo vs_info;
-	vs_info.codeSize = shader.length();
+	vs_info.codeSize = spir_v.length();
 	vs_info.pNext = nullptr;
 	vs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	vs_info.pCode = (uint32_t*)shader.data();
+	vs_info.pCode = (uint32_t*)spir_v.data();
 	vs_info.flags = 0;
 
 	VkDevice dev = (VkDevice)*vk::get_current_renderer();
 	vkCreateShaderModule(dev, &vs_info, nullptr, &handle);
+
+	id = (u32)(handle);
 }
 
 void VKVertexProgram::Delete()

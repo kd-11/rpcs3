@@ -63,6 +63,8 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>$(SolutionDir)bin\</OutDir>
     <TargetName>$(ProjectName)-dbg</TargetName>
+    <IncludePath>.\;..\;..\asmjit\src\asmjit;..\wxWidgets\include\msvc;..\wxWidgets\include;..\ffmpeg\WindowsInclude;..\ffmpeg\Windows\x86_64\Include;$(VC_IncludePath);$(WindowsSDK_IncludePath);..\llvm\include;..\llvm_build\include;$(UniversalCRT_IncludePath);..\minidx12\Include;..\glm;..\GSL\include;..\libpng;..\Vulkan\Include</IncludePath>
+    <LibraryPath>..\Vulkan\Lib;$(SolutionDir)lib\$(Configuration)-$(Platform)\;$(UniversalCRT_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug - LLVM|x64'">
     <OutDir>$(SolutionDir)bin\</OutDir>
@@ -98,6 +100,7 @@
     <Link>
       <AdditionalLibraryDirectories>..\OpenAL\libs\Win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Release - LLVM|x64'">VKGSRender.lib;wxmsw31u_adv.lib;wxbase31u.lib;wxmsw31u_core.lib;wxmsw31u_aui.lib;wxtiff.lib;wxjpeg.lib;wxpng.lib;wxzlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">VKGSRender.lib;wxmsw31ud_adv.lib;wxbase31ud.lib;wxmsw31ud_core.lib;wxmsw31ud_aui.lib;wxtiffd.lib;wxjpegd.lib;wxpngd.lib;wxzlibd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

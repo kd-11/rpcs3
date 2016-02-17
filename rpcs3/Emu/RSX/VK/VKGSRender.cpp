@@ -68,6 +68,9 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 
 	std::vector<vk::device> gpus = m_thread_context.enumerateDevices();
 	m_swap_chain = &m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
+
+	vk::set_current_thread_ctx(m_thread_context);
+	vk::set_current_renderer(m_swap_chain->get_device());
 }
 
 VKGSRender::~VKGSRender()

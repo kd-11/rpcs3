@@ -32,10 +32,10 @@ namespace vk
 	class render_device;
 
 	vk::context *get_current_thread_ctx();
-	void set_current_thread_ctx(vk::context &ctx);
+	void set_current_thread_ctx(const vk::context &ctx);
 
 	vk::render_device *get_current_renderer();
-	void set_current_renderer(vk::render_device &device);
+	void set_current_renderer(const vk::render_device &device);
 
 	class texture
 	{

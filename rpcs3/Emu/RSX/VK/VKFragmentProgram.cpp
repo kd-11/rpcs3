@@ -185,16 +185,26 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 void VKFragmentProgram::Compile()
 {
+	const char *glsl_shader = shader.data();
+	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(glsl_shader);
+
+	system("glslangValidator.exe -V -o frag.spv FragmentProgram.frag");
+	
+	std::string spir_v;
+	fs::file(fs::get_config_dir() + "frag.spv", fom::read).read(spir_v);
+
 	//Create the object and compile
 	VkShaderModuleCreateInfo fs_info;
-	fs_info.codeSize = shader.length();
+	fs_info.codeSize = spir_v.length();
 	fs_info.pNext = nullptr;
 	fs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	fs_info.pCode = (uint32_t*)shader.data();
+	fs_info.pCode = (uint32_t*)spir_v.data();
 	fs_info.flags = 0;
 
 	VkDevice dev = (VkDevice)*vk::get_current_renderer();
 	vkCreateShaderModule(dev, &fs_info, nullptr, &handle);
+
+	id = (u32)(handle);
 }
 
 void VKFragmentProgram::Delete()

@@ -14,6 +14,7 @@ namespace vk
 
 	u32 texture::vk_wrap_mode(u32 gcm_wrap)
 	{
+		return 0;
 	}
 
 	float texture::max_aniso(u32 gcm_aniso)

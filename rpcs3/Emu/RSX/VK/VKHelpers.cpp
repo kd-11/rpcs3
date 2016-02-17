@@ -31,9 +31,9 @@ namespace vk
 		return callbacks;
 	}
 
-	void set_current_thread_ctx(context &ctx)
+	void set_current_thread_ctx(const vk::context &ctx)
 	{
-		g_current_vulkan_ctx = &ctx;
+		g_current_vulkan_ctx = (vk::context *)&ctx;
 	}
 
 	context *get_current_thread_ctx()
@@ -46,8 +46,8 @@ namespace vk
 		return g_current_renderer;
 	}
 
-	void set_current_renderer(vk::render_device &device)
+	void set_current_renderer(const vk::render_device &device)
 	{
-		g_current_renderer = &device;
+		g_current_renderer = (vk::render_device *)&device;
 	}
 }

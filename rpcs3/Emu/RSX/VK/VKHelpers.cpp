@@ -3,6 +3,9 @@
 
 namespace vk
 {
+	context *g_current_vulkan_ctx = nullptr;
+	render_device *g_current_renderer = nullptr;
+
 	VKAPI_ATTR void *VKAPI_CALL mem_realloc(void *pUserData, void *pOriginal, size_t size, size_t alignment, VkSystemAllocationScope allocationScope)
 	{
 		return realloc(pOriginal, size);
@@ -26,5 +29,25 @@ namespace vk
 		callbacks.pfnReallocation = vk::mem_realloc;
 
 		return callbacks;
+	}
+
+	void set_current_thread_ctx(context &ctx)
+	{
+		g_current_vulkan_ctx = &ctx;
+	}
+
+	context *get_current_thread_ctx()
+	{
+		return g_current_vulkan_ctx;
+	}
+
+	vk::render_device *get_current_renderer()
+	{
+		return g_current_renderer;
+	}
+
+	void set_current_renderer(vk::render_device &device)
+	{
+		g_current_renderer = &device;
 	}
 }

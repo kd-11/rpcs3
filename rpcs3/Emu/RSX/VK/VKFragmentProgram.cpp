@@ -4,6 +4,7 @@
 #include "VKFragmentProgram.h"
 
 #include "VKCommonDecompiler.h"
+#include "VKHelpers.h"
 #include "../GCM.h"
 
 std::string VKFragmentDecompilerThread::getFloatTypeName(size_t elementCount)
@@ -185,14 +186,15 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 void VKFragmentProgram::Compile()
 {
 	//Create the object and compile
-	VkShaderModuleCreateInfo vs_info;
-	vs_info.codeSize = shader.length();
-	vs_info.pNext = nullptr;
-	vs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-	vs_info.pCode = (uint32_t*)shader.data();
-	vs_info.flags = 0;
+	VkShaderModuleCreateInfo fs_info;
+	fs_info.codeSize = shader.length();
+	fs_info.pNext = nullptr;
+	fs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	fs_info.pCode = (uint32_t*)shader.data();
+	fs_info.flags = 0;
 
-	vkCreateShaderModule(nullptr, &vs_info, nullptr, &handle);
+	VkDevice dev = (VkDevice)*vk::get_current_renderer();
+	vkCreateShaderModule(dev, &fs_info, nullptr, &handle);
 }
 
 void VKFragmentProgram::Delete()
@@ -207,7 +209,8 @@ void VKFragmentProgram::Delete()
 		}
 		else
 		{
-			vkDestroyShaderModule(nullptr, handle, NULL);
+			VkDevice dev = (VkDevice)*vk::get_current_renderer();
+			vkDestroyShaderModule(dev, handle, NULL);
 			handle = nullptr;
 		}
 	}

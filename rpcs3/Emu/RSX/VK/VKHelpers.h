@@ -28,6 +28,15 @@ namespace vk
 
 	VkAllocationCallbacks default_callbacks();
 
+	class context;
+	class render_device;
+
+	vk::context *get_current_thread_ctx();
+	void set_current_thread_ctx(vk::context &ctx);
+
+	vk::render_device *get_current_renderer();
+	void set_current_renderer(vk::render_device &device);
+
 	class texture
 	{
 	public:

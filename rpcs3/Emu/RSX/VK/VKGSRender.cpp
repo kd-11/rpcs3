@@ -39,17 +39,17 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	HINSTANCE hInstance = NULL;
 	HWND hWnd = (HWND)m_frame->handle();
 
-	m_thread_context.createInstance("RPCS3");
-	m_thread_context.makeCurrentInstance(1);
+//	m_thread_context.createInstance("RPCS3");
+//	m_thread_context.makeCurrentInstance(1);
 
-	std::vector<vk::device> gpus = m_thread_context.enumerateDevices();
-	m_swap_chain = &m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
+//	std::vector<vk::device> gpus = m_thread_context.enumerateDevices();
+//	m_swap_chain = &m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
 }
 
 VKGSRender::~VKGSRender()
 {
-	m_swap_chain->destroy();
-	m_thread_context.close();
+//	m_swap_chain->destroy();
+//	m_thread_context.close();
 }
 
 u32 VKGSRender::enable(u32 condition, u32 cap)

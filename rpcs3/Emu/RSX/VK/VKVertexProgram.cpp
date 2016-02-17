@@ -3,6 +3,7 @@
 
 #include "VKVertexProgram.h"
 #include "VKCommonDecompiler.h"
+#include "VKHelpers.h"
 
 std::string VKVertexDecompilerThread::getFloatTypeName(size_t elementCount)
 {
@@ -257,7 +258,15 @@ void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 
 void VKVertexProgram::Compile()
 {
+	VkShaderModuleCreateInfo vs_info;
+	vs_info.codeSize = shader.length();
+	vs_info.pNext = nullptr;
+	vs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	vs_info.pCode = (uint32_t*)shader.data();
+	vs_info.flags = 0;
 
+	VkDevice dev = (VkDevice)*vk::get_current_renderer();
+	vkCreateShaderModule(dev, &vs_info, nullptr, &handle);
 }
 
 void VKVertexProgram::Delete()
@@ -272,7 +281,8 @@ void VKVertexProgram::Delete()
 		}
 		else
 		{
-			vkDestroyShaderModule(nullptr, handle, nullptr);
+			VkDevice dev = (VkDevice)*vk::get_current_renderer();
+			vkDestroyShaderModule(dev, handle, nullptr);
 		}
 
 		handle = nullptr;

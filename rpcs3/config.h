@@ -50,7 +50,8 @@ enum class rsx_renderer_type
 {
 	Null,
 	OpenGL,
-	DX12
+	DX12,
+	Vulkan
 };
 
 enum class rsx_aspect_ratio

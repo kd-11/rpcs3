@@ -1,5 +1,5 @@
 #include "stdafx.h"
-#include "GLCommonDecompiler.h"
+#include "VKCommonDecompiler.h"
 
 std::string getFloatTypeNameImpl(size_t elementCount)
 {

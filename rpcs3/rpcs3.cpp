@@ -37,6 +37,7 @@
 #ifdef _MSC_VER
 #include "Emu/RSX/D3D12/D3D12GSRender.h"
 #include "Emu/Audio/XAudio2/XAudio2Thread.h"
+#include "Emu/RSX/VK/VKGSRender.h"
 #endif
 
 #ifdef _WIN32
@@ -128,6 +129,7 @@ bool Rpcs3App::OnInit()
 		{
 		case frame_type::OpenGL: return std::make_unique<GLGSFrame>();
 		case frame_type::DX12: return std::make_unique<GSFrame>("DirectX 12");
+		case frame_type::Vulkan: return std::make_unique<GSFrame>("Vulkan");
 		case frame_type::Null: return std::make_unique<GSFrame>("Null");
 		}
 
@@ -142,6 +144,7 @@ bool Rpcs3App::OnInit()
 		case rsx_renderer_type::OpenGL: return std::make_shared<GLGSRender>();
 #ifdef _MSC_VER
 		case rsx_renderer_type::DX12: return std::make_shared<D3D12GSRender>();
+		case rsx_renderer_type::Vulkan: return std::make_shared<VKGSRender>();
 #endif
 		default: throw EXCEPTION("Invalid GS Renderer %d", (int)mode);
 		}

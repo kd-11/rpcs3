@@ -42,7 +42,7 @@ public:
 	~VKFragmentProgram();
 
 	ParamArray parr;
-	u32 id = 0;
+	VkShaderModule handle = nullptr;
 	std::string shader;
 	std::vector<size_t> FragmentConstantOffsetCache;
 

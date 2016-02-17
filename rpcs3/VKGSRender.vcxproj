@@ -69,7 +69,9 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <IncludePath>.\;..\;..\asmjit\src\asmjit;..\wxWidgets\include\msvc;..\wxWidgets\include;..\ffmpeg\WindowsInclude;..\ffmpeg\Windows\x86_64\Include;$(VC_IncludePath);$(WindowsSDK_IncludePath);..\llvm\include;..\llvm_build\include;$(UniversalCRT_IncludePath);..\minidx12\Include;..\Vulkan\Include;..\glm;..\GSL\include;..\libpng</IncludePath>
+  </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <PrecompiledHeader>
@@ -129,9 +131,31 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
+    <Lib>
+      <AdditionalDependencies>LLVMMCJIT.lib;LLVMRuntimeDyld.lib;LLVMVectorize.lib;LLVMX86CodeGen.lib;LLVMX86Disassembler.lib;LLVMExecutionEngine.lib;LLVMAsmPrinter.lib;LLVMSelectionDAG.lib;LLVMCodeGen.lib;LLVMScalarOpts.lib;LLVMInstCombine.lib;LLVMTransformUtils.lib;LLVMipa.lib;LLVMAnalysis.lib;LLVMTarget.lib;LLVMX86Desc.lib;LLVMX86AsmPrinter.lib;LLVMObject.lib;LLVMMCParser.lib;LLVMBitReader.lib;LLVMCore.lib;LLVMX86Utils.lib;LLVMMC.lib;LLVMX86Info.lib;LLVMSupport.lib;LLVMMCDisassembler.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>..\llvm_build\Release\lib</AdditionalLibraryDirectories>
+    </Lib>
   </ItemDefinitionGroup>
   <ItemGroup>
     <Text Include="ReadMe.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Emu\RSX\VK\VKCommonDecompiler.cpp" />
+    <ClCompile Include="Emu\RSX\VK\VKFragmentProgram.cpp" />
+    <ClCompile Include="Emu\RSX\VK\VKGSRender.cpp" />
+    <ClCompile Include="Emu\RSX\VK\VKHelpers.cpp" />
+    <ClCompile Include="Emu\RSX\VK\VKTexture.cpp" />
+    <ClCompile Include="Emu\RSX\VK\VKVertexProgram.cpp" />
+    <ClCompile Include="Emu\RSX\VK\VulkanAPI.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Emu\RSX\VK\VKCommonDecompiler.h" />
+    <ClInclude Include="Emu\RSX\VK\VKFragmentProgram.h" />
+    <ClInclude Include="Emu\RSX\VK\VKGSRender.h" />
+    <ClInclude Include="Emu\RSX\VK\VKHelpers.h" />
+    <ClInclude Include="Emu\RSX\VK\VKProgramBuffer.h" />
+    <ClInclude Include="Emu\RSX\VK\VKVertexProgram.h" />
+    <ClInclude Include="Emu\RSX\VK\VulkanAPI.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

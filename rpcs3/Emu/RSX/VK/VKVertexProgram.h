@@ -2,9 +2,9 @@
 #include "../Common/VertexProgramDecompiler.h"
 #include "Emu/RSX/RSXVertexProgram.h"
 #include "Utilities/Thread.h"
-#include "OpenGL.h"
+#include "VulkanAPI.h"
 
-struct GLVertexDecompilerThread : public VertexProgramDecompiler
+struct VKVertexDecompilerThread : public VertexProgramDecompiler
 {
 	std::string &m_shader;
 protected:
@@ -22,7 +22,7 @@ protected:
 
 	const RSXVertexProgram &rsx_vertex_program;
 public:
-	GLVertexDecompilerThread(const RSXVertexProgram &prog, std::string& shader, ParamArray& parr)
+	VKVertexDecompilerThread(const RSXVertexProgram &prog, std::string& shader, ParamArray& parr)
 		: VertexProgramDecompiler(prog)
 		, m_shader(shader)
 		, rsx_vertex_program(prog)
@@ -32,14 +32,14 @@ public:
 	void Task();
 };
 
-class GLVertexProgram
+class VKVertexProgram
 { 
 public:
-	GLVertexProgram();
-	~GLVertexProgram();
+	VKVertexProgram();
+	~VKVertexProgram();
 
 	ParamArray parr;
-	u32 id = 0;
+	VkShaderModule handle = nullptr;
 	std::string shader;
 
 	void Decompile(const RSXVertexProgram& prog);

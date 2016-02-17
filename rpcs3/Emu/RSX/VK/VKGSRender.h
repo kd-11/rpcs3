@@ -1,57 +1,58 @@
 #pragma once
 #include "Emu/RSX/GSRender.h"
-#include "gl_helpers.h"
-#include "rsx_gl_texture.h"
+#include "VKHelpers.h"
+#include "VKTexture.h"
 
 #define RSX_DEBUG 1
 
-#include "GLProgramBuffer.h"
+#include "VKProgramBuffer.h"
 
-#pragma comment(lib, "opengl32.lib")
+#pragma comment(lib, "vulkan-1.lib")
 
-class GLGSRender : public GSRender
+class VKGSRender : public GSRender
 {
 private:
-	GLFragmentProgram m_fragment_prog;
-	GLVertexProgram m_vertex_prog;
+	VKFragmentProgram m_fragment_prog;
+	VKVertexProgram m_vertex_prog;
 
-	rsx::gl::texture m_gl_textures[rsx::limits::textures_count];
-	rsx::gl::texture m_gl_vertex_textures[rsx::limits::vertex_textures_count];
+	vk::texture m_textures[rsx::limits::textures_count];
+	vk::texture m_vertex_textures[rsx::limits::vertex_textures_count];
 
-	gl::glsl::program *m_program;
+	//vk::glsl::program *m_program;
+	vk::context m_thread_context;
 
 	rsx::surface_info m_surface;
 
 	struct texture_buffer_pair
 	{
-		gl::texture *texture;
-		gl::buffer *buffer;
+		vk::texture *texture;
+		vk::buffer *buffer;
 	}
 	m_gl_attrib_buffers[rsx::limits::vertex_count];
 
 public:
-	gl::fbo draw_fbo;
+	//vk::fbo draw_fbo;
 
 private:
-	GLProgramBuffer m_prog_buffer;
+	//VKProgramBuffer m_prog_buffer;
 
-	gl::texture m_draw_tex_color[rsx::limits::color_buffers_count];
-	gl::texture m_draw_tex_depth_stencil;
+	vk::texture m_draw_tex_color[rsx::limits::color_buffers_count];
+	vk::texture m_draw_tex_depth_stencil;
 
+	vk::swap_chain* m_swap_chain;
 	//buffer
-	gl::fbo m_flip_fbo;
-	gl::texture m_flip_tex_color;
 
-	gl::buffer m_scale_offset_buffer;
-	gl::buffer m_vertex_constants_buffer;
-	gl::buffer m_fragment_constants_buffer;
+	vk::buffer m_scale_offset_buffer;
+	vk::buffer m_vertex_constants_buffer;
+	vk::buffer m_fragment_constants_buffer;
 
-	gl::buffer m_vbo;
-	gl::buffer m_ebo;
-	gl::vao m_vao;
+	vk::buffer m_vbo;
+	vk::buffer m_ebo;
+	//vk::vao m_vao;
 
 public:
-	GLGSRender();
+	VKGSRender();
+	~VKGSRender();
 
 private:
 	static u32 enable(u32 enable, u32 cap);
@@ -72,5 +73,4 @@ protected:
 	void on_exit() override;
 	bool do_method(u32 id, u32 arg) override;
 	void flip(int buffer) override;
-	u64 timestamp() const override;
 };

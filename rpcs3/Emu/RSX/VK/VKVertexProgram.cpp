@@ -1,31 +1,31 @@
 #include "stdafx.h"
 #include "Emu/System.h"
 
-#include "GLVertexProgram.h"
-#include "GLCommonDecompiler.h"
+#include "VKVertexProgram.h"
+#include "VKCommonDecompiler.h"
 
-std::string GLVertexDecompilerThread::getFloatTypeName(size_t elementCount)
+std::string VKVertexDecompilerThread::getFloatTypeName(size_t elementCount)
 {
 	return getFloatTypeNameImpl(elementCount);
 }
 
-std::string GLVertexDecompilerThread::getIntTypeName(size_t elementCount)
+std::string VKVertexDecompilerThread::getIntTypeName(size_t elementCount)
 {
 	return "ivec4";
 }
 
 
-std::string GLVertexDecompilerThread::getFunction(FUNCTION f)
+std::string VKVertexDecompilerThread::getFunction(FUNCTION f)
 {
 	return getFunctionImpl(f);
 }
 
-std::string GLVertexDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
+std::string VKVertexDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
 {
 	return compareFunctionImpl(f, Op0, Op1);
 }
 
-void GLVertexDecompilerThread::insertHeader(std::stringstream &OS)
+void VKVertexDecompilerThread::insertHeader(std::stringstream &OS)
 {
 	OS << "#version 430" << std::endl << std::endl;
 	OS << "layout(std140, binding = 0) uniform ScaleOffsetBuffer" << std::endl;
@@ -34,7 +34,7 @@ void GLVertexDecompilerThread::insertHeader(std::stringstream &OS)
 	OS << "};" << std::endl;
 }
 
-void GLVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::vector<ParamType>& inputs)
+void VKVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::vector<ParamType>& inputs)
 {
 	std::vector<std::tuple<size_t, std::string>> input_data;
 	for (const ParamType &PT : inputs)
@@ -66,7 +66,7 @@ void GLVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 	}
 }
 
-void GLVertexDecompilerThread::insertConstants(std::stringstream & OS, const std::vector<ParamType> & constants)
+void VKVertexDecompilerThread::insertConstants(std::stringstream & OS, const std::vector<ParamType> & constants)
 {
 	OS << "layout(std140, binding = 1) uniform VertexConstantsBuffer" << std::endl;
 	OS << "{" << std::endl;
@@ -110,7 +110,7 @@ static const reg_info reg_table[] =
 	{ "tc9", true, "dst_reg6", "", false }  // In this line, dst_reg6 is correct since dst_reg goes from 0 to 15.
 };
 
-void GLVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::vector<ParamType> & outputs)
+void VKVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::vector<ParamType> & outputs)
 {
 	for (auto &i : reg_table)
 	{
@@ -156,7 +156,7 @@ void add_input(std::stringstream & OS, const ParamItem &PI, const std::vector<rs
 	OS << "	vec4 " << PI.name << " = vec4(0., 0., 0., 1.);" << std::endl;
 }
 
-void GLVertexDecompilerThread::insertMainStart(std::stringstream & OS)
+void VKVertexDecompilerThread::insertMainStart(std::stringstream & OS)
 {
 	insert_glsl_legacy_function(OS);
 
@@ -182,7 +182,7 @@ void GLVertexDecompilerThread::insertMainStart(std::stringstream & OS)
 	}
 }
 
-void GLVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
+void VKVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 {
 	for (auto &i : reg_table)
 	{
@@ -194,16 +194,16 @@ void GLVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 }
 
 
-void GLVertexDecompilerThread::Task()
+void VKVertexDecompilerThread::Task()
 {
 	m_shader = Decompile();
 }
 
-GLVertexProgram::GLVertexProgram()
+VKVertexProgram::VKVertexProgram()
 {
 }
 
-GLVertexProgram::~GLVertexProgram()
+VKVertexProgram::~VKVertexProgram()
 {
 	//if (m_decompiler_thread)
 	//{
@@ -220,7 +220,7 @@ GLVertexProgram::~GLVertexProgram()
 	Delete();
 }
 
-//void GLVertexProgram::Wait()
+//void VKVertexProgram::Wait()
 //{
 //	if (m_decompiler_thread && m_decompiler_thread->IsAlive())
 //	{
@@ -228,13 +228,13 @@ GLVertexProgram::~GLVertexProgram()
 //	}
 //}
 
-void GLVertexProgram::Decompile(const RSXVertexProgram& prog)
+void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 {
-	GLVertexDecompilerThread decompiler(prog, shader, parr);
+	VKVertexDecompilerThread decompiler(prog, shader, parr);
 	decompiler.Task();
 }
 
-//void GLVertexProgram::DecompileAsync(RSXVertexProgram& prog)
+//void VKVertexProgram::DecompileAsync(RSXVertexProgram& prog)
 //{
 //	if (m_decompiler_thread)
 //	{
@@ -248,61 +248,30 @@ void GLVertexProgram::Decompile(const RSXVertexProgram& prog)
 //		m_decompiler_thread = nullptr;
 //	}
 //
-//	m_decompiler_thread = new GLVertexDecompilerThread(prog.data, shader, parr);
+//	m_decompiler_thread = new VKVertexDecompilerThread(prog.data, shader, parr);
 //	m_decompiler_thread->Start();
 //}
 
-void GLVertexProgram::Compile()
+void VKVertexProgram::Compile()
 {
-	if (id)
-	{
-		glDeleteShader(id);
-	}
-
-	id = glCreateShader(GL_VERTEX_SHADER);
-
-	const char* str = shader.c_str();
-	const int strlen = gsl::narrow<int>(shader.length());
-
-	glShaderSource(id, 1, &str, &strlen);
-	glCompileShader(id);
-
-	GLint r = GL_FALSE;
-	glGetShaderiv(id, GL_COMPILE_STATUS, &r);
-	if (r != GL_TRUE)
-	{
-		glGetShaderiv(id, GL_INFO_LOG_LENGTH, &r);
-
-		if (r)
-		{
-			char* buf = new char[r + 1]();
-			GLsizei len;
-			glGetShaderInfoLog(id, r, &len, buf);
-			LOG_ERROR(RSX, "Failed to compile vertex shader: %s", buf);
-			delete[] buf;
-		}
-
-		LOG_NOTICE(RSX, "%s", shader.c_str());
-		Emu.Pause();
-	}
-	//else LOG_WARNING(RSX, "Vertex shader compiled successfully!");
 
 }
 
-void GLVertexProgram::Delete()
+void VKVertexProgram::Delete()
 {
 	shader.clear();
 
-	if (id)
+	if (handle)
 	{
 		if (Emu.IsStopped())
 		{
-			LOG_WARNING(RSX, "GLVertexProgram::Delete(): glDeleteShader(%d) avoided", id);
+			LOG_WARNING(RSX, "VKVertexProgram::Delete(): vkDestroyShaderModule(0x%X) avoided", handle);
 		}
 		else
 		{
-			glDeleteShader(id);
+			vkDestroyShaderModule(nullptr, handle, nullptr);
 		}
-		id = 0;
+
+		handle = nullptr;
 	}
 }

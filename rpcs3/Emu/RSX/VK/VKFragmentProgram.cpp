@@ -1,37 +1,37 @@
 #include "stdafx.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "GLFragmentProgram.h"
+#include "VKFragmentProgram.h"
 
-#include "GLCommonDecompiler.h"
+#include "VKCommonDecompiler.h"
 #include "../GCM.h"
 
-std::string GLFragmentDecompilerThread::getFloatTypeName(size_t elementCount)
+std::string VKFragmentDecompilerThread::getFloatTypeName(size_t elementCount)
 {
 	return getFloatTypeNameImpl(elementCount);
 }
 
-std::string GLFragmentDecompilerThread::getFunction(FUNCTION f)
+std::string VKFragmentDecompilerThread::getFunction(FUNCTION f)
 {
 	return getFunctionImpl(f);
 }
 
-std::string GLFragmentDecompilerThread::saturate(const std::string & code)
+std::string VKFragmentDecompilerThread::saturate(const std::string & code)
 {
 	return "clamp(" + code + ", 0., 1.)";
 }
 
-std::string GLFragmentDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
+std::string VKFragmentDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
 {
 	return compareFunctionImpl(f, Op0, Op1);
 }
 
-void GLFragmentDecompilerThread::insertHeader(std::stringstream & OS)
+void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
 {
 	OS << "#version 420" << std::endl;
 }
 
-void GLFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
+void VKFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
 {
 	for (const ParamType& PT : m_parr.params[PF_PARAM_IN])
 	{
@@ -40,7 +40,7 @@ void GLFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
 	}
 }
 
-void GLFragmentDecompilerThread::insertOutputs(std::stringstream & OS)
+void VKFragmentDecompilerThread::insertOutputs(std::stringstream & OS)
 {
 	const std::pair<std::string, std::string> table[] =
 	{
@@ -57,7 +57,7 @@ void GLFragmentDecompilerThread::insertOutputs(std::stringstream & OS)
 	}
 }
 
-void GLFragmentDecompilerThread::insertConstants(std::stringstream & OS)
+void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 {
 	for (const ParamType& PT : m_parr.params[PF_PARAM_UNIFORM])
 	{
@@ -99,7 +99,7 @@ void GLFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 	OS << "};" << std::endl;
 }
 
-void GLFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
+void VKFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
 {
 	insert_glsl_legacy_function(OS);
 
@@ -118,7 +118,7 @@ void GLFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
 	}
 }
 
-void GLFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
+void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 {
 	const std::pair<std::string, std::string> table[] =
 	{
@@ -150,45 +150,26 @@ void GLFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 	OS << "}" << std::endl;
 }
 
-void GLFragmentDecompilerThread::Task()
+void VKFragmentDecompilerThread::Task()
 {
 	m_shader = Decompile();
 }
 
-GLFragmentProgram::GLFragmentProgram()
+VKFragmentProgram::VKFragmentProgram()
 {
 }
 
-GLFragmentProgram::~GLFragmentProgram()
+VKFragmentProgram::~VKFragmentProgram()
 {
-	//if (m_decompiler_thread)
-	//{
-	//	Wait();
-	//	if (m_decompiler_thread->IsAlive())
-	//	{
-	//		m_decompiler_thread->Stop();
-	//	}
-
-	//	delete m_decompiler_thread;
-	//	m_decompiler_thread = nullptr;
-	//}
-
 	Delete();
 }
 
-//void GLFragmentProgram::Wait()
-//{
-//	if (m_decompiler_thread && m_decompiler_thread->IsAlive())
-//	{
-//		m_decompiler_thread->Join();
-//	}
-//}
-
-void GLFragmentProgram::Decompile(const RSXFragmentProgram& prog)
+void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 {
 	u32 size;
-	GLFragmentDecompilerThread decompiler(shader, parr, prog, size);
+	VKFragmentDecompilerThread decompiler(shader, parr, prog, size);
 	decompiler.Task();
+	
 	for (const ParamType& PT : decompiler.m_parr.params[PF_PARAM_UNIFORM])
 	{
 		for (const ParamItem& PI : PT.items)
@@ -201,76 +182,33 @@ void GLFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 	}
 }
 
-//void GLFragmentProgram::DecompileAsync(RSXFragmentProgram& prog)
-//{
-//	if (m_decompiler_thread)
-//	{
-//		Wait();
-//		if (m_decompiler_thread->IsAlive())
-//		{
-//			m_decompiler_thread->Stop();
-//		}
-//
-//		delete m_decompiler_thread;
-//		m_decompiler_thread = nullptr;
-//	}
-//
-//	m_decompiler_thread = new GLFragmentDecompilerThread(shader, parr, prog.addr, prog.size, prog.ctrl);
-//	m_decompiler_thread->Start();
-//}
-
-void GLFragmentProgram::Compile()
+void VKFragmentProgram::Compile()
 {
-	if (id)
-	{
-		glDeleteShader(id);
-	}
+	//Create the object and compile
+	VkShaderModuleCreateInfo vs_info;
+	vs_info.codeSize = shader.length();
+	vs_info.pNext = nullptr;
+	vs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	vs_info.pCode = (uint32_t*)shader.data();
+	vs_info.flags = 0;
 
-	id = glCreateShader(GL_FRAGMENT_SHADER);
-
-	const char* str = shader.c_str();
-	const int strlen = gsl::narrow<int>(shader.length());
-
-	glShaderSource(id, 1, &str, &strlen);
-	glCompileShader(id);
-
-	GLint compileStatus = GL_FALSE;
-	glGetShaderiv(id, GL_COMPILE_STATUS, &compileStatus); // Determine the result of the glCompileShader call
-	if (compileStatus != GL_TRUE) // If the shader failed to compile...
-	{
-		GLint infoLength;
-		glGetShaderiv(id, GL_INFO_LOG_LENGTH, &infoLength); // Retrieve the length in bytes (including trailing NULL) of the shader info log
-
-		if (infoLength > 0)
-		{
-			GLsizei len;
-			char* buf = new char[infoLength]; // Buffer to store infoLog
-
-			glGetShaderInfoLog(id, infoLength, &len, buf); // Retrieve the shader info log into our buffer
-			LOG_ERROR(RSX, "Failed to compile shader: %s", buf); // Write log to the console
-
-			delete[] buf;
-		}
-
-		LOG_NOTICE(RSX, shader.c_str()); // Log the text of the shader that failed to compile
-		Emu.Pause(); // Pause the emulator, we can't really continue from here
-	}
+	vkCreateShaderModule(nullptr, &vs_info, nullptr, &handle);
 }
 
-void GLFragmentProgram::Delete()
+void VKFragmentProgram::Delete()
 {
 	shader.clear();
 
-	if (id)
+	if (handle)
 	{
 		if (Emu.IsStopped())
 		{
-			LOG_WARNING(RSX, "GLFragmentProgram::Delete(): glDeleteShader(%d) avoided", id);
+			LOG_WARNING(RSX, "VKFragmentProgram::Delete(): vkDestroyShaderModule(0x%X) avoided", handle);
 		}
 		else
 		{
-			glDeleteShader(id);
+			vkDestroyShaderModule(nullptr, handle, NULL);
+			handle = nullptr;
 		}
-		id = 0;
 	}
 }

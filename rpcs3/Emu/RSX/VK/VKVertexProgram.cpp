@@ -124,36 +124,39 @@ void VKVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::
 	}
 }
 
-void add_input(std::stringstream & OS, const ParamItem &PI, const std::vector<rsx_vertex_input> &inputs)
+namespace vk
 {
-	for (const auto &real_input : inputs)
+	void add_input(std::stringstream & OS, const ParamItem &PI, const std::vector<rsx_vertex_input> &inputs)
 	{
-		if (real_input.location != PI.location)
-			continue;
-
-		if (!real_input.is_array)
+		for (const auto &real_input : inputs)
 		{
-			OS << "	vec4 " << PI.name << " = texelFetch(" << PI.name << "_buffer, 0);" << std::endl;
-			return;
-		}
+			if (real_input.location != PI.location)
+				continue;
 
-		if (real_input.frequency > 1)
-		{
-			if (real_input.is_modulo)
+			if (!real_input.is_array)
 			{
-				OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID %" << real_input.frequency << ");" << std::endl;
+				OS << "	vec4 " << PI.name << " = texelFetch(" << PI.name << "_buffer, 0);" << std::endl;
 				return;
 			}
 
-			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID /" << real_input.frequency << ");" << std::endl;
+			if (real_input.frequency > 1)
+			{
+				if (real_input.is_modulo)
+				{
+					OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID %" << real_input.frequency << ");" << std::endl;
+					return;
+				}
+
+				OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID /" << real_input.frequency << ");" << std::endl;
+				return;
+			}
+
+			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID);" << std::endl;
 			return;
 		}
 
-		OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID);" << std::endl;
-		return;
+		OS << "	vec4 " << PI.name << " = vec4(0., 0., 0., 1.);" << std::endl;
 	}
-
-	OS << "	vec4 " << PI.name << " = vec4(0., 0., 0., 1.);" << std::endl;
 }
 
 void VKVertexDecompilerThread::insertMainStart(std::stringstream & OS)
@@ -178,7 +181,7 @@ void VKVertexDecompilerThread::insertMainStart(std::stringstream & OS)
 	for (const ParamType &PT : m_parr.params[PF_PARAM_IN])
 	{
 		for (const ParamItem &PI : PT.items)
-			add_input(OS, PI, rsx_vertex_program.rsx_vertex_inputs);
+			vk::add_input(OS, PI, rsx_vertex_program.rsx_vertex_inputs);
 	}
 }
 

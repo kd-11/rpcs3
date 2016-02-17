@@ -81,6 +81,8 @@
     <OutDir>$(SolutionDir)bin\</OutDir>
     <LinkIncremental>false</LinkIncremental>
     <RunCodeAnalysis>false</RunCodeAnalysis>
+    <IncludePath>.\;..\;..\asmjit\src\asmjit;..\wxWidgets\include\msvc;..\wxWidgets\include;..\ffmpeg\WindowsInclude;..\ffmpeg\Windows\x86_64\Include;$(VC_IncludePath);$(WindowsSDK_IncludePath);..\llvm\include;..\llvm_build\include;$(UniversalCRT_IncludePath);..\minidx12\Include;..\glm;..\GSL\include;..\libpng;..\Vulkan\Include</IncludePath>
+    <LibraryPath>$(SolutionDir)lib\$(Configuration)-$(Platform)\;$(UniversalCRT_LibraryPath_x64);$(LibraryPath);..\Vulkan\Lib</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <PreBuildEvent>
@@ -95,6 +97,7 @@
     </ClCompile>
     <Link>
       <AdditionalLibraryDirectories>..\OpenAL\libs\Win64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies Condition="'$(Configuration)|$(Platform)'=='Release - LLVM|x64'">VKGSRender.lib;wxmsw31u_adv.lib;wxbase31u.lib;wxmsw31u_core.lib;wxmsw31u_aui.lib;wxtiff.lib;wxjpeg.lib;wxpng.lib;wxzlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

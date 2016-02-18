@@ -50,8 +50,14 @@ private:
 	vk::buffer m_index_buffer;
 
 	//Vulkan internals
-	u32 current_present_image;
-	VkSemaphore vk_present_semaphore;
+	u32 m_current_present_image;
+	VkSemaphore m_present_semaphore;
+
+	vk::command_pool m_command_buffer_pool;
+	vk::command_buffer m_command_buffer;
+
+	//Single render pass
+	VkRenderPass m_render_pass;
 
 public:
 	VKGSRender();
@@ -61,6 +67,8 @@ private:
 	static u32 enable(u32 enable, u32 cap);
 	static u32 enable(u32 enable, u32 cap, u32 index);
 	void clear_surface(u32 mask);
+	void init_render_pass();
+	void destroy_render_pass();
 
 public:
 	bool load_program();

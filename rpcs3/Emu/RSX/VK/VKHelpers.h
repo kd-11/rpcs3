@@ -39,34 +39,19 @@ namespace vk
 	vk::render_device *get_current_renderer();
 	void set_current_renderer(const vk::render_device &device);
 
-	class texture
+	enum image_usage
 	{
-	public:
-		texture() {}
-		~texture() {}
-
-		void create();
-		void remove();
-
-		u32  vk_wrap_mode(u32 gcm_wrap_mode);
-		float max_aniso(u32 gcm_aniso);
-
-		void init(int index, rsx::texture &tex);
+		color_attachment = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+		depth_attachment = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+		input = VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
+		sampled = VK_IMAGE_USAGE_SAMPLED_BIT,
+		storage = VK_IMAGE_USAGE_STORAGE_BIT,
+		transfer_dst = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+		transfer_src = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+		transient = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT
 	};
 
-	class buffer
-	{
-	public:
-		buffer() {}
-	};
-
-	class surface
-	{
-	public:
-		surface() {}
-	};
-
-	class device
+	class physical_device
 	{
 		VkPhysicalDevice dev;
 		VkPhysicalDeviceProperties props;
@@ -118,7 +103,7 @@ namespace vk
 
 	class render_device
 	{
-		vk::device *pgpu;
+		vk::physical_device *pgpu;
 		VkDevice dev;
 
 	public:
@@ -129,7 +114,7 @@ namespace vk
 			pgpu = nullptr;
 		}
 
-		render_device(vk::device &pdev, uint32_t graphics_queue_idx)
+		render_device(vk::physical_device &pdev, uint32_t graphics_queue_idx)
 		{
 			VkResult err;
 
@@ -182,7 +167,7 @@ namespace vk
 			}
 		}
 
-		const vk::device& gpu()
+		const vk::physical_device& gpu()
 		{
 			return *pgpu;
 		}
@@ -191,6 +176,129 @@ namespace vk
 		{
 			return dev;
 		}
+	};
+
+	class memory_block
+	{
+		VkDeviceMemory vram = nullptr;
+		vk::render_device *owner = nullptr;
+		u32 vram_block_sz = 0;
+
+	public:
+		memory_block() {}
+		~memory_block() {}
+
+		void allocate_from_pool(vk::render_device &device, u32 block_sz, u32 typeIndex)
+		{
+			if (vram)
+				destroy();
+
+			VkMemoryAllocateInfo infos;
+			infos.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+			infos.pNext = nullptr;
+			infos.allocationSize = block_sz;
+			infos.memoryTypeIndex = typeIndex;
+
+			owner = (vk::render_device*)&device;
+			VkDevice dev = (VkDevice)(*owner);
+
+			CHECK_RESULT(vkAllocateMemory(dev, &infos, nullptr, &vram));
+			vram_block_sz = block_sz;
+		}
+
+		void destroy()
+		{
+			VkDevice dev = (VkDevice)(*owner);
+			vkFreeMemory(dev, vram, nullptr);
+
+			owner = nullptr;
+			vram = nullptr;
+			vram_block_sz = 0;
+		}
+
+		vk::render_device& get_owner()
+		{
+			return (*owner);
+		}
+
+		operator VkDeviceMemory()
+		{
+			return vram;
+		}
+	};
+
+	class texture
+	{
+		VkImageView m_view = nullptr;
+		VkSampler m_sampler = nullptr;
+		VkImage m_image_contents = nullptr;
+		VkMemoryRequirements m_memory_layout;
+		VkFormat m_internal_format;
+		VkImageUsageFlags m_flags;
+
+		vk::memory_block vram_allocation;
+		vk::render_device *owner = nullptr;
+		
+		u32 m_width;
+		u32 m_height;
+		u32 m_mipmaps;
+
+	public:
+		texture() {}
+		~texture() {}
+
+		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only);
+		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height);
+		void remove();
+
+		u32  vk_wrap_mode(u32 gcm_wrap_mode);
+		float max_aniso(u32 gcm_aniso);
+
+		void sampler_setup(VkSamplerAddressMode clamp_mode, VkImageViewType type, VkComponentMapping swizzle);
+		void init(int index, rsx::texture &tex);
+	};
+
+	class buffer
+	{
+		VkBuffer vram_buffer = nullptr;
+		VkMemoryRequirements mem_desc;
+
+		vk::render_device *owner;
+		vk::memory_block vram;
+		u32 block_sz = 0;
+
+	public:
+		buffer() {}
+		~buffer() {}
+
+		void create(vk::render_device &dev, u32 size)
+		{			
+			VkBufferCreateInfo infos;
+			infos.pNext = nullptr;
+			infos.size = size;
+			infos.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+			infos.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+			CHECK_RESULT(vkCreateBuffer(dev, &infos, nullptr, &vram_buffer));
+			block_sz = size;
+			owner = &dev;
+
+			//Allocate vram for this buffer
+			vkGetBufferMemoryRequirements(dev, vram_buffer, &mem_desc);
+			vram.allocate_from_pool(dev, mem_desc.size, mem_desc.memoryTypeBits);
+		}
+
+		void destroy()
+		{
+			vkDestroyBuffer((VkDevice)(*owner), vram_buffer, nullptr);
+			vram.destroy();
+		}
+	};
+
+	class surface
+	{
+	public:
+		surface() {}
 	};
 
 	class swap_chain_image
@@ -263,7 +371,7 @@ namespace vk
 		PFN_vkAcquireNextImageKHR acquireNextImageKHR;
 		PFN_vkQueuePresentKHR queuePresentKHR;
 
-		swap_chain(vk::device &gpu, uint32_t _present_queue, uint32_t _graphics_queue, VkFormat format, VkSurfaceKHR surface, VkColorSpaceKHR color_space)
+		swap_chain(vk::physical_device &gpu, uint32_t _present_queue, uint32_t _graphics_queue, VkFormat format, VkSurfaceKHR surface, VkColorSpaceKHR color_space)
 		{
 			dev = render_device(gpu, _graphics_queue);
 
@@ -308,7 +416,7 @@ namespace vk
 			VkSwapchainKHR old_swapchain = m_vk_swapchain;
 
 			uint32_t num_modes;
-			vk::device& gpu = const_cast<vk::device&>(dev.gpu());
+			vk::physical_device& gpu = const_cast<vk::physical_device&>(dev.gpu());
 			__vkcheck vkGetPhysicalDeviceSurfacePresentModesKHR(gpu, m_surface, &num_modes, NULL);
 
 			std::vector<VkPresentModeKHR> present_mode_descriptors(num_modes);
@@ -397,9 +505,87 @@ namespace vk
 			return vk_graphics_queue;
 		}
 
+		const VkFormat get_surface_format()
+		{
+			return m_surface_format;
+		}
+
 		operator const VkSwapchainKHR()
 		{
 			return m_vk_swapchain;
+		}
+	};
+
+	class command_pool
+	{
+		vk::render_device *owner = nullptr;
+		VkCommandPool pool = nullptr;
+
+	public:
+		command_pool() {}
+		~command_pool() {}
+
+		void create(vk::render_device &dev)
+		{
+			owner = &dev;
+			VkCommandPoolCreateInfo infos;
+			infos.flags = 0;
+			infos.pNext = nullptr;
+			infos.queueFamilyIndex = 0;
+			infos.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+
+			CHECK_RESULT(vkCreateCommandPool(dev, &infos, nullptr, &pool));
+		}
+
+		void destroy()
+		{
+			if (!pool)
+				return;
+
+			vkDestroyCommandPool((*owner), pool, nullptr);
+			pool = nullptr;
+		}
+
+		vk::render_device& get_owner()
+		{
+			return (*owner);
+		}
+
+		operator VkCommandPool()
+		{
+			return pool;
+		}
+	};
+
+	class command_buffer
+	{
+		vk::command_pool *pool = nullptr;
+		VkCommandBuffer commands = nullptr;
+
+	public:
+		command_buffer() {}
+		~command_buffer() {}
+
+		void create(vk::command_pool &cmd_pool)
+		{
+			VkCommandBufferAllocateInfo infos;
+			infos.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+			infos.commandBufferCount = 1;
+			infos.commandPool = (VkCommandPool)cmd_pool;
+			infos.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+			infos.pNext = nullptr;
+
+			CHECK_RESULT(vkAllocateCommandBuffers(cmd_pool.get_owner(), &infos, &commands));
+		}
+
+		void destroy()
+		{
+			vkFreeCommandBuffers(pool->get_owner(), (*pool), 1, &commands);
+		}
+
+		operator VkCommandBuffer()
+		{
+			return commands;
 		}
 	};
 
@@ -507,7 +693,7 @@ namespace vk
 			return m_vk_instances[instance_id];
 		}
 
-		std::vector<vk::device> enumerateDevices()
+		std::vector<vk::physical_device> enumerateDevices()
 		{
 			VkResult error;
 			uint32_t num_gpus;
@@ -520,7 +706,7 @@ namespace vk
 
 			if (error != VK_SUCCESS) throw;
 
-			std::vector<vk::device> devices(num_gpus);
+			std::vector<vk::physical_device> devices(num_gpus);
 			for (int i = 0; i < num_gpus; ++i)
 			{
 				devices[i].set_device(pdevs[i]);
@@ -529,7 +715,7 @@ namespace vk
 			return devices;
 		}
 
-		vk::swap_chain* createSwapChain(HINSTANCE hInstance, HWND hWnd, vk::device &dev)
+		vk::swap_chain* createSwapChain(HINSTANCE hInstance, HWND hWnd, vk::physical_device &dev)
 		{
 			VkWin32SurfaceCreateInfoKHR createInfo;
 			createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;

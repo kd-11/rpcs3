@@ -64,7 +64,7 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	m_thread_context.createInstance("RPCS3");
 	m_thread_context.makeCurrentInstance(1);
 
-	std::vector<vk::device> gpus = m_thread_context.enumerateDevices();
+	std::vector<vk::physical_device> gpus = m_thread_context.enumerateDevices();
 	m_swap_chain = m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
 
 	m_device = (vk::render_device *)(&m_swap_chain->get_device());
@@ -73,13 +73,24 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	vk::set_current_renderer(m_swap_chain->get_device());
 
 	m_swap_chain->init_swapchain(m_frame->client_size().width, m_frame->client_size().height);
+
+	//create command buffer...
+	m_command_buffer_pool.create((*m_device));
+	m_command_buffer.create(m_command_buffer_pool);
+
+	//Create render pass
+	init_render_pass();
 }
 
 VKGSRender::~VKGSRender()
 {
 	m_swap_chain->destroy();
-	m_thread_context.close();
+	m_command_buffer.destroy();
+	m_command_buffer_pool.destroy();
 
+	destroy_render_pass();
+
+	m_thread_context.close();
 	delete m_swap_chain;
 }
 
@@ -182,18 +193,57 @@ void VKGSRender::on_exit()
 {
 }
 
-void nv4097_clear_surface(u32 arg, VKGSRender* renderer)
-{
-	if ((arg & 0xf3) == 0)
-	{
-		//do nothing
-		return;
-	}
-}
-
 void VKGSRender::clear_surface(u32 mask)
 {
 	//TODO: Build clear commands into current renderpass descriptor set
+	if (!(mask & 0xF3)) return;
+
+	float depth_clear = 1.f;
+	float color_clear[] = { 0.f, 0.f, 0.f, 0.f };
+	u32   stencil_clear = 0.f;
+
+	VkClearValue clear_values;
+
+	if (mask & 0x1)
+	{
+		rsx::surface_depth_format surface_depth_format = rsx::to_surface_depth_format((rsx::method_registers[NV4097_SET_SURFACE_FORMAT] >> 5) & 0x7);
+		u32 max_depth_value = get_max_depth_value(surface_depth_format);
+
+		u32 clear_depth = rsx::method_registers[NV4097_SET_ZSTENCIL_CLEAR_VALUE] >> 8;
+		float depth_clear = (float)clear_depth / max_depth_value;
+
+		clear_values.depthStencil.depth = depth_clear;
+		clear_values.depthStencil.stencil = stencil_clear;
+	}
+
+	if (mask & 0x2)
+	{
+		u8 clear_stencil = rsx::method_registers[NV4097_SET_ZSTENCIL_CLEAR_VALUE] & 0xff;
+		u32 stencil_mask = rsx::method_registers[NV4097_SET_STENCIL_MASK];
+
+		//TODO set stencil mask
+		clear_values.depthStencil.stencil = stencil_mask;
+	}
+
+	if (mask & 0xF0)
+	{
+		u32 clear_color = rsx::method_registers[NV4097_SET_COLOR_CLEAR_VALUE];
+		u8 clear_a = clear_color >> 24;
+		u8 clear_r = clear_color >> 16;
+		u8 clear_g = clear_color >> 8;
+		u8 clear_b = clear_color;
+
+		//TODO set color mask
+		VkBool32 clear_red = (VkBool32)!!(mask & 0x20);
+		VkBool32 clear_green = (VkBool32)!!(mask & 0x40);
+		VkBool32 clear_blue = (VkBool32)!!(mask & 0x80);
+		VkBool32 clear_alpha = (VkBool32)!!(mask & 0x10);
+
+		clear_values.color.float32[0] = (float)clear_a / 255;
+		clear_values.color.float32[1] = (float)clear_g / 255;
+		clear_values.color.float32[2] = (float)clear_b / 255;
+		clear_values.color.float32[3] = (float)clear_a / 255;
+	}
 }
 
 bool VKGSRender::do_method(u32 cmd, u32 arg)
@@ -206,6 +256,67 @@ bool VKGSRender::do_method(u32 cmd, u32 arg)
 	default:
 		return false;
 	}
+}
+
+void VKGSRender::init_render_pass()
+{
+	/* Describe a render pass and framebuffer attachments */
+	VkAttachmentDescription attachments[2];
+	attachments[0].format = m_swap_chain->get_surface_format();
+	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	attachments[1].format = VK_FORMAT_D24_UNORM_S8_UINT;						/* Depth buffer format. Should be more elegant than this */
+	attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+	attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachments[1].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+	attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference color_reference;
+	color_reference.attachment = 0;
+	color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference depth_reference;
+	depth_reference.attachment = 1;
+	depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	VkSubpassDescription subpass;
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.flags = 0;
+	subpass.inputAttachmentCount = 0;
+	subpass.pInputAttachments = nullptr;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &color_reference;
+	subpass.pResolveAttachments = nullptr;
+	subpass.pDepthStencilAttachment = &depth_reference;
+	subpass.preserveAttachmentCount = 0;
+	subpass.pPreserveAttachments = nullptr;
+
+	VkRenderPassCreateInfo rp_info;
+	rp_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	rp_info.pNext = NULL;
+	rp_info.attachmentCount = 2;
+	rp_info.pAttachments = attachments;
+	rp_info.subpassCount = 1;
+	rp_info.pSubpasses = &subpass;
+	rp_info.dependencyCount = 0;
+	rp_info.pDependencies = NULL;
+
+	CHECK_RESULT(vkCreateRenderPass((*m_device), &rp_info, NULL, &m_render_pass));
+}
+
+void VKGSRender::destroy_render_pass()
+{
+	vkDestroyRenderPass((*m_device), m_render_pass, nullptr);
+	m_render_pass = nullptr;
 }
 
 bool VKGSRender::load_program()
@@ -243,10 +354,10 @@ void VKGSRender::init_buffers(bool skip_reading)
 	semaphore_info.pNext = nullptr;
 	semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-	vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &vk_present_semaphore);
+	vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &m_present_semaphore);
 
 	VkFence nullFence = VK_NULL_HANDLE;
-	vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, vk_present_semaphore, nullFence, &current_present_image);
+	vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, m_present_semaphore, nullFence, &m_current_present_image);
 
 	//TODO: if !fbo exists, or fbo is different from previous, recreate the fbo
 
@@ -353,11 +464,28 @@ void VKGSRender::flip(int buffer)
 		aspect_ratio.size = m_frame->client_size();
 	}
 
+	VkFence nullFence = VK_NULL_HANDLE;
+	VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	VkCommandBuffer cmd = m_command_buffer;
+
+	VkSubmitInfo infos;
+	infos.commandBufferCount = 1;
+	infos.pCommandBuffers = &cmd;
+	infos.pNext = nullptr;
+	infos.pSignalSemaphores = nullptr;
+	infos.pWaitDstStageMask = &pipe_stage_flags;
+	infos.signalSemaphoreCount = 0;
+	infos.waitSemaphoreCount = 1;
+	infos.pWaitSemaphores = &m_present_semaphore;
+	infos.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+	vkQueueSubmit(m_swap_chain->get_present_queue(), 1, &infos, nullFence);
+
 	//TODO
 
 	//Clear old screen
 	//Blit contents to surface
-	
+
 	VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);
 	
 	VkPresentInfoKHR present;
@@ -365,12 +493,14 @@ void VKGSRender::flip(int buffer)
 	present.pNext = nullptr;
 	present.swapchainCount = 1;
 	present.pSwapchains = &swap_chain;
-	present.pImageIndices = &current_present_image;
-	present.pWaitSemaphores = &vk_present_semaphore;
+	present.pImageIndices = &m_current_present_image;
+	present.pWaitSemaphores = &m_present_semaphore;
 	present.waitSemaphoreCount = 1;
 
 	CHECK_RESULT(m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present));
-	vkDestroySemaphore((*m_device), vk_present_semaphore, nullptr);
+	
+	CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
+	vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
 
 	m_frame->flip(m_context);
 }

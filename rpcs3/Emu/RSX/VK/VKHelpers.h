@@ -260,8 +260,10 @@ namespace vk
 
 	class buffer
 	{
-		VkBuffer vram_buffer = nullptr;
-		VkMemoryRequirements mem_desc;
+		VkBufferView m_view = nullptr;
+		VkBuffer m_buffer = nullptr;
+		VkMemoryRequirements m_memory_layout;
+		VkFormat m_internal_format = VK_FORMAT_R8_UNORM;
 
 		vk::render_device *owner;
 		vk::memory_block vram;
@@ -272,26 +274,44 @@ namespace vk
 		~buffer() {}
 
 		void create(vk::render_device &dev, u32 size)
-		{			
+		{
+			if (m_buffer) throw;
+
 			VkBufferCreateInfo infos;
 			infos.pNext = nullptr;
 			infos.size = size;
 			infos.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 			infos.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-			CHECK_RESULT(vkCreateBuffer(dev, &infos, nullptr, &vram_buffer));
+			CHECK_RESULT(vkCreateBuffer(dev, &infos, nullptr, &m_buffer));
 			block_sz = size;
 			owner = &dev;
 
 			//Allocate vram for this buffer
-			vkGetBufferMemoryRequirements(dev, vram_buffer, &mem_desc);
-			vram.allocate_from_pool(dev, mem_desc.size, mem_desc.memoryTypeBits);
+			vkGetBufferMemoryRequirements(dev, m_buffer, &m_memory_layout);
+			vram.allocate_from_pool(dev, m_memory_layout.size, m_memory_layout.memoryTypeBits);
+
+			VkBufferViewCreateInfo view_info;
+			view_info.buffer = m_buffer;
+			view_info.flags = 0;
+			view_info.format = VK_FORMAT_R8_UNORM;
+			view_info.offset = 0;
+			view_info.pNext = nullptr;
+			view_info.range = size;
+			view_info.sType = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
+			CHECK_RESULT(vkCreateBufferView((*owner), &view_info, nullptr, &m_view));
 		}
 
 		void destroy()
 		{
-			vkDestroyBuffer((VkDevice)(*owner), vram_buffer, nullptr);
+			vkDestroyBufferView((*owner), m_view, nullptr);
+			vkDestroyBuffer((*owner), m_buffer, nullptr);
 			vram.destroy();
+		}
+
+		operator VkBufferView()
+		{
+			return m_view;
 		}
 	};
 

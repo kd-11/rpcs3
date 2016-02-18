@@ -22,16 +22,26 @@ namespace rsx
 namespace vk
 {
 #define __vkcheck
-#define CHECK_RESULT(expr) if (expr != VK_SUCCESS) throw EXCEPTION("Assertion failed!")
+#define CHECK_RESULT(expr) { VkResult __res = expr; if(__res != VK_SUCCESS) throw EXCEPTION("Assertion failed! Result is %Xh", __res); }
 
 	VKAPI_ATTR void *VKAPI_CALL mem_realloc(void *pUserData, void *pOriginal, size_t size, size_t alignment, VkSystemAllocationScope allocationScope);
 	VKAPI_ATTR void *VKAPI_CALL mem_alloc(void *pUserData, size_t size, size_t alignment, VkSystemAllocationScope allocationScope);
 	VKAPI_ATTR void VKAPI_CALL mem_free(void *pUserData, void *pMemory);
 
+	VKAPI_ATTR VkBool32 VKAPI_CALL dbgFunc(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType,
+											uint64_t srcObject, size_t location, int32_t msgCode,
+											const char *pLayerPrefix, const char *pMsg, void *pUserData);
+
+	VkBool32 BreakCallback(VkFlags msgFlags, VkDebugReportObjectTypeEXT objType,
+							uint64_t srcObject, size_t location, int32_t msgCode,
+							const char *pLayerPrefix, const char *pMsg,
+							void *pUserData);
+
 	VkAllocationCallbacks default_callbacks();
 
 	class context;
 	class render_device;
+	class swap_chain_image;
 
 	vk::context *get_current_thread_ctx();
 	void set_current_thread_ctx(const vk::context &ctx);
@@ -39,17 +49,10 @@ namespace vk
 	vk::render_device *get_current_renderer();
 	void set_current_renderer(const vk::render_device &device);
 
-	enum image_usage
-	{
-		color_attachment = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-		depth_attachment = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-		input = VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
-		sampled = VK_IMAGE_USAGE_SAMPLED_BIT,
-		storage = VK_IMAGE_USAGE_STORAGE_BIT,
-		transfer_dst = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-		transfer_src = VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-		transient = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT
-	};
+	VkImageSubresource default_image_subresource();
+	VkImageSubresourceRange default_image_subresource_range();
+
+	void change_image_layout(VkCommandBuffer cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout, VkImageAspectFlags aspect_flags);
 
 	class physical_device
 	{
@@ -134,13 +137,22 @@ namespace vk
 				"VK_KHR_swapchain"
 			};
 
+			const char *validation_layers[] =
+			{
+				"VK_LAYER_LUNARG_threading",      "VK_LAYER_LUNARG_mem_tracker",
+				"VK_LAYER_LUNARG_object_tracker", "VK_LAYER_LUNARG_draw_state",
+				"VK_LAYER_LUNARG_param_checker",  "VK_LAYER_LUNARG_swapchain",
+				"VK_LAYER_LUNARG_device_limits",  "VK_LAYER_LUNARG_image",
+				"VK_LAYER_GOOGLE_unique_objects",
+			};
+
 			VkDeviceCreateInfo device;
 			device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 			device.pNext = NULL;
 			device.queueCreateInfoCount = 1;
 			device.pQueueCreateInfos = &queue;
-			device.enabledLayerCount = 0;
-			device.ppEnabledLayerNames = nullptr;
+			device.enabledLayerCount = 9;
+			device.ppEnabledLayerNames = validation_layers;
 			device.enabledExtensionCount = 1;
 			device.ppEnabledExtensionNames = requested_extensions;
 			device.pEnabledFeatures = nullptr;
@@ -243,19 +255,26 @@ namespace vk
 		u32 m_height;
 		u32 m_mipmaps;
 
+		u32  vk_wrap_mode(u32 gcm_wrap_mode);
+		float max_aniso(u32 gcm_aniso);
+		void sampler_setup(VkSamplerAddressMode clamp_mode, VkImageViewType type, VkComponentMapping swizzle);
+
 	public:
+		texture(vk::swap_chain_image &img);
 		texture() {}
 		~texture() {}
 
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only);
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height);
-		void remove();
+		void destroy();
 
-		u32  vk_wrap_mode(u32 gcm_wrap_mode);
-		float max_aniso(u32 gcm_aniso);
-
-		void sampler_setup(VkSamplerAddressMode clamp_mode, VkImageViewType type, VkComponentMapping swizzle);
 		void init(int index, rsx::texture &tex);
+
+		const VkFormat get_format();
+
+		operator VkSampler();
+		operator VkImageView();
+		operator VkImage();
 	};
 
 	class buffer
@@ -315,28 +334,20 @@ namespace vk
 		}
 	};
 
-	class surface
-	{
-	public:
-		surface() {}
-	};
-
 	class swap_chain_image
 	{
-		VkImageView view;
-		VkImage image;
+		VkImageView view = nullptr;
+		VkImage image = nullptr;
+		VkFormat internal_format;
+		vk::render_device *owner = nullptr;
 
 	public:
-		swap_chain_image()
-		{
-			image = nullptr;
-			view = nullptr;
-		}
+		swap_chain_image() {}
 
 		void create(vk::render_device &dev, VkImage &swap_image, VkFormat format)
 		{
 			VkImageViewCreateInfo color_image_view;
-			
+
 			color_image_view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 			color_image_view.pNext = nullptr;
 			color_image_view.format = format;
@@ -357,11 +368,30 @@ namespace vk
 
 			color_image_view.image = swap_image;
 			vkCreateImageView(dev, &color_image_view, nullptr, &view);
+
+			image = swap_image;
+			internal_format = format;
+			owner = &dev;
 		}
 
 		void discard(vk::render_device &dev)
 		{
 			vkDestroyImageView(dev, view, nullptr);
+		}
+
+		operator VkImage()
+		{
+			return image;
+		}
+
+		operator VkImageView()
+		{
+			return view;
+		}
+
+		operator vk::texture()
+		{
+			return vk::texture(*this);
 		}
 	};
 
@@ -515,6 +545,16 @@ namespace vk
 			}
 		}
 
+		u32 get_swap_image_count()
+		{
+			return m_swap_images.size();
+		}
+
+		vk::swap_chain_image& get_swap_chain_image(const int index)
+		{
+			return m_swap_images[index];
+		}
+
 		const vk::render_device& get_device()
 		{
 			return dev;
@@ -549,7 +589,7 @@ namespace vk
 		{
 			owner = &dev;
 			VkCommandPoolCreateInfo infos;
-			infos.flags = 0;
+			infos.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 			infos.pNext = nullptr;
 			infos.queueFamilyIndex = 0;
 			infos.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -596,6 +636,7 @@ namespace vk
 			infos.pNext = nullptr;
 
 			CHECK_RESULT(vkAllocateCommandBuffers(cmd_pool.get_owner(), &infos, &commands));
+			pool = &cmd_pool;
 		}
 
 		void destroy()
@@ -615,6 +656,10 @@ namespace vk
 		std::vector<VkInstance> m_vk_instances;
 		VkInstance m_instance;
 
+		PFN_vkDestroyDebugReportCallbackEXT destroyDebugReportCallback = nullptr;
+		PFN_vkCreateDebugReportCallbackEXT createDebugReportCallback = nullptr;
+		VkDebugReportCallbackEXT m_debugger = nullptr;
+
 	public:
 
 		context()
@@ -632,6 +677,12 @@ namespace vk
 		{
 			if (!m_vk_instances.size()) return;
 
+			if (m_debugger)
+			{
+				destroyDebugReportCallback(m_instance, m_debugger, nullptr);
+				m_debugger = nullptr;
+			}
+
 			VkAllocationCallbacks callbacks;
 			callbacks.pfnAllocation = vk::mem_alloc;
 			callbacks.pfnFree = vk::mem_free;
@@ -644,6 +695,23 @@ namespace vk
 
 			m_instance = nullptr;
 			m_vk_instances.resize(0);
+		}
+		
+		void enable_debugging()
+		{
+			PFN_vkDebugReportCallbackEXT callback = vk::dbgFunc;
+
+			createDebugReportCallback = (PFN_vkCreateDebugReportCallbackEXT)vkGetInstanceProcAddr(m_instance, "vkCreateDebugReportCallbackEXT");
+			destroyDebugReportCallback = (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(m_instance, "vkDestroyDebugReportCallbackEXT");
+
+			VkDebugReportCallbackCreateInfoEXT dbgCreateInfo;
+			dbgCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
+			dbgCreateInfo.pNext = NULL;
+			dbgCreateInfo.pfnCallback = callback;
+			dbgCreateInfo.pUserData = NULL;
+			dbgCreateInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
+
+			CHECK_RESULT(createDebugReportCallback(m_instance, &dbgCreateInfo, NULL, &m_debugger));
 		}
 
 		uint32_t createInstance(const char *app_name)
@@ -664,15 +732,25 @@ namespace vk
 			{
 				"VK_KHR_surface",
 				"VK_KHR_win32_surface",
+				"VK_EXT_debug_report",
+			};
+
+			const char *validation_layers[] =
+			{
+				"VK_LAYER_LUNARG_threading",      "VK_LAYER_LUNARG_mem_tracker",
+				"VK_LAYER_LUNARG_object_tracker", "VK_LAYER_LUNARG_draw_state",
+				"VK_LAYER_LUNARG_param_checker",  "VK_LAYER_LUNARG_swapchain",
+				"VK_LAYER_LUNARG_device_limits",  "VK_LAYER_LUNARG_image",
+				"VK_LAYER_GOOGLE_unique_objects",
 			};
 
 			VkInstanceCreateInfo instance_info;
 			instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 			instance_info.pNext = nullptr;
 			instance_info.pApplicationInfo = &app;
-			instance_info.enabledLayerCount = 0;
-			instance_info.ppEnabledLayerNames = nullptr;
-			instance_info.enabledExtensionCount = 2;
+			instance_info.enabledLayerCount = 9;
+			instance_info.ppEnabledLayerNames = validation_layers;
+			instance_info.enabledExtensionCount = 3;
 			instance_info.ppEnabledExtensionNames = requested_extensions;
 
 			//Set up memory allocation callbacks
@@ -694,6 +772,12 @@ namespace vk
 		{
 			if (!instance_id || instance_id > m_vk_instances.size())
 				throw;
+
+			if (m_debugger)
+			{
+				destroyDebugReportCallback(m_instance, m_debugger, nullptr);
+				m_debugger = nullptr;
+			}
 
 			instance_id--;
 			m_instance = m_vk_instances[instance_id];

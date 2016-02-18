@@ -41,6 +41,7 @@ private:
 
 	vk::render_device *m_device;
 	vk::swap_chain* m_swap_chain;
+	vk::texture m_depth_buffer;
 	//buffer
 
 	vk::buffer m_scale_offset_buffer;
@@ -50,11 +51,14 @@ private:
 	vk::buffer m_index_buffer;
 
 	//Vulkan internals
-	u32 m_current_present_image;
-	VkSemaphore m_present_semaphore;
+	u32 m_current_present_image = 0xFFFF;
+	VkSemaphore m_present_semaphore = nullptr;
+	VkFence m_submit_fence = nullptr;
 
 	vk::command_pool m_command_buffer_pool;
 	vk::command_buffer m_command_buffer;
+	bool recording = false;
+	bool dirty_frame = true;
 
 	//Single render pass
 	VkRenderPass m_render_pass;
@@ -69,6 +73,7 @@ private:
 	void clear_surface(u32 mask);
 	void init_render_pass();
 	void destroy_render_pass();
+	void execute_command_buffer();
 
 public:
 	bool load_program();

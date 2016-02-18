@@ -63,6 +63,7 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 
 	m_thread_context.createInstance("RPCS3");
 	m_thread_context.makeCurrentInstance(1);
+	m_thread_context.enable_debugging();
 
 	std::vector<vk::physical_device> gpus = m_thread_context.enumerateDevices();
 	m_swap_chain = m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
@@ -73,6 +74,7 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	vk::set_current_renderer(m_swap_chain->get_device());
 
 	m_swap_chain->init_swapchain(m_frame->client_size().width, m_frame->client_size().height);
+	m_depth_buffer.create((*m_device), VK_FORMAT_D16_UNORM, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, m_frame->client_size().width, m_frame->client_size().height);
 
 	//create command buffer...
 	m_command_buffer_pool.create((*m_device));
@@ -80,16 +82,49 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 
 	//Create render pass
 	init_render_pass();
+
+	VkCommandBufferInheritanceInfo inheritance_info;
+	inheritance_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+	inheritance_info.pNext = nullptr;
+	inheritance_info.renderPass = VK_NULL_HANDLE;
+	inheritance_info.subpass = 0;
+	inheritance_info.framebuffer = VK_NULL_HANDLE;
+	inheritance_info.occlusionQueryEnable = VK_FALSE;
+	inheritance_info.queryFlags = 0;
+	inheritance_info.pipelineStatistics = 0;
+
+	VkCommandBufferBeginInfo begin_infos;
+	begin_infos.flags = 0;
+	begin_infos.pInheritanceInfo = &inheritance_info;
+	begin_infos.pNext = nullptr;
+	begin_infos.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	CHECK_RESULT(vkBeginCommandBuffer(m_command_buffer, &begin_infos));
+
+	for (u32 i = 0; i < m_swap_chain->get_swap_image_count(); ++i)
+	{
+		vk::change_image_layout(m_command_buffer, m_swap_chain->get_swap_chain_image(i),
+								VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+								VK_IMAGE_ASPECT_COLOR_BIT);
+	}
+
+	vk::change_image_layout(m_command_buffer, m_depth_buffer,
+							VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+							VK_IMAGE_ASPECT_DEPTH_BIT);
+	
+	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
+	execute_command_buffer();
 }
 
 VKGSRender::~VKGSRender()
 {
-	m_swap_chain->destroy();
+	destroy_render_pass();
+
 	m_command_buffer.destroy();
 	m_command_buffer_pool.destroy();
 
-	destroy_render_pass();
-
+	m_depth_buffer.destroy();
+	m_swap_chain->destroy();
 	m_thread_context.close();
 	delete m_swap_chain;
 }
@@ -113,8 +148,6 @@ void VKGSRender::begin()
 	if (!load_program())
 		return;
 
-	init_buffers();
-
 	u32 color_mask = rsx::method_registers[NV4097_SET_COLOR_MASK];
 	bool color_mask_b = !!(color_mask & 0xff);
 	bool color_mask_g = !!((color_mask >> 8) & 0xff);
@@ -132,6 +165,43 @@ void VKGSRender::begin()
 	}
 
 	//TODO: Set up other render-state parameters into the program pipeline
+
+	VkCommandBufferInheritanceInfo inheritance_info;
+	inheritance_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+	inheritance_info.pNext = nullptr;
+	inheritance_info.renderPass = VK_NULL_HANDLE;
+	inheritance_info.subpass = 0;
+	inheritance_info.framebuffer = VK_NULL_HANDLE;
+	inheritance_info.occlusionQueryEnable = VK_FALSE;
+	inheritance_info.queryFlags = 0;
+	inheritance_info.pipelineStatistics = 0;
+
+	VkCommandBufferBeginInfo begin_infos;
+	begin_infos.flags = 0;
+	begin_infos.pInheritanceInfo = &inheritance_info;
+	begin_infos.pNext = nullptr;
+	begin_infos.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	if (m_submit_fence)
+	{
+		VkResult error = vkWaitForFences(*m_device, 1, &m_submit_fence, VK_TRUE, 1000L);
+		vkDestroyFence(*m_device, m_submit_fence, nullptr);
+		m_submit_fence = nullptr;
+
+		if (error)
+			LOG_ERROR(RSX, "vkWaitForFences failed with error 0x%X", error);
+	}
+
+	if (!recording)
+		CHECK_RESULT(vkBeginCommandBuffer(m_command_buffer, &begin_infos));
+
+	init_buffers();
+	recording = true;
+
+	//TODO:
+	//Begin renderPass
+	//Bind pipeline (shaders)
+	//Bind descriptor sets (shader data)
 }
 
 namespace
@@ -155,8 +225,11 @@ namespace
 }
 
 void VKGSRender::end()
-{
-	//TODO: build the draw command buffer and submit to graphics queue
+{	
+	recording = false;
+	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
+	execute_command_buffer();
+
 	rsx::thread::end();
 }
 
@@ -196,6 +269,7 @@ void VKGSRender::on_exit()
 void VKGSRender::clear_surface(u32 mask)
 {
 	//TODO: Build clear commands into current renderpass descriptor set
+	if (!recording) return;
 	if (!(mask & 0xF3)) return;
 
 	float depth_clear = 1.f;
@@ -203,6 +277,7 @@ void VKGSRender::clear_surface(u32 mask)
 	u32   stencil_clear = 0.f;
 
 	VkClearValue clear_values;
+	VkImageSubresourceRange range = vk::default_image_subresource_range();
 
 	if (mask & 0x1)
 	{
@@ -243,7 +318,13 @@ void VKGSRender::clear_surface(u32 mask)
 		clear_values.color.float32[1] = (float)clear_g / 255;
 		clear_values.color.float32[2] = (float)clear_b / 255;
 		clear_values.color.float32[3] = (float)clear_a / 255;
+
+		VkImage color_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
+		vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, &clear_values.color, 1, &range);
 	}
+
+	if (mask & 0x3)
+		vkCmdClearDepthStencilImage(m_command_buffer, m_depth_buffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, &clear_values.depthStencil, 1, &range);
 }
 
 bool VKGSRender::do_method(u32 cmd, u32 arg)
@@ -348,16 +429,25 @@ void VKGSRender::init_buffers(bool skip_reading)
 	u32 clip_y = clip_vertical;
 
 
-	//Prepare surface for new frame
-	VkSemaphoreCreateInfo semaphore_info;
-	semaphore_info.flags = 0;
-	semaphore_info.pNext = nullptr;
-	semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	if (dirty_frame)
+	{
+		//Prepare surface for new frame
+		VkSemaphoreCreateInfo semaphore_info;
+		semaphore_info.flags = 0;
+		semaphore_info.pNext = nullptr;
+		semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-	vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &m_present_semaphore);
+		vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &m_present_semaphore);
 
-	VkFence nullFence = VK_NULL_HANDLE;
-	vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, m_present_semaphore, nullFence, &m_current_present_image);
+		VkFence nullFence = VK_NULL_HANDLE;
+		CHECK_RESULT(vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, m_present_semaphore, nullFence, &m_current_present_image));
+
+		vk::change_image_layout(m_command_buffer, m_swap_chain->get_swap_chain_image(m_current_present_image),
+			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+			VK_IMAGE_ASPECT_COLOR_BIT);
+
+		dirty_frame = false;
+	}
 
 	//TODO: if !fbo exists, or fbo is different from previous, recreate the fbo
 
@@ -425,6 +515,54 @@ void VKGSRender::write_buffers()
 {
 }
 
+void VKGSRender::execute_command_buffer()
+{
+	if (recording) throw;
+
+	if (m_submit_fence)
+	{
+		VkResult error = vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, 1000L);
+		vkDestroyFence((*m_device), m_submit_fence, nullptr);
+		m_submit_fence = nullptr;
+
+		if (error) LOG_ERROR(RSX, "vkWaitForFence failed with error 0x%X", error);
+	}
+
+	VkFenceCreateInfo fence_info;
+	fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	fence_info.flags = 0;
+	fence_info.pNext = nullptr;
+
+	vkCreateFence(*m_device, &fence_info, nullptr, &m_submit_fence);
+
+	VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+	VkCommandBuffer cmd = m_command_buffer;
+
+	VkSubmitInfo infos;
+	infos.commandBufferCount = 1;
+	infos.pCommandBuffers = &cmd;
+	infos.pNext = nullptr;
+	infos.pSignalSemaphores = nullptr;
+	infos.pWaitDstStageMask = &pipe_stage_flags;
+	infos.signalSemaphoreCount = 0;
+	
+	if (0)
+	{
+		infos.waitSemaphoreCount = 1;
+		infos.pWaitSemaphores = &m_present_semaphore;
+	}
+	else
+	{
+		infos.waitSemaphoreCount = 0;
+		infos.pWaitSemaphores = nullptr;
+	}
+	
+	infos.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+	//TODO: Submit the command buffer...
+	CHECK_RESULT(vkQueueSubmit(m_swap_chain->get_present_queue(), 1, &infos, m_submit_fence));
+}
+
 void VKGSRender::flip(int buffer)
 {
 	//LOG_NOTICE(Log::RSX, "flip(%d)", buffer);
@@ -464,23 +602,7 @@ void VKGSRender::flip(int buffer)
 		aspect_ratio.size = m_frame->client_size();
 	}
 
-	VkFence nullFence = VK_NULL_HANDLE;
-	VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-	VkCommandBuffer cmd = m_command_buffer;
-
-	VkSubmitInfo infos;
-	infos.commandBufferCount = 1;
-	infos.pCommandBuffers = &cmd;
-	infos.pNext = nullptr;
-	infos.pSignalSemaphores = nullptr;
-	infos.pWaitDstStageMask = &pipe_stage_flags;
-	infos.signalSemaphoreCount = 0;
-	infos.waitSemaphoreCount = 1;
-	infos.pWaitSemaphores = &m_present_semaphore;
-	infos.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-
-	vkQueueSubmit(m_swap_chain->get_present_queue(), 1, &infos, nullFence);
-
+	execute_command_buffer();
 	//TODO
 
 	//Clear old screen
@@ -502,5 +624,6 @@ void VKGSRender::flip(int buffer)
 	CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
 	vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
 
+	dirty_frame = true;
 	m_frame->flip(m_context);
 }

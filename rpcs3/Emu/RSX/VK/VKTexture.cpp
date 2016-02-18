@@ -8,6 +8,16 @@
 
 namespace vk
 {
+	texture::texture(vk::swap_chain_image &img)
+	{
+		m_image_contents = img;
+		m_view = img;
+		m_sampler = nullptr;
+		
+		//We did not create this object, do not allow internal modification!
+		owner = nullptr;
+	}
+
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only)
 	{
 		//First create the image
@@ -27,8 +37,9 @@ namespace vk
 		CHECK_RESULT(vkCreateImage(device, &image_info, nullptr, &m_image_contents));
 
 		//Need to grab proper memory type bits using a function
-		u32 type_bits = gpu_only ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT : VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-		type_bits |= VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+		//u32 type_bits = gpu_only ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT : VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
+		//type_bits |= VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
+		u32 type_bits = 0;
 		
 		vkGetImageMemoryRequirements(device, m_image_contents, &m_memory_layout);
 		vram_allocation.allocate_from_pool(device, m_memory_layout.size, type_bits);
@@ -99,6 +110,8 @@ namespace vk
 		subres.baseMipLevel = 0;
 		subres.layerCount = 1;
 		subres.levelCount = 1;
+
+		return subres;
 	}
 
 	void texture::sampler_setup(VkSamplerAddressMode clamp_mode, VkImageViewType type, VkComponentMapping swizzle)
@@ -158,13 +171,35 @@ namespace vk
 		vkUnmapMemory((*owner), vram_allocation);
 	}
 
-	void texture::remove()
+	void texture::destroy()
 	{
+		if (!owner) return;
+
 		//Destroy all objects managed by this object
 		vkDestroyImageView((*owner), m_view, nullptr);
 		vkDestroySampler((*owner), m_sampler, nullptr);
 		vkDestroyImage((*owner), m_image_contents, nullptr);
 
 		vram_allocation.destroy();
+	}
+
+	const VkFormat texture::get_format()
+	{
+		return m_internal_format;
+	}
+
+	texture::operator VkImage()
+	{
+		return m_image_contents;
+	}
+
+	texture::operator VkImageView()
+	{
+		return m_view;
+	}
+
+	texture::operator VkSampler()
+	{
+		return m_sampler;
 	}
 }

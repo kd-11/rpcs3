@@ -334,6 +334,45 @@ namespace vk
 		}
 	};
 
+	class framebuffer
+	{
+		VkFramebuffer m_vk_framebuffer = nullptr;
+		vk::render_device *owner = nullptr;
+
+	public:
+		framebuffer() {}
+		~framebuffer() {}
+
+		void create(vk::render_device &dev, VkRenderPass pass, VkImageView *attachments, u32 nb_attachments, u32 width, u32 height)
+		{
+			VkFramebufferCreateInfo infos;
+			infos.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+			infos.attachmentCount = 1;
+			infos.flags = 0;
+			infos.width = width;
+			infos.height = height;
+			infos.pNext = nullptr;
+			infos.attachmentCount = nb_attachments;
+			infos.pAttachments = attachments;
+			infos.renderPass = pass;
+			infos.layers = 1;
+
+			vkCreateFramebuffer(dev, &infos, nullptr, &m_vk_framebuffer);
+			owner = &dev;
+		}
+
+		void destroy()
+		{
+			vkDestroyFramebuffer((*owner), m_vk_framebuffer, nullptr);
+			owner = nullptr;
+		}
+
+		operator VkFramebuffer() const
+		{
+			return m_vk_framebuffer;
+		}
+	};
+
 	class swap_chain_image
 	{
 		VkImageView view = nullptr;
@@ -455,6 +494,8 @@ namespace vk
 						for (vk::swap_chain_image &img : m_swap_images)
 							img.discard(dev);
 					}
+
+					destroySwapchainKHR(pdev, m_vk_swapchain, nullptr);
 				}
 
 				dev.destroy();

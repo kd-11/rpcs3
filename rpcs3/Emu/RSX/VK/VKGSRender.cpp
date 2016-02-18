@@ -111,13 +111,24 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	vk::change_image_layout(m_command_buffer, m_depth_buffer,
 							VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
 							VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	clear_surface(0xFFFFFFFF);
 	
 	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
 	execute_command_buffer();
+
+	for (u32 i = 0; i < m_swap_chain->get_swap_image_count(); ++i)
+	{
+		VkImageView attachments[] = { m_swap_chain->get_swap_chain_image(i), m_depth_buffer };
+		m_framebuffers[i].create((*m_device), m_render_pass, attachments, 2, m_frame->client_size().width, m_frame->client_size().height);
+	}
 }
 
 VKGSRender::~VKGSRender()
 {
+	for (u32 i = 0; i < m_swap_chain->get_swap_image_count(); ++i)
+		m_framebuffers[i].destroy();
+
 	destroy_render_pass();
 
 	m_command_buffer.destroy();
@@ -165,38 +176,12 @@ void VKGSRender::begin()
 	}
 
 	//TODO: Set up other render-state parameters into the program pipeline
-
-	VkCommandBufferInheritanceInfo inheritance_info;
-	inheritance_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
-	inheritance_info.pNext = nullptr;
-	inheritance_info.renderPass = VK_NULL_HANDLE;
-	inheritance_info.subpass = 0;
-	inheritance_info.framebuffer = VK_NULL_HANDLE;
-	inheritance_info.occlusionQueryEnable = VK_FALSE;
-	inheritance_info.queryFlags = 0;
-	inheritance_info.pipelineStatistics = 0;
-
-	VkCommandBufferBeginInfo begin_infos;
-	begin_infos.flags = 0;
-	begin_infos.pInheritanceInfo = &inheritance_info;
-	begin_infos.pNext = nullptr;
-	begin_infos.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-
-	if (m_submit_fence)
-	{
-		VkResult error = vkWaitForFences(*m_device, 1, &m_submit_fence, VK_TRUE, 1000L);
-		vkDestroyFence(*m_device, m_submit_fence, nullptr);
-		m_submit_fence = nullptr;
-
-		if (error)
-			LOG_ERROR(RSX, "vkWaitForFences failed with error 0x%X", error);
-	}
-
 	if (!recording)
-		CHECK_RESULT(vkBeginCommandBuffer(m_command_buffer, &begin_infos));
+		begin_command_buffer_recording();
 
 	init_buffers();
-	recording = true;
+
+	LOG_ERROR(RSX, ">>> Draw call begin!");
 
 	//TODO:
 	//Begin renderPass
@@ -226,9 +211,13 @@ namespace
 
 void VKGSRender::end()
 {	
+	LOG_ERROR(RSX, ">> Draw call end!");
 	recording = false;
 	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
 	execute_command_buffer();
+
+	CHECK_RESULT(vkResetCommandBuffer(m_command_buffer, 0));
+	begin_command_buffer_recording();
 
 	rsx::thread::end();
 }
@@ -325,6 +314,8 @@ void VKGSRender::clear_surface(u32 mask)
 
 	if (mask & 0x3)
 		vkCmdClearDepthStencilImage(m_command_buffer, m_depth_buffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, &clear_values.depthStencil, 1, &range);
+
+	LOG_ERROR(RSX, ">>>> Clear surface finished");
 }
 
 bool VKGSRender::do_method(u32 cmd, u32 arg)
@@ -515,13 +506,45 @@ void VKGSRender::write_buffers()
 {
 }
 
+void VKGSRender::begin_command_buffer_recording()
+{
+	VkCommandBufferInheritanceInfo inheritance_info;
+	inheritance_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO;
+	inheritance_info.pNext = nullptr;
+	inheritance_info.renderPass = VK_NULL_HANDLE;
+	inheritance_info.subpass = 0;
+	inheritance_info.framebuffer = VK_NULL_HANDLE;
+	inheritance_info.occlusionQueryEnable = VK_FALSE;
+	inheritance_info.queryFlags = 0;
+	inheritance_info.pipelineStatistics = 0;
+
+	VkCommandBufferBeginInfo begin_infos;
+	begin_infos.flags = 0;
+	begin_infos.pInheritanceInfo = &inheritance_info;
+	begin_infos.pNext = nullptr;
+	begin_infos.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	if (m_submit_fence)
+	{
+		VkResult error = vkWaitForFences(*m_device, 1, &m_submit_fence, VK_TRUE, 1000000L);
+		vkDestroyFence(*m_device, m_submit_fence, nullptr);
+		m_submit_fence = nullptr;
+
+		if (error)
+			LOG_ERROR(RSX, "vkWaitForFences failed with error 0x%X", error);
+	}
+
+	CHECK_RESULT(vkBeginCommandBuffer(m_command_buffer, &begin_infos));
+	recording = true;
+}
+
 void VKGSRender::execute_command_buffer()
 {
 	if (recording) throw;
 
 	if (m_submit_fence)
 	{
-		VkResult error = vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, 1000L);
+		VkResult error = vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, 1000000L);
 		vkDestroyFence((*m_device), m_submit_fence, nullptr);
 		m_submit_fence = nullptr;
 

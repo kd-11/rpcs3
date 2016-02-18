@@ -63,6 +63,8 @@ private:
 	//Single render pass
 	VkRenderPass m_render_pass;
 
+	vk::framebuffer m_framebuffers[4];
+
 public:
 	VKGSRender();
 	~VKGSRender();
@@ -74,6 +76,7 @@ private:
 	void init_render_pass();
 	void destroy_render_pass();
 	void execute_command_buffer();
+	void begin_command_buffer_recording();
 
 public:
 	bool load_program();

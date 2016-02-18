@@ -8,6 +8,40 @@
 
 namespace vk
 {
+	VkComponentMapping default_component_map()
+	{
+		VkComponentMapping result;
+		result.a = VK_COMPONENT_SWIZZLE_A;
+		result.r = VK_COMPONENT_SWIZZLE_R;
+		result.g = VK_COMPONENT_SWIZZLE_G;
+		result.b = VK_COMPONENT_SWIZZLE_B;
+
+		return result;
+	}
+
+	VkImageSubresource default_image_subresource()
+	{
+		VkImageSubresource subres;
+		subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		subres.mipLevel = 0;
+		subres.arrayLayer = 0;
+
+		return subres;
+	}
+
+	VkImageSubresourceRange default_image_subresource_range()
+	{
+		VkImageSubresourceRange subres;
+		subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		subres.baseArrayLayer = 0;
+		subres.baseMipLevel = 0;
+		subres.layerCount = 1;
+		subres.levelCount = 1;
+
+		return subres;
+	}
+
+
 	texture::texture(vk::swap_chain_image &img)
 	{
 		m_image_contents = img;
@@ -20,6 +54,8 @@ namespace vk
 
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only)
 	{
+		owner = &device;
+
 		//First create the image
 		VkImageCreateInfo image_info;
 		image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
@@ -45,6 +81,18 @@ namespace vk
 		vram_allocation.allocate_from_pool(device, m_memory_layout.size, type_bits);
 
 		CHECK_RESULT(vkBindImageMemory(device, m_image_contents, vram_allocation, 0));
+
+		VkImageViewCreateInfo view_info;
+		view_info.format = format;
+		view_info.image = m_image_contents;
+		view_info.pNext = nullptr;
+		view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		view_info.components = default_component_map();
+		view_info.subresourceRange = default_image_subresource_range();
+		view_info.flags = 0;
+
+		CHECK_RESULT(vkCreateImageView(device, &view_info, nullptr, &m_view));
 
 		m_width = width;
 		m_height = height;
@@ -81,39 +129,6 @@ namespace vk
 		return 1.0f;
 	}
 
-	VkComponentMapping default_component_map()
-	{
-		VkComponentMapping result;
-		result.a = VK_COMPONENT_SWIZZLE_A;
-		result.r = VK_COMPONENT_SWIZZLE_R;
-		result.g = VK_COMPONENT_SWIZZLE_G;
-		result.b = VK_COMPONENT_SWIZZLE_B;
-
-		return result;
-	}
-
-	VkImageSubresource default_image_subresource()
-	{
-		VkImageSubresource subres;
-		subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		subres.mipLevel = 0;
-		subres.arrayLayer = 0;
-
-		return subres;
-	}
-
-	VkImageSubresourceRange default_image_subresource_range()
-	{
-		VkImageSubresourceRange subres;
-		subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		subres.baseArrayLayer = 0;
-		subres.baseMipLevel = 0;
-		subres.layerCount = 1;
-		subres.levelCount = 1;
-
-		return subres;
-	}
-
 	void texture::sampler_setup(VkSamplerAddressMode clamp_mode, VkImageViewType type, VkComponentMapping swizzle)
 	{
 		VkSamplerCreateInfo sampler_info;
@@ -132,18 +147,7 @@ namespace vk
 		sampler_info.compareOp = VK_COMPARE_OP_NEVER;
 		sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 
-		VkImageViewCreateInfo view_info;
-		view_info.format = m_internal_format;
-		view_info.image = VK_NULL_HANDLE;
-		view_info.pNext = nullptr;
-		view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		view_info.components = default_component_map();
-		view_info.subresourceRange = default_image_subresource_range();
-		view_info.flags = 0;
-
 		CHECK_RESULT(vkCreateSampler((*owner), &sampler_info, nullptr, &m_sampler));
-		CHECK_RESULT(vkCreateImageView((*owner), &view_info, nullptr, &m_view));
 	}
 
 	void texture::init(int index, rsx::texture& tex)

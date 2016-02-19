@@ -321,6 +321,41 @@ namespace vk
 			CHECK_RESULT(vkCreateBufferView((*owner), &view_info, nullptr, &m_view));
 		}
 
+		void *map(u32 offset, u32 size)
+		{
+			void *data = nullptr;
+			CHECK_RESULT(vkMapMemory((*owner), vram, offset, size, 0, &data));
+
+			return data;
+		}
+
+		void unmap()
+		{
+			vkUnmapMemory((*owner), vram);
+		}
+
+		void sub_data(u32 offset, u32 size, void *data)
+		{
+			//TODO: Synchronization
+			if (!data && (block_sz < size))
+			{
+				vk::render_device *pdev = owner;
+
+				destroy();
+				create((*pdev), size);
+			}
+
+			if (!data) return;
+			if ((offset + size) > block_sz)
+				throw EXCEPTION("Buffer is too small to upload requested data block!");
+
+			u8 *dst = (u8*)map(offset, size);
+			u8 *src = (u8*)data;
+
+			memcpy(dst, src, size);
+			unmap();
+		}
+
 		void destroy()
 		{
 			vkDestroyBufferView((*owner), m_view, nullptr);

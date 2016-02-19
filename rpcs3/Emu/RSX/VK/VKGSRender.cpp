@@ -257,6 +257,200 @@ namespace
 
 void VKGSRender::end()
 {	
+	//TODO:
+	//1. Bind output fbo
+	//2. Enable output program
+	//3. Texture setup
+
+	//setup textures
+	for (int i = 0; i < rsx::limits::textures_count; ++i)
+	{
+		if (!textures[i].enabled())
+		{
+			continue;
+		}
+
+		//TODO:
+		//Attach a sampler for this texture to the corresponding descriptor
+	}
+
+	//initialize vertex attributes
+	std::vector<u8> vertex_arrays_data;
+	u32 vertex_arrays_offsets[rsx::limits::vertex_count];
+
+	const std::string reg_table[] =
+	{
+		"in_pos", "in_weight", "in_normal",
+		"in_diff_color", "in_spec_color",
+		"in_fog",
+		"in_point_size", "in_7",
+		"in_tc0", "in_tc1", "in_tc2", "in_tc3",
+		"in_tc4", "in_tc5", "in_tc6", "in_tc7"
+	};
+
+	u32 input_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_INPUT_MASK];
+
+	std::vector<u8> vertex_index_array;
+	vertex_draw_count = 0;
+	u32 min_index, max_index;
+
+	if (draw_command == rsx::draw_command::indexed)
+	{
+		rsx::index_array_type type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
+		u32 type_size = gsl::narrow<u32>(get_index_type_size(type));
+		for (const auto& first_count : first_count_commands)
+		{
+			vertex_draw_count += first_count.second;
+		}
+
+		vertex_index_array.resize(vertex_draw_count * type_size);
+
+		switch (type)
+		{
+		case rsx::index_array_type::u32:
+			std::tie(min_index, max_index) = write_index_array_data_to_buffer_untouched(gsl::span<u32>((u32*)vertex_index_array.data(), vertex_draw_count), first_count_commands);
+			break;
+		case rsx::index_array_type::u16:
+			std::tie(min_index, max_index) = write_index_array_data_to_buffer_untouched(gsl::span<u16>((u16*)vertex_index_array.data(), vertex_draw_count), first_count_commands);
+			break;
+		}
+	}
+
+	if (draw_command == rsx::draw_command::inlined_array)
+	{
+		vertex_arrays_data.resize(inline_vertex_array.size() * sizeof(u32));
+		write_inline_array_to_buffer(vertex_arrays_data.data());
+		u32 offset = 0;
+		for (int index = 0; index < rsx::limits::vertex_count; ++index)
+		{
+			auto &vertex_info = vertex_arrays_info[index];
+
+			if (!vertex_info.size) // disabled
+				continue;
+
+			int location;
+			if (!m_program->uniforms.has_location(reg_table[index] + "_buffer", &location))
+				continue;
+
+			const u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
+			const u32 gl_type = to_gl_internal_type(vertex_info.type, vertex_info.size);
+			const u32 data_size = element_size * vertex_draw_count;
+
+			auto &buffer = m_gl_attrib_buffers[index].buffer;
+			auto &texture = m_gl_attrib_buffers[index].texture;
+
+			buffer->data(data_size, nullptr);
+			buffer->sub_data(0, data_size, vertex_arrays_data.data() + offset);
+
+			//Attach buffer to texture
+			texture->copy_from(*buffer, gl_type);
+
+			//Link texture to uniform location
+			m_program->uniforms.texture(location, index + rsx::limits::vertex_count, *texture);
+
+			offset += rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
+		}
+	}
+
+	if (draw_command == rsx::draw_command::array)
+	{
+		for (const auto &first_count : first_count_commands)
+		{
+			vertex_draw_count += first_count.second;
+		}
+	}
+
+	if (draw_command == rsx::draw_command::array || draw_command == rsx::draw_command::indexed)
+	{
+		for (int index = 0; index < rsx::limits::vertex_count; ++index)
+		{
+			bool enabled = !!(input_mask & (1 << index));
+			if (!enabled)
+				continue;
+
+			int location;
+			if (!m_program->uniforms.has_location(reg_table[index] + "_buffer", &location))
+				continue;
+
+			if (vertex_arrays_info[index].size > 0)
+			{
+				auto &vertex_info = vertex_arrays_info[index];
+				// Active vertex array
+				std::vector<u8> vertex_array;
+
+				// Fill vertex_array
+				u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
+				vertex_array.resize(vertex_draw_count * element_size);
+				if (draw_command == rsx::draw_command::array)
+				{
+					size_t offset = 0;
+					for (const auto &first_count : first_count_commands)
+					{
+						write_vertex_array_data_to_buffer(vertex_array.data() + offset, first_count.first, first_count.second, index, vertex_info);
+						offset += first_count.second * element_size;
+					}
+				}
+				if (draw_command == rsx::draw_command::indexed)
+				{
+					vertex_array.resize((max_index + 1) * element_size);
+					write_vertex_array_data_to_buffer(vertex_array.data(), 0, max_index + 1, index, vertex_info);
+				}
+
+				size_t size = vertex_array.size();
+				size_t position = vertex_arrays_data.size();
+				vertex_arrays_offsets[index] = gsl::narrow<u32>(position);
+				vertex_arrays_data.resize(position + size);
+
+				const u32 gl_type = to_gl_internal_type(vertex_info.type, vertex_info.size);
+				const u32 data_size = element_size * vertex_draw_count;
+
+				auto &buffer = m_gl_attrib_buffers[index].buffer;
+				auto &texture = m_gl_attrib_buffers[index].texture;
+
+				buffer->data(data_size, nullptr);
+				buffer->sub_data(0, data_size, vertex_array.data());
+
+				//Attach buffer to texture
+				texture->copy_from(*buffer, gl_type);
+
+				//Link texture to uniform
+				m_program->uniforms.texture(location, index + rsx::limits::vertex_count, *texture);
+			}
+			else if (register_vertex_info[index].size > 0)
+			{
+				//Untested!
+				auto &vertex_data = register_vertex_data[index];
+				auto &vertex_info = register_vertex_info[index];
+
+				switch (vertex_info.type)
+				{
+				case rsx::vertex_base_type::f:
+				{
+					const u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
+					const u32 gl_type = to_gl_internal_type(vertex_info.type, vertex_info.size);
+					const size_t data_size = vertex_data.size();
+
+					auto &buffer = m_gl_attrib_buffers[index].buffer;
+					auto &texture = m_gl_attrib_buffers[index].texture;
+
+					buffer->data(data_size, nullptr);
+					buffer->sub_data(0, data_size, vertex_data.data());
+
+					//Attach buffer to texture
+					texture->copy_from(*buffer, gl_type);
+
+					//Link texture to uniform
+					m_program->uniforms.texture(location, index + rsx::limits::vertex_count, *texture);
+					break;
+				}
+				default:
+					LOG_ERROR(RSX, "bad non array vertex data format (type = %d, size = %d)", vertex_info.type, vertex_info.size);
+					break;
+				}
+			}
+		}
+	}
+
 	vkCmdEndRenderPass(m_command_buffer);
 
 	LOG_ERROR(RSX, ">> Draw call end!");

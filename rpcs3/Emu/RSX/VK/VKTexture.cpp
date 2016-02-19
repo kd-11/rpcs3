@@ -69,6 +69,7 @@ namespace vk
 		image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
 		image_info.usage = usage;
 		image_info.flags = 0;
+		image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 		CHECK_RESULT(vkCreateImage(device, &image_info, nullptr, &m_image_contents));
 
@@ -91,6 +92,9 @@ namespace vk
 		view_info.components = default_component_map();
 		view_info.subresourceRange = default_image_subresource_range();
 		view_info.flags = 0;
+
+		if (usage == VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+			view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT/* | VK_IMAGE_ASPECT_STENCIL_BIT*/;
 
 		CHECK_RESULT(vkCreateImageView(device, &view_info, nullptr, &m_view));
 

@@ -115,7 +115,7 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	clear_surface(0xFFFFFFFF);
 	
 	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
-	execute_command_buffer();
+	execute_command_buffer(false);
 
 	for (u32 i = 0; i < m_swap_chain->get_swap_image_count(); ++i)
 	{
@@ -126,6 +126,21 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 
 VKGSRender::~VKGSRender()
 {
+	if (m_submit_fence)
+	{
+		vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, 1000000L);
+		vkDestroyFence((*m_device), m_submit_fence, nullptr);
+		m_submit_fence = nullptr;
+	}
+
+	if (m_present_semaphore)
+	{
+		vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
+		m_present_semaphore = nullptr;
+	}
+
+	m_prog_buffer.clear();
+
 	for (u32 i = 0; i < m_swap_chain->get_swap_image_count(); ++i)
 		m_framebuffers[i].destroy();
 
@@ -183,8 +198,39 @@ void VKGSRender::begin()
 
 	LOG_ERROR(RSX, ">>> Draw call begin!");
 
+	VkRenderPassBeginInfo rp_begin;
+	rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	rp_begin.pNext = NULL;
+	rp_begin.renderPass = m_render_pass;
+	rp_begin.framebuffer = m_framebuffers[m_current_present_image];
+	rp_begin.renderArea.offset.x = 0;
+	rp_begin.renderArea.offset.y = 0;
+	rp_begin.renderArea.extent.width = m_frame->client_size().width;
+	rp_begin.renderArea.extent.height = m_frame->client_size().height;
+	rp_begin.clearValueCount = 0;
+	rp_begin.pClearValues = nullptr;
+
+	vkCmdBeginRenderPass(m_command_buffer, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
+	VkViewport viewport;
+	viewport.x = 0;
+	viewport.y = 0;
+	viewport.width = m_frame->client_size().width;
+	viewport.height = m_frame->client_size().height;
+	viewport.minDepth = 0.f;
+	viewport.maxDepth = 1.f;
+
+	vkCmdSetViewport(m_command_buffer, 0, 1, &viewport);
+
+	VkRect2D scissor;
+	scissor.extent.height = viewport.height;
+	scissor.extent.width = viewport.width;
+	scissor.offset.x = 0;
+	scissor.offset.y = 0;
+
+	vkCmdSetScissor(m_command_buffer, 0, 1, &scissor);
+
 	//TODO:
-	//Begin renderPass
 	//Bind pipeline (shaders)
 	//Bind descriptor sets (shader data)
 }
@@ -211,13 +257,12 @@ namespace
 
 void VKGSRender::end()
 {	
+	vkCmdEndRenderPass(m_command_buffer);
+
 	LOG_ERROR(RSX, ">> Draw call end!");
 	recording = false;
-	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
-	execute_command_buffer();
-
-	CHECK_RESULT(vkResetCommandBuffer(m_command_buffer, 0));
-	begin_command_buffer_recording();
+	end_command_buffer_recording();
+	execute_command_buffer(false);
 
 	rsx::thread::end();
 }
@@ -258,15 +303,19 @@ void VKGSRender::on_exit()
 void VKGSRender::clear_surface(u32 mask)
 {
 	//TODO: Build clear commands into current renderpass descriptor set
-	if (!recording) return;
 	if (!(mask & 0xF3)) return;
+
+	if (m_current_present_image== 0xFFFF || recording) return;
+
+	begin_command_buffer_recording();
 
 	float depth_clear = 1.f;
 	float color_clear[] = { 0.f, 0.f, 0.f, 0.f };
 	u32   stencil_clear = 0.f;
 
 	VkClearValue clear_values;
-	VkImageSubresourceRange range = vk::default_image_subresource_range();
+	VkImageSubresourceRange depth_range = vk::default_image_subresource_range();
+	depth_range.aspectMask = 0;
 
 	if (mask & 0x1)
 	{
@@ -276,6 +325,7 @@ void VKGSRender::clear_surface(u32 mask)
 		u32 clear_depth = rsx::method_registers[NV4097_SET_ZSTENCIL_CLEAR_VALUE] >> 8;
 		float depth_clear = (float)clear_depth / max_depth_value;
 
+		depth_range.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
 		clear_values.depthStencil.depth = depth_clear;
 		clear_values.depthStencil.stencil = stencil_clear;
 	}
@@ -286,6 +336,7 @@ void VKGSRender::clear_surface(u32 mask)
 		u32 stencil_mask = rsx::method_registers[NV4097_SET_STENCIL_MASK];
 
 		//TODO set stencil mask
+		depth_range.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 		clear_values.depthStencil.stencil = stencil_mask;
 	}
 
@@ -298,22 +349,26 @@ void VKGSRender::clear_surface(u32 mask)
 		u8 clear_b = clear_color;
 
 		//TODO set color mask
-		VkBool32 clear_red = (VkBool32)!!(mask & 0x20);
+		/*VkBool32 clear_red = (VkBool32)!!(mask & 0x20);
 		VkBool32 clear_green = (VkBool32)!!(mask & 0x40);
 		VkBool32 clear_blue = (VkBool32)!!(mask & 0x80);
-		VkBool32 clear_alpha = (VkBool32)!!(mask & 0x10);
+		VkBool32 clear_alpha = (VkBool32)!!(mask & 0x10);*/
 
-		clear_values.color.float32[0] = (float)clear_a / 255;
+		clear_values.color.float32[0] = (float)clear_r / 255;
 		clear_values.color.float32[1] = (float)clear_g / 255;
 		clear_values.color.float32[2] = (float)clear_b / 255;
 		clear_values.color.float32[3] = (float)clear_a / 255;
 
+		VkImageSubresourceRange range = vk::default_image_subresource_range();
 		VkImage color_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
-		vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, &clear_values.color, 1, &range);
+		vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &clear_values.color, 1, &range);
 	}
 
 	if (mask & 0x3)
-		vkCmdClearDepthStencilImage(m_command_buffer, m_depth_buffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, &clear_values.depthStencil, 1, &range);
+		vkCmdClearDepthStencilImage(m_command_buffer, m_depth_buffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, &clear_values.depthStencil, 1, &depth_range);
+
+	end_command_buffer_recording();
+	execute_command_buffer(false);
 
 	LOG_ERROR(RSX, ">>>> Clear surface finished");
 }
@@ -434,8 +489,8 @@ void VKGSRender::init_buffers(bool skip_reading)
 		CHECK_RESULT(vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, m_present_semaphore, nullFence, &m_current_present_image));
 
 		vk::change_image_layout(m_command_buffer, m_swap_chain->get_swap_chain_image(m_current_present_image),
-			VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-			VK_IMAGE_ASPECT_COLOR_BIT);
+								VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+								VK_IMAGE_ASPECT_COLOR_BIT);
 
 		dirty_frame = false;
 	}
@@ -532,13 +587,21 @@ void VKGSRender::begin_command_buffer_recording()
 
 		if (error)
 			LOG_ERROR(RSX, "vkWaitForFences failed with error 0x%X", error);
+
+		vkResetCommandBuffer(m_command_buffer, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
 	}
 
 	CHECK_RESULT(vkBeginCommandBuffer(m_command_buffer, &begin_infos));
 	recording = true;
 }
 
-void VKGSRender::execute_command_buffer()
+void VKGSRender::end_command_buffer_recording()
+{
+	recording = false;
+	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
+}
+
+void VKGSRender::execute_command_buffer(bool wait)
 {
 	if (recording) throw;
 
@@ -569,7 +632,7 @@ void VKGSRender::execute_command_buffer()
 	infos.pWaitDstStageMask = &pipe_stage_flags;
 	infos.signalSemaphoreCount = 0;
 	
-	if (0)
+	if (wait)
 	{
 		infos.waitSemaphoreCount = 1;
 		infos.pWaitSemaphores = &m_present_semaphore;
@@ -582,7 +645,6 @@ void VKGSRender::execute_command_buffer()
 	
 	infos.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-	//TODO: Submit the command buffer...
 	CHECK_RESULT(vkQueueSubmit(m_swap_chain->get_present_queue(), 1, &infos, m_submit_fence));
 }
 
@@ -625,7 +687,7 @@ void VKGSRender::flip(int buffer)
 		aspect_ratio.size = m_frame->client_size();
 	}
 
-	execute_command_buffer();
+	execute_command_buffer(false);
 	//TODO
 
 	//Clear old screen
@@ -646,6 +708,7 @@ void VKGSRender::flip(int buffer)
 	
 	CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
 	vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
+	m_present_semaphore = nullptr;
 
 	dirty_frame = true;
 	m_frame->flip(m_context);

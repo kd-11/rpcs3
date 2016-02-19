@@ -75,8 +75,9 @@ private:
 	void clear_surface(u32 mask);
 	void init_render_pass();
 	void destroy_render_pass();
-	void execute_command_buffer();
+	void execute_command_buffer(bool wait);
 	void begin_command_buffer_recording();
+	void end_command_buffer_recording();
 
 public:
 	bool load_program();

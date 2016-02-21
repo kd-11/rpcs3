@@ -193,7 +193,7 @@ namespace vk
 
 void VKVertexDecompilerThread::insertMainStart(std::stringstream & OS)
 {
-	insert_glsl_legacy_function(OS);
+	insert_vulkan_glsl_legacy_function(OS);
 
 	OS << "void main()" << std::endl;
 	OS << "{" << std::endl;

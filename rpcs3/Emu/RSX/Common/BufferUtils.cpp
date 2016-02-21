@@ -9,11 +9,11 @@
 namespace
 {
 	/**
-	 * Convert CMP vector to RGBA16.
-	 * A vector in CMP (compressed) format is stored as X11Y11Z10 and has a W component of 1.
-	 * X11 and Y11 channels are int between -1024 and 1023 interpreted as -1.f, 1.f
-	 * Z10 is int between -512 and 511 interpreted as -1.f, 1.f
-	 */
+	* Convert CMP vector to RGBA16.
+	* A vector in CMP (compressed) format is stored as X11Y11Z10 and has a W component of 1.
+	* X11 and Y11 channels are int between -1024 and 1023 interpreted as -1.f, 1.f
+	* Z10 is int between -512 and 511 interpreted as -1.f, 1.f
+	*/
 	std::array<u16, 4> decode_cmp_vector(u32 encoded_vector)
 	{
 		u16 Z = encoded_vector >> 22;
@@ -28,7 +28,7 @@ namespace
 
 // FIXME: these functions shouldn't access rsx::method_registers (global)
 
-void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_t index, const rsx::data_array_format_info &vertex_array_desc)
+void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_t index, const rsx::data_array_format_info &vertex_array_desc, bool force_expansion)
 {
 	Expects(vertex_array_desc.size > 0);
 
@@ -37,6 +37,10 @@ void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_
 	u32 address = base_offset + rsx::get_address(offset & 0x7fffffff, offset >> 31);
 
 	u32 element_size = rsx::get_vertex_type_size_on_host(vertex_array_desc.type, vertex_array_desc.size);
+
+	if (force_expansion && vertex_array_desc.size == 3 &&
+		(vertex_array_desc.type == rsx::vertex_base_type::f || vertex_array_desc.type == rsx::vertex_base_type::s32k))
+		element_size = (sizeof(u32) * 4);
 
 	u32 base_index = rsx::method_registers[NV4097_SET_VERTEX_DATA_BASE_INDEX];
 
@@ -65,8 +69,20 @@ void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_
 				*c_dst++ = 0x3c00;
 			break;
 		}
-
 		case rsx::vertex_base_type::f:
+		{
+			auto* c_src = (const be_t<float>*)src;
+			float* c_dst = (float*)dst;
+
+			for (u32 j = 0; j < vertex_array_desc.size; ++j)
+			{
+				*c_dst++ = *c_src++;
+			}
+
+			if (vertex_array_desc.size == 3 && force_expansion)
+				*c_dst++ = 1.f;
+			break;
+		}
 		case rsx::vertex_base_type::s32k:
 		case rsx::vertex_base_type::ub256:
 		{
@@ -77,6 +93,9 @@ void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_
 			{
 				*c_dst++ = *c_src++;
 			}
+
+			if (vertex_array_desc.size == 3 && force_expansion)
+				*c_dst++ = ~(0L);
 			break;
 		}
 		case rsx::vertex_base_type::cmp:
@@ -96,148 +115,148 @@ void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_
 
 namespace
 {
-template<typename T>
-std::tuple<T, T> upload_untouched(gsl::span<to_be_t<const T>> src, gsl::span<T> dst, bool is_primitive_restart_enabled, T primitive_restart_index)
-{
-	T min_index = -1;
-	T max_index = 0;
-
-	Expects(dst.size_bytes() >= src.size_bytes());
-
-	size_t dst_idx = 0;
-	for (T index : src)
+	template<typename T>
+	std::tuple<T, T> upload_untouched(gsl::span<to_be_t<const T>> src, gsl::span<T> dst, bool is_primitive_restart_enabled, T primitive_restart_index)
 	{
-		if (is_primitive_restart_enabled && index == primitive_restart_index)
+		T min_index = -1;
+		T max_index = 0;
+
+		Expects(dst.size_bytes() >= src.size_bytes());
+
+		size_t dst_idx = 0;
+		for (T index : src)
 		{
-			index = -1;
+			if (is_primitive_restart_enabled && index == primitive_restart_index)
+			{
+				index = -1;
+			}
+			else
+			{
+				max_index = MAX2(max_index, index);
+				min_index = MIN2(min_index, index);
+			}
+			dst[dst_idx++] = index;
 		}
-		else
-		{
-			max_index = MAX2(max_index, index);
-			min_index = MIN2(min_index, index);
-		}
-		dst[dst_idx++] = index;
-	}
-	return std::make_tuple(min_index, max_index);
-}
-
-// FIXME: expanded primitive type may not support primitive restart correctly
-template<typename T>
-std::tuple<T, T> expand_indexed_triangle_fan(gsl::span<to_be_t<const T>> src, gsl::span<T> dst, bool is_primitive_restart_enabled, T primitive_restart_index)
-{
-	T min_index = -1;
-	T max_index = 0;
-
-	Expects(dst.size() >= 3 * (src.size() - 2));
-
-	const T index0 = src[0];
-	if (!is_primitive_restart_enabled || index0 != -1) // Cut
-	{
-		min_index = MIN2(min_index, index0);
-		max_index = MAX2(max_index, index0);
+		return std::make_tuple(min_index, max_index);
 	}
 
-	size_t dst_idx = 0;
-	while (src.size() > 2)
+	// FIXME: expanded primitive type may not support primitive restart correctly
+	template<typename T>
+	std::tuple<T, T> expand_indexed_triangle_fan(gsl::span<to_be_t<const T>> src, gsl::span<T> dst, bool is_primitive_restart_enabled, T primitive_restart_index)
 	{
-		gsl::span<to_be_t<const T>> tri_indexes = src.subspan(0, 2);
-		T index1 = tri_indexes[0];
-		if (is_primitive_restart_enabled && index1 == primitive_restart_index)
-		{
-			index1 = -1;
-		}
-		else
-		{
-			min_index = MIN2(min_index, index1);
-			max_index = MAX2(max_index, index1);
-		}
-		T index2 = tri_indexes[1];
-		if (is_primitive_restart_enabled && index2 == primitive_restart_index)
-		{
-			index2 = -1;
-		}
-		else
-		{
-			min_index = MIN2(min_index, index2);
-			max_index = MAX2(max_index, index2);
-		}
+		T min_index = -1;
+		T max_index = 0;
 
-		dst[dst_idx++] = index0;
-		dst[dst_idx++] = index1;
-		dst[dst_idx++] = index2;
+		Expects(dst.size() >= 3 * (src.size() - 2));
 
-		src = src.subspan(2);
-	}
-	return std::make_tuple(min_index, max_index);
-}
-
-// FIXME: expanded primitive type may not support primitive restart correctly
-template<typename T>
-std::tuple<T, T> expand_indexed_quads(gsl::span<to_be_t<const T>> src, gsl::span<T> dst, bool is_primitive_restart_enabled, T primitive_restart_index)
-{
-	T min_index = -1;
-	T max_index = 0;
-
-	Expects(4 * dst.size_bytes() >= 6 * src.size_bytes());
-
-	size_t dst_idx = 0;
-	while (!src.empty())
-	{
-		gsl::span<to_be_t<const T>> quad_indexes = src.subspan(0, 4);
-		T index0 = quad_indexes[0];
-		if (is_primitive_restart_enabled && index0 == primitive_restart_index)
-		{
-			index0 = -1;
-		}
-		else
+		const T index0 = src[0];
+		if (!is_primitive_restart_enabled || index0 != -1) // Cut
 		{
 			min_index = MIN2(min_index, index0);
 			max_index = MAX2(max_index, index0);
 		}
-		T index1 = quad_indexes[1];
-		if (is_primitive_restart_enabled && index1 == primitive_restart_index)
-		{
-			index1 = -1;
-		}
-		else
-		{
-			min_index = MIN2(min_index, index1);
-			max_index = MAX2(max_index, index1);
-		}
-		T index2 = quad_indexes[2];
-		if (is_primitive_restart_enabled && index2 == primitive_restart_index)
-		{
-			index2 = -1;
-		}
-		else
-		{
-			min_index = MIN2(min_index, index2);
-			max_index = MAX2(max_index, index2);
-		}
-		T index3 = quad_indexes[3];
-		if (is_primitive_restart_enabled &&index3 == primitive_restart_index)
-		{
-			index3 = -1;
-		}
-		else
-		{
-			min_index = MIN2(min_index, index3);
-			max_index = MAX2(max_index, index3);
-		}
 
-		// First triangle
-		dst[dst_idx++] = index0;
-		dst[dst_idx++] = index1;
-		dst[dst_idx++] = index2;
-		// Second triangle
-		dst[dst_idx++] = index2;
-		dst[dst_idx++] = index3;
-		dst[dst_idx++] = index0;
+		size_t dst_idx = 0;
+		while (src.size() > 2)
+		{
+			gsl::span<to_be_t<const T>> tri_indexes = src.subspan(0, 2);
+			T index1 = tri_indexes[0];
+			if (is_primitive_restart_enabled && index1 == primitive_restart_index)
+			{
+				index1 = -1;
+			}
+			else
+			{
+				min_index = MIN2(min_index, index1);
+				max_index = MAX2(max_index, index1);
+			}
+			T index2 = tri_indexes[1];
+			if (is_primitive_restart_enabled && index2 == primitive_restart_index)
+			{
+				index2 = -1;
+			}
+			else
+			{
+				min_index = MIN2(min_index, index2);
+				max_index = MAX2(max_index, index2);
+			}
 
-		src = src.subspan(4);
+			dst[dst_idx++] = index0;
+			dst[dst_idx++] = index1;
+			dst[dst_idx++] = index2;
+
+			src = src.subspan(2);
+		}
+		return std::make_tuple(min_index, max_index);
 	}
-	return std::make_tuple(min_index, max_index);
-}
+
+	// FIXME: expanded primitive type may not support primitive restart correctly
+	template<typename T>
+	std::tuple<T, T> expand_indexed_quads(gsl::span<to_be_t<const T>> src, gsl::span<T> dst, bool is_primitive_restart_enabled, T primitive_restart_index)
+	{
+		T min_index = -1;
+		T max_index = 0;
+
+		Expects(4 * dst.size_bytes() >= 6 * src.size_bytes());
+
+		size_t dst_idx = 0;
+		while (!src.empty())
+		{
+			gsl::span<to_be_t<const T>> quad_indexes = src.subspan(0, 4);
+			T index0 = quad_indexes[0];
+			if (is_primitive_restart_enabled && index0 == primitive_restart_index)
+			{
+				index0 = -1;
+			}
+			else
+			{
+				min_index = MIN2(min_index, index0);
+				max_index = MAX2(max_index, index0);
+			}
+			T index1 = quad_indexes[1];
+			if (is_primitive_restart_enabled && index1 == primitive_restart_index)
+			{
+				index1 = -1;
+			}
+			else
+			{
+				min_index = MIN2(min_index, index1);
+				max_index = MAX2(max_index, index1);
+			}
+			T index2 = quad_indexes[2];
+			if (is_primitive_restart_enabled && index2 == primitive_restart_index)
+			{
+				index2 = -1;
+			}
+			else
+			{
+				min_index = MIN2(min_index, index2);
+				max_index = MAX2(max_index, index2);
+			}
+			T index3 = quad_indexes[3];
+			if (is_primitive_restart_enabled &&index3 == primitive_restart_index)
+			{
+				index3 = -1;
+			}
+			else
+			{
+				min_index = MIN2(min_index, index3);
+				max_index = MAX2(max_index, index3);
+			}
+
+			// First triangle
+			dst[dst_idx++] = index0;
+			dst[dst_idx++] = index1;
+			dst[dst_idx++] = index2;
+			// Second triangle
+			dst[dst_idx++] = index2;
+			dst[dst_idx++] = index3;
+			dst[dst_idx++] = index0;
+
+			src = src.subspan(4);
+		}
+		return std::make_tuple(min_index, max_index);
+	}
 }
 
 // Only handle quads and triangle fan now
@@ -262,9 +281,9 @@ bool is_primitive_native(rsx::primitive_type draw_mode)
 }
 
 /** We assume that polygon is convex in polygon mode (constraints in OpenGL)
- *In such case polygon triangulation equates to triangle fan with arbitrary start vertex
- * see http://www.gamedev.net/page/resources/_/technical/graphics-programming-and-theory/polygon-triangulation-r3334
- */
+*In such case polygon triangulation equates to triangle fan with arbitrary start vertex
+* see http://www.gamedev.net/page/resources/_/technical/graphics-programming-and-theory/polygon-triangulation-r3334
+*/
 
 size_t get_index_count(rsx::primitive_type draw_mode, unsigned initial_index_count)
 {

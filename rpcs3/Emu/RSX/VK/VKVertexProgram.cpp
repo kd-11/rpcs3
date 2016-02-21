@@ -7,7 +7,7 @@
 
 std::string VKVertexDecompilerThread::getFloatTypeName(size_t elementCount)
 {
-	return getFloatTypeNameImpl(elementCount);
+	return vk::getFloatTypeNameImpl(elementCount);
 }
 
 std::string VKVertexDecompilerThread::getIntTypeName(size_t elementCount)
@@ -18,12 +18,12 @@ std::string VKVertexDecompilerThread::getIntTypeName(size_t elementCount)
 
 std::string VKVertexDecompilerThread::getFunction(FUNCTION f)
 {
-	return getFunctionImpl(f);
+	return vk::getFunctionImpl(f);
 }
 
 std::string VKVertexDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
 {
-	return compareFunctionImpl(f, Op0, Op1);
+	return vk::compareFunctionImpl(f, Op0, Op1);
 }
 
 void VKVertexDecompilerThread::insertHeader(std::stringstream &OS)
@@ -193,7 +193,7 @@ namespace vk
 
 void VKVertexDecompilerThread::insertMainStart(std::stringstream & OS)
 {
-	insert_vulkan_glsl_legacy_function(OS);
+	vk::insert_glsl_legacy_function(OS);
 
 	OS << "void main()" << std::endl;
 	OS << "{" << std::endl;

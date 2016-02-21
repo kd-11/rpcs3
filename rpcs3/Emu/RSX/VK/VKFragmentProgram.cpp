@@ -9,12 +9,12 @@
 
 std::string VKFragmentDecompilerThread::getFloatTypeName(size_t elementCount)
 {
-	return getFloatTypeNameImpl(elementCount);
+	return vk::getFloatTypeNameImpl(elementCount);
 }
 
 std::string VKFragmentDecompilerThread::getFunction(FUNCTION f)
 {
-	return getFunctionImpl(f);
+	return vk::getFunctionImpl(f);
 }
 
 std::string VKFragmentDecompilerThread::saturate(const std::string & code)
@@ -24,7 +24,7 @@ std::string VKFragmentDecompilerThread::saturate(const std::string & code)
 
 std::string VKFragmentDecompilerThread::compareFunction(COMPARE f, const std::string &Op0, const std::string &Op1)
 {
-	return compareFunctionImpl(f, Op0, Op1);
+	return vk::compareFunctionImpl(f, Op0, Op1);
 }
 
 void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
@@ -115,7 +115,7 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 
 void VKFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
 {
-	insert_vulkan_glsl_legacy_function(OS);
+	vk::insert_glsl_legacy_function(OS);
 
 	OS << "void main ()" << std::endl;
 	OS << "{" << std::endl;

@@ -199,23 +199,13 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 void VKFragmentProgram::Compile()
 {
-	const char *glsl_shader = shader.data();//"#version 450\n#extension GL_ARB_separate_shader_objects : enable\nlayout(location=0) out vec4 col;\nvoid main(){\ncol=vec4(1.f);\n}\n";
-	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(glsl_shader);
-
-	system("del frag.spv");
-	system("glslangValidator.exe -V -o frag.spv FragmentProgram.frag > fs_compile_log.log");
-	
-	fs::file spv_file = fs::file(fs::get_config_dir() + "frag.spv", fom::read);
-	u64 spir_v_length = spv_file.size();
-
-	if (!spir_v_length) throw EXCEPTION("Failed to load Spir-V shader");
-
-	std::vector<u8> spir_v(spir_v_length);
-	spv_file.read(spir_v);
+	std::vector<u32> spir_v;
+	if (!vk::compile_glsl_to_spv(shader, vk::glsl::glsl_fragment_program, spir_v))
+		throw EXCEPTION("Failed to compile fragment shader");
 
 	//Create the object and compile
 	VkShaderModuleCreateInfo fs_info;
-	fs_info.codeSize = (size_t)spir_v_length;
+	fs_info.codeSize = spir_v.size() * sizeof(u32);
 	fs_info.pNext = nullptr;
 	fs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 	fs_info.pCode = (uint32_t*)spir_v.data();

@@ -70,6 +70,36 @@ namespace vk
 
 		return vec_selectors[size][(int)type];
 	}
+
+	u32 get_suitable_vk_size(rsx::vertex_base_type type, u32 size)
+	{
+		if (size == 3)
+		{
+			switch (type)
+			{
+			case rsx::vertex_base_type::f:
+			case rsx::vertex_base_type::s32k:
+				return 16;
+			}
+		}
+		
+		return rsx::get_vertex_type_size_on_host(type, size);
+	}
+
+	bool requires_component_expansion(rsx::vertex_base_type type, u32 size)
+	{
+		if (size == 3)
+		{
+			switch (type)
+			{
+			case rsx::vertex_base_type::f:
+			case rsx::vertex_base_type::s32k:
+				return true;
+			}
+		}
+
+		return false;
+	}
 }
 
 VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
@@ -421,9 +451,15 @@ void VKGSRender::end()
 				}
 
 				const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
-				const u32 data_size = element_size * vertex_draw_count;
+				u32 data_size = element_size * vertex_draw_count;
 
 				auto &buffer = m_gl_attrib_buffers[index];
+
+				if (vertex_info.size == 3)
+				{
+					if (vk::requires_component_expansion(vertex_info.type, vertex_info.size))
+						data_size = (data_size * 4) / 3;
+				}
 
 				buffer.sub_data(0, data_size, vertex_array.data());
 				buffer.set_format(format);
@@ -479,8 +515,6 @@ void VKGSRender::end()
 	recording = false;
 	end_command_buffer_recording();
 	execute_command_buffer(false);
-
-	Sleep(10);
 
 	rsx::thread::end();
 }
@@ -689,8 +723,11 @@ bool VKGSRender::load_program()
 	//3. Update fragment constants
 	u8 *buf = (u8*)m_scale_offset_buffer.map(0, VK_WHOLE_SIZE);
 
-	//COORDINATE TRANSFORMS ARE ODD WITH THIS ONE
-	//COMPUTE TRANSFORM HERE FOR EXPERIMENTS
+	//TODO: Add case for this in RSXThread
+	/**
+	 * NOTE: While VK's coord system resembles GLs, the clip volume is no longer symetrical in z
+	 * Its like D3D without the flip in y (depending on how you build the spir-v)
+	 */
 	{
 		int clip_w = rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL] >> 16;
 		int clip_h = rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL] >> 16;

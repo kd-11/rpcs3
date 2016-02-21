@@ -143,7 +143,7 @@ static const reg_info reg_table[] =
 
 void VKVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::vector<ParamType> & outputs)
 {
-	int location = 17;
+	int location = 16;
 	for (auto &i : reg_table)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg) && i.need_declare)
@@ -183,7 +183,7 @@ namespace vk
 				return;
 			}
 
-			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex).xyz;" << std::endl;
+			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex);" << std::endl;
 			return;
 		}
 
@@ -255,22 +255,12 @@ void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 
 void VKVertexProgram::Compile()
 {
-	const char *glsl_shader = shader.data();
-	fs::file(fs::get_config_dir() + "VertexProgram.vert", fom::rewrite).write(glsl_shader);
-
-	system("del frag.spv");
-	system("glslangValidator.exe -V -o vert.spv VertexProgram.vert > vs_compile_log.log");
-
-	fs::file spv_file = fs::file(fs::get_config_dir() + "vert.spv", fom::read);
-	u64 spir_v_length = spv_file.size();
-
-	if (!spir_v_length) throw EXCEPTION("Failed to load Spir-V shader");
-
-	std::vector<u8> spir_v(spir_v_length);
-	spv_file.read(spir_v);
+	std::vector<u32> spir_v;
+	if (!vk::compile_glsl_to_spv(shader, vk::glsl::glsl_vertex_program, spir_v))
+		throw EXCEPTION("Failed to compile vertex shader");
 
 	VkShaderModuleCreateInfo vs_info;
-	vs_info.codeSize = (size_t)spir_v_length;
+	vs_info.codeSize = spir_v.size() * sizeof(u32);
 	vs_info.pNext = nullptr;
 	vs_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 	vs_info.pCode = (uint32_t*)spir_v.data();

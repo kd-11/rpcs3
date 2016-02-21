@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "VKCommonDecompiler.h"
+#include "../VulKan/glslang/SPIRV/GlslangToSpv.h"
 
 namespace vk
 {
@@ -121,5 +122,139 @@ namespace vk
 		OS << "	result.z = clamped_val.x > 0. ? exp(clamped_val.w * log(max(clamped_val.y, 1.E-10))) : 0.;\n";
 		OS << "	return result;\n";
 		OS << "}\n\n";
+	}
+
+	void init_default_resources(TBuiltInResource &rsc)
+	{
+		rsc.maxLights = 32;
+		rsc.maxClipPlanes = 6;
+		rsc.maxTextureUnits = 32;
+		rsc.maxTextureCoords = 32;
+		rsc.maxVertexAttribs = 64;
+		rsc.maxVertexUniformComponents = 4096;
+		rsc.maxVaryingFloats = 64;
+		rsc.maxVertexTextureImageUnits = 32;
+		rsc.maxCombinedTextureImageUnits = 80;
+		rsc.maxTextureImageUnits = 32;
+		rsc.maxFragmentUniformComponents = 4096;
+		rsc.maxDrawBuffers = 32;
+		rsc.maxVertexUniformVectors = 128;
+		rsc.maxVaryingVectors = 8;
+		rsc.maxFragmentUniformVectors = 16;
+		rsc.maxVertexOutputVectors = 16;
+		rsc.maxFragmentInputVectors = 15;
+		rsc.maxProgramTexelOffset = -8;
+		rsc.maxProgramTexelOffset = 7;
+		rsc.maxClipDistances = 8;
+		rsc.maxComputeWorkGroupCountX = 65535;
+		rsc.maxComputeWorkGroupCountY = 65535;
+		rsc.maxComputeWorkGroupCountZ = 65535;
+		rsc.maxComputeWorkGroupSizeX = 1024;
+		rsc.maxComputeWorkGroupSizeY = 1024;
+		rsc.maxComputeWorkGroupSizeZ = 64;
+		rsc.maxComputeUniformComponents = 1024;
+		rsc.maxComputeTextureImageUnits = 16;
+		rsc.maxComputeImageUniforms = 8;
+		rsc.maxComputeAtomicCounters = 8;
+		rsc.maxComputeAtomicCounterBuffers = 1;
+		rsc.maxVaryingComponents = 60;
+		rsc.maxVertexOutputComponents = 64;
+		rsc.maxGeometryInputComponents = 64;
+		rsc.maxGeometryOutputComponents = 128;
+		rsc.maxFragmentInputComponents = 128;
+		rsc.maxImageUnits = 8;
+		rsc.maxCombinedImageUnitsAndFragmentOutputs = 8;
+		rsc.maxCombinedShaderOutputResources = 8;
+		rsc.maxImageSamples = 0;
+		rsc.maxVertexImageUniforms = 0;
+		rsc.maxTessControlImageUniforms = 0;
+		rsc.maxTessEvaluationImageUniforms = 0;
+		rsc.maxGeometryImageUniforms = 0;
+		rsc.maxFragmentImageUniforms = 8;
+		rsc.maxCombinedImageUniforms = 8;
+		rsc.maxGeometryTextureImageUnits = 16;
+		rsc.maxGeometryOutputVertices = 256;
+		rsc.maxGeometryTotalOutputComponents = 1024;
+		rsc.maxGeometryUniformComponents = 1024;
+		rsc.maxGeometryVaryingComponents = 64;
+		rsc.maxTessControlInputComponents = 128;
+		rsc.maxTessControlOutputComponents = 128;
+		rsc.maxTessControlTextureImageUnits = 16;
+		rsc.maxTessControlUniformComponents = 1024;
+		rsc.maxTessControlTotalOutputComponents = 4096;
+		rsc.maxTessEvaluationInputComponents = 128;
+		rsc.maxTessEvaluationOutputComponents = 128;
+		rsc.maxTessEvaluationTextureImageUnits = 16;
+		rsc.maxTessEvaluationUniformComponents = 1024;
+		rsc.maxTessPatchComponents = 120;
+		rsc.maxPatchVertices = 32;
+		rsc.maxTessGenLevel = 64;
+		rsc.maxViewports = 16;
+		rsc.maxVertexAtomicCounters = 0;
+		rsc.maxTessControlAtomicCounters = 0;
+		rsc.maxTessEvaluationAtomicCounters = 0;
+		rsc.maxGeometryAtomicCounters = 0;
+		rsc.maxFragmentAtomicCounters = 8;
+		rsc.maxCombinedAtomicCounters = 8;
+		rsc.maxAtomicCounterBindings = 1;
+		rsc.maxVertexAtomicCounterBuffers = 0;
+		rsc.maxTessControlAtomicCounterBuffers = 0;
+		rsc.maxTessEvaluationAtomicCounterBuffers = 0;
+		rsc.maxGeometryAtomicCounterBuffers = 0;
+		rsc.maxFragmentAtomicCounterBuffers = 1;
+		rsc.maxCombinedAtomicCounterBuffers = 1;
+		rsc.maxAtomicCounterBufferSize = 16384;
+		rsc.maxTransformFeedbackBuffers = 4;
+		rsc.maxTransformFeedbackInterleavedComponents = 64;
+		rsc.maxCullDistances = 8;
+		rsc.maxCombinedClipAndCullDistances = 8;
+		rsc.maxSamples = 4;
+
+		rsc.limits.nonInductiveForLoops = 1;
+		rsc.limits.whileLoops = 1;
+		rsc.limits.doWhileLoops = 1;
+		rsc.limits.generalUniformIndexing = 1;
+		rsc.limits.generalAttributeMatrixVectorIndexing = 1;
+		rsc.limits.generalVaryingIndexing = 1;
+		rsc.limits.generalSamplerIndexing = 1;
+		rsc.limits.generalVariableIndexing = 1;
+		rsc.limits.generalConstantMatrixVectorIndexing = 1;
+	}
+
+	bool compile_glsl_to_spv(std::string& shader, glsl::program_domain domain, std::vector<u32>& spv)
+	{
+		EShLanguage lang = (domain == glsl::glsl_fragment_program) ? EShLangFragment : EShLangVertex;
+
+		glslang::InitializeProcess();
+		glslang::TProgram program;
+		glslang::TShader shader_object(lang);
+		
+		bool success = false;
+		const char *shader_text = shader.data();
+		
+		TBuiltInResource rsc;
+		init_default_resources(rsc);
+
+		shader_object.setStrings(&shader_text, 1);
+
+		EShMessages msg = (EShMessages)(EShMsgVulkanRules | EShMsgSpvRules);
+		if (shader_object.parse(&rsc, 400, EProfile::ECoreProfile, false, true, msg))
+		{
+			program.addShader(&shader_object);
+			success = program.link(EShMsgVulkanRules);
+			if (success)
+			{
+				glslang::TIntermediate* bytes = program.getIntermediate(lang);
+				glslang::GlslangToSpv(*bytes, spv);
+			}
+		}
+		else
+		{
+			LOG_ERROR(RSX, shader_object.getInfoLog());
+			LOG_ERROR(RSX, shader_object.getInfoDebugLog());
+		}
+
+		glslang::FinalizeProcess();
+		return success;
 	}
 }

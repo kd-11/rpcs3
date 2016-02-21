@@ -3,10 +3,13 @@
 #include "Emu/RSX/RSXVertexProgram.h"
 #include "Utilities/Thread.h"
 #include "VulkanAPI.h"
+#include "../VK/VKHelpers.h"
 
 struct VKVertexDecompilerThread : public VertexProgramDecompiler
 {
 	std::string &m_shader;
+	std::vector<vk::glsl::__program_input> inputs;
+	class VKVertexProgram *vk_prog;
 protected:
 	virtual std::string getFloatTypeName(size_t elementCount) override;
 	std::string getIntTypeName(size_t elementCount) override;
@@ -22,14 +25,16 @@ protected:
 
 	const RSXVertexProgram &rsx_vertex_program;
 public:
-	VKVertexDecompilerThread(const RSXVertexProgram &prog, std::string& shader, ParamArray& parr)
+	VKVertexDecompilerThread(const RSXVertexProgram &prog, std::string& shader, ParamArray& parr, class VKVertexProgram &dst)
 		: VertexProgramDecompiler(prog)
 		, m_shader(shader)
 		, rsx_vertex_program(prog)
+		, vk_prog(&dst)
 	{
 	}
 
 	void Task();
+	const std::vector<vk::glsl::__program_input>& get_inputs() { return inputs; }
 };
 
 class VKVertexProgram
@@ -42,9 +47,11 @@ public:
 	VkShaderModule handle = nullptr;
 	int id;
 	std::string shader;
+	std::vector<vk::glsl::__program_input> uniforms;
 
 	void Decompile(const RSXVertexProgram& prog);
 	void Compile();
+	void SetInputs(std::vector<vk::glsl::__program_input>& inputs);
 
 private:
 	void Delete();

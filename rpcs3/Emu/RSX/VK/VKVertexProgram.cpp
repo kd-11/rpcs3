@@ -28,11 +28,21 @@ std::string VKVertexDecompilerThread::compareFunction(COMPARE f, const std::stri
 
 void VKVertexDecompilerThread::insertHeader(std::stringstream &OS)
 {
-	OS << "#version 430" << std::endl << std::endl;
-	OS << "layout(std140, binding = 0) uniform ScaleOffsetBuffer" << std::endl;
+	OS << "#version 450" << std::endl << std::endl;
+	OS << "#extension GL_ARB_separate_shader_objects : enable" << std::endl;
+	OS << "layout(std140, set=0, binding = 0) uniform ScaleOffsetBuffer" << std::endl;
 	OS << "{" << std::endl;
 	OS << "	mat4 scaleOffsetMat;" << std::endl;
 	OS << "};" << std::endl;
+
+	vk::glsl::__program_input in;
+	in.location = 0;
+	in.domain = vk::glsl::glsl_vertex_program;
+	in.name = "ScaleOffsetBuffer";
+	in.type = vk::glsl::input_type_uniform_buffer;
+	in.bound_value = nullptr;
+
+	inputs.push_back(in);
 }
 
 void VKVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::vector<ParamType>& inputs)
@@ -53,7 +63,7 @@ void VKVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 
 	std::sort(input_data.begin(), input_data.end());
 
-	int location = 1;
+	int location = 2;
 	for (const std::tuple<size_t, std::string> item : input_data)
 	{
 		for (const ParamType &PT : inputs)
@@ -61,7 +71,18 @@ void VKVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 			for (const ParamItem &PI : PT.items)
 			{
 				if (PI.name == std::get<1>(item))
-					OS << "layout(location=" << location++ << ")" << "	uniform samplerBuffer" << " " << PI.name << "_buffer;" << std::endl;
+				{
+					vk::glsl::__program_input in;
+					in.location = location;
+					in.domain = vk::glsl::glsl_vertex_program;
+					in.name = PI.name + "_buffer";
+					in.type = vk::glsl::input_type_texel_buffer;
+					in.bound_value = nullptr;
+
+					this->inputs.push_back(in);
+
+					OS << "layout(set=0, binding=" << location++ << ")" << "	uniform samplerBuffer" << " " << PI.name << "_buffer;" << std::endl;
+				}
 			}
 		}
 	}
@@ -69,10 +90,19 @@ void VKVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 
 void VKVertexDecompilerThread::insertConstants(std::stringstream & OS, const std::vector<ParamType> & constants)
 {
-	OS << "layout(std140, binding = 1) uniform VertexConstantsBuffer" << std::endl;
+	OS << "layout(std140, set=0, binding = 1) uniform VertexConstantsBuffer" << std::endl;
 	OS << "{" << std::endl;
 	OS << "	vec4 vc[468];" << std::endl;
 	OS << "};" << std::endl;
+
+	vk::glsl::__program_input in;
+	in.location = 1;
+	in.domain = vk::glsl::glsl_vertex_program;
+	in.name = "VertexConstantsBuffer";
+	in.type = vk::glsl::input_type_uniform_buffer;
+	in.bound_value = nullptr;
+
+	inputs.push_back(in);
 }
 
 struct reg_info
@@ -113,14 +143,15 @@ static const reg_info reg_table[] =
 
 void VKVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::vector<ParamType> & outputs)
 {
+	int location = 17;
 	for (auto &i : reg_table)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg) && i.need_declare)
 		{
 			if (i.name == "fogc")
-				OS << "out float " << i.name << ";" << std::endl;
+				OS << "layout(location=" << location++ << ") out float " << i.name << ";" << std::endl;
 			else
-				OS << "out vec4 " << i.name << ";" << std::endl;
+				OS << "layout(location=" << location++ << ") out vec4 " << i.name << ";" << std::endl;
 		}
 	}
 }
@@ -144,15 +175,15 @@ namespace vk
 			{
 				if (real_input.is_modulo)
 				{
-					OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID %" << real_input.frequency << ");" << std::endl;
+					OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex %" << real_input.frequency << ");" << std::endl;
 					return;
 				}
 
-				OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID /" << real_input.frequency << ");" << std::endl;
+				OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex /" << real_input.frequency << ");" << std::endl;
 				return;
 			}
 
-			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexID);" << std::endl;
+			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex).xyz;" << std::endl;
 			return;
 		}
 
@@ -193,6 +224,9 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg))
 			OS << "	" << i.name << " = " << i.src_reg << i.src_reg_mask << ";" << std::endl;
 	}
+
+	//Transpose maybe?
+	OS << "	//gl_Position = scaleOffsetMat * gl_Position;" << std::endl;
 	OS << "	gl_Position = gl_Position * scaleOffsetMat;" << std::endl;
 	OS << "}" << std::endl;
 }
@@ -201,6 +235,7 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 void VKVertexDecompilerThread::Task()
 {
 	m_shader = Decompile();
+	vk_prog->SetInputs(inputs);
 }
 
 VKVertexProgram::VKVertexProgram()
@@ -214,7 +249,7 @@ VKVertexProgram::~VKVertexProgram()
 
 void VKVertexProgram::Decompile(const RSXVertexProgram& prog)
 {
-	VKVertexDecompilerThread decompiler(prog, shader, parr);
+	VKVertexDecompilerThread decompiler(prog, shader, parr, *this);
 	decompiler.Task();
 }
 
@@ -223,7 +258,8 @@ void VKVertexProgram::Compile()
 	const char *glsl_shader = shader.data();
 	fs::file(fs::get_config_dir() + "VertexProgram.vert", fom::rewrite).write(glsl_shader);
 
-	system("glslangValidator.exe -G -o vert.spv VertexProgram.vert > vs_compile_log.log");
+	system("del frag.spv");
+	system("glslangValidator.exe -V -o vert.spv VertexProgram.vert > vs_compile_log.log");
 
 	fs::file spv_file = fs::file(fs::get_config_dir() + "vert.spv", fom::read);
 	u64 spir_v_length = spv_file.size();
@@ -263,5 +299,13 @@ void VKVertexProgram::Delete()
 		}
 
 		handle = nullptr;
+	}
+}
+
+void VKVertexProgram::SetInputs(std::vector<vk::glsl::__program_input>& inputs)
+{
+	for (auto &it : inputs)
+	{
+		uniforms.push_back(it);
 	}
 }

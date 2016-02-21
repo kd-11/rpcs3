@@ -52,6 +52,24 @@ namespace vk
 			throw EXCEPTION("Unsupported compare op: 0x%X", gl_name);
 		}
 	}
+
+	VkFormat get_suitable_vk_format(rsx::vertex_base_type type, u8 size)
+	{
+		/**
+		* Set up buffer fetches to only work on 4-component access
+		*/
+		const VkFormat vec1_types[] = { VK_FORMAT_R16_UNORM, VK_FORMAT_R32_SFLOAT, VK_FORMAT_R16_SFLOAT, VK_FORMAT_R8_UNORM, VK_FORMAT_R32_SINT, VK_FORMAT_R16_SFLOAT, VK_FORMAT_R8_UNORM };
+		const VkFormat vec2_types[] = { VK_FORMAT_R16G16_UNORM, VK_FORMAT_R32G32_SFLOAT, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R8G8_UNORM, VK_FORMAT_R32G32_SINT, VK_FORMAT_R16G16_SFLOAT, VK_FORMAT_R8G8_UNORM };
+		const VkFormat vec3_types[] = { VK_FORMAT_R16G16B16A16_UNORM, VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R32G32B32A32_SINT, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM };	//VEC3 COMPONENTS NOT SUPPORTED!
+		const VkFormat vec4_types[] = { VK_FORMAT_R16G16B16A16_UNORM, VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM, VK_FORMAT_R32G32B32A32_SINT, VK_FORMAT_R16G16B16A16_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM };
+
+		const VkFormat* vec_selectors[] = { 0, vec1_types, vec2_types, vec3_types, vec4_types };
+
+		if (type > rsx::vertex_base_type::ub256)
+			throw EXCEPTION("VKGS error: unknown vertex base type 0x%X.", (u32)type);
+
+		return vec_selectors[size][(int)type];
+	}
 }
 
 VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
@@ -65,7 +83,7 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	m_thread_context.makeCurrentInstance(1);
 	m_thread_context.enable_debugging();
 
-	std::vector<vk::physical_device> gpus = m_thread_context.enumerateDevices();
+	std::vector<vk::physical_device>& gpus = m_thread_context.enumerateDevices();
 	m_swap_chain = m_thread_context.createSwapChain(hInstance, hWnd, gpus[0]);
 
 	m_device = (vk::render_device *)(&m_swap_chain->get_device());
@@ -122,6 +140,10 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 		VkImageView attachments[] = { m_swap_chain->get_swap_chain_image(i), m_depth_buffer };
 		m_framebuffers[i].create((*m_device), m_render_pass, attachments, 2, m_frame->client_size().width, m_frame->client_size().height);
 	}
+
+	m_scale_offset_buffer.create((*m_device), 64);
+	m_vertex_constants_buffer.create((*m_device), 512 * 16);
+	m_fragment_constants_buffer.create((*m_device), 512 * 16);
 }
 
 VKGSRender::~VKGSRender()
@@ -140,6 +162,9 @@ VKGSRender::~VKGSRender()
 	}
 
 	m_prog_buffer.clear();
+	m_scale_offset_buffer.destroy();
+	m_vertex_constants_buffer.destroy();
+	m_fragment_constants_buffer.destroy();
 
 	for (u32 i = 0; i < m_swap_chain->get_swap_image_count(); ++i)
 		m_framebuffers[i].destroy();
@@ -171,10 +196,12 @@ void VKGSRender::begin()
 {
 	rsx::thread::begin();
 
+	CHECK_RESULT(vkDeviceWaitIdle((*m_device)));
+
 	if (!load_program())
 		return;
 
-	u32 color_mask = rsx::method_registers[NV4097_SET_COLOR_MASK];
+/*	u32 color_mask = rsx::method_registers[NV4097_SET_COLOR_MASK];
 	bool color_mask_b = !!(color_mask & 0xff);
 	bool color_mask_g = !!((color_mask >> 8) & 0xff);
 	bool color_mask_r = !!((color_mask >> 16) & 0xff);
@@ -185,10 +212,10 @@ void VKGSRender::begin()
 
 	if (rsx::method_registers[NV4097_SET_DEPTH_TEST_ENABLE])
 	{
-		m_program->set_depth_state_enable(VK_TRUE);
+		m_program->set_depth_test_enable(VK_TRUE);
 		m_program->set_depth_compare_op(vk::compare_op(rsx::method_registers[NV4097_SET_DEPTH_FUNC]));
 		m_program->set_depth_write_mask(rsx::method_registers[NV4097_SET_DEPTH_MASK]);
-	}
+	}*/
 
 	//TODO: Set up other render-state parameters into the program pipeline
 	if (!recording)
@@ -196,7 +223,11 @@ void VKGSRender::begin()
 
 	init_buffers();
 
-	LOG_ERROR(RSX, ">>> Draw call begin!");
+	//LOG_ERROR(RSX, ">>> Draw call begin!");
+
+/*	VkClearValue clear_values[2];
+	clear_values[0].color.float32[0] = 0.2f;
+	clear_values[1].depthStencil = { 1.0f, 0 };*/
 
 	VkRenderPassBeginInfo rp_begin;
 	rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -229,10 +260,7 @@ void VKGSRender::begin()
 	scissor.offset.y = 0;
 
 	vkCmdSetScissor(m_command_buffer, 0, 1, &scissor);
-
-	//TODO:
-	//Bind pipeline (shaders)
-	//Bind descriptor sets (shader data)
+	m_draw_calls++;
 }
 
 namespace
@@ -280,12 +308,12 @@ void VKGSRender::end()
 
 	const std::string reg_table[] =
 	{
-		"in_pos", "in_weight", "in_normal",
-		"in_diff_color", "in_spec_color",
-		"in_fog",
-		"in_point_size", "in_7",
-		"in_tc0", "in_tc1", "in_tc2", "in_tc3",
-		"in_tc4", "in_tc5", "in_tc6", "in_tc7"
+		"in_pos_buffer", "in_weight_buffer", "in_normal_buffer",
+		"in_diff_color_buffer", "in_spec_color_buffer",
+		"in_fog_buffer",
+		"in_point_size_buffer", "in_7_buffer",
+		"in_tc0_buffer", "in_tc1_buffer", "in_tc2_buffer", "in_tc3_buffer",
+		"in_tc4_buffer", "in_tc5_buffer", "in_tc6_buffer", "in_tc7_buffer"
 	};
 
 	u32 input_mask = rsx::method_registers[NV4097_SET_VERTEX_ATTRIB_INPUT_MASK];
@@ -328,25 +356,22 @@ void VKGSRender::end()
 			if (!vertex_info.size) // disabled
 				continue;
 
-			int location;
-			if (!m_program->uniforms.has_location(reg_table[index] + "_buffer", &location))
+			if (!m_program->has_uniform(vk::glsl::glsl_vertex_program, reg_table[index]))
 				continue;
 
 			const u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
-			const u32 gl_type = to_gl_internal_type(vertex_info.type, vertex_info.size);
 			const u32 data_size = element_size * vertex_draw_count;
+			const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
 
-			auto &buffer = m_gl_attrib_buffers[index].buffer;
-			auto &texture = m_gl_attrib_buffers[index].texture;
+			auto &buffer = m_gl_attrib_buffers[index];
 
-			buffer->data(data_size, nullptr);
-			buffer->sub_data(0, data_size, vertex_arrays_data.data() + offset);
-
+			buffer.sub_data(0, data_size, vertex_arrays_data.data() + offset);
+			buffer.set_format(format);
 			//Attach buffer to texture
-			texture->copy_from(*buffer, gl_type);
+			//texture->copy_from(*buffer, gl_type);
 
 			//Link texture to uniform location
-			m_program->uniforms.texture(location, index + rsx::limits::vertex_count, *texture);
+			m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], buffer, true);
 
 			offset += rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
 		}
@@ -368,8 +393,7 @@ void VKGSRender::end()
 			if (!enabled)
 				continue;
 
-			int location;
-			if (!m_program->uniforms.has_location(reg_table[index] + "_buffer", &location))
+			if (!m_program->has_uniform(vk::glsl::glsl_vertex_program, reg_table[index]))
 				continue;
 
 			if (vertex_arrays_info[index].size > 0)
@@ -380,41 +404,34 @@ void VKGSRender::end()
 
 				// Fill vertex_array
 				u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
-				vertex_array.resize(vertex_draw_count * element_size);
+				vertex_array.resize(vertex_draw_count * sizeof(u32)*4);
 				if (draw_command == rsx::draw_command::array)
 				{
 					size_t offset = 0;
 					for (const auto &first_count : first_count_commands)
 					{
-						write_vertex_array_data_to_buffer(vertex_array.data() + offset, first_count.first, first_count.second, index, vertex_info);
+						write_vertex_array_data_to_buffer(vertex_array.data() + offset, first_count.first, first_count.second, index, vertex_info, true);
 						offset += first_count.second * element_size;
 					}
 				}
 				if (draw_command == rsx::draw_command::indexed)
 				{
 					vertex_array.resize((max_index + 1) * element_size);
-					write_vertex_array_data_to_buffer(vertex_array.data(), 0, max_index + 1, index, vertex_info);
+					write_vertex_array_data_to_buffer(vertex_array.data(), 0, max_index + 1, index, vertex_info, true);
 				}
 
-				size_t size = vertex_array.size();
-				size_t position = vertex_arrays_data.size();
-				vertex_arrays_offsets[index] = gsl::narrow<u32>(position);
-				vertex_arrays_data.resize(position + size);
-
-				const u32 gl_type = to_gl_internal_type(vertex_info.type, vertex_info.size);
+				const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
 				const u32 data_size = element_size * vertex_draw_count;
 
-				auto &buffer = m_gl_attrib_buffers[index].buffer;
-				auto &texture = m_gl_attrib_buffers[index].texture;
+				auto &buffer = m_gl_attrib_buffers[index];
 
-				buffer->data(data_size, nullptr);
-				buffer->sub_data(0, data_size, vertex_array.data());
-
+				buffer.sub_data(0, data_size, vertex_array.data());
+				buffer.set_format(format);
 				//Attach buffer to texture
-				texture->copy_from(*buffer, gl_type);
+				//texture->copy_from(*buffer, gl_type);
 
 				//Link texture to uniform
-				m_program->uniforms.texture(location, index + rsx::limits::vertex_count, *texture);
+				m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], buffer, true);
 			}
 			else if (register_vertex_info[index].size > 0)
 			{
@@ -426,21 +443,19 @@ void VKGSRender::end()
 				{
 				case rsx::vertex_base_type::f:
 				{
-					const u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
-					const u32 gl_type = to_gl_internal_type(vertex_info.type, vertex_info.size);
 					const size_t data_size = vertex_data.size();
+					const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
 
-					auto &buffer = m_gl_attrib_buffers[index].buffer;
-					auto &texture = m_gl_attrib_buffers[index].texture;
+					auto &buffer = m_gl_attrib_buffers[index];
 
-					buffer->data(data_size, nullptr);
-					buffer->sub_data(0, data_size, vertex_data.data());
+					buffer.sub_data(0, data_size, vertex_data.data());
+					buffer.set_format(format);
 
 					//Attach buffer to texture
-					texture->copy_from(*buffer, gl_type);
+					//texture->copy_from(*buffer, gl_type);
 
 					//Link texture to uniform
-					m_program->uniforms.texture(location, index + rsx::limits::vertex_count, *texture);
+					m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], buffer, true);
 					break;
 				}
 				default:
@@ -451,12 +466,21 @@ void VKGSRender::end()
 		}
 	}
 
+	m_program->use(m_command_buffer, m_render_pass, 0);
+	
+	if (draw_command != rsx::draw_command::indexed)
+		vkCmdDraw(m_command_buffer, vertex_draw_count, 1, 0, 0);
+	else
+		LOG_ERROR(RSX, "Indexed draw!");
+
 	vkCmdEndRenderPass(m_command_buffer);
 
-	LOG_ERROR(RSX, ">> Draw call end!");
+	LOG_ERROR(RSX, ">> Draw call end, %d!", m_draw_calls);
 	recording = false;
 	end_command_buffer_recording();
 	execute_command_buffer(false);
+
+	Sleep(10);
 
 	rsx::thread::end();
 }
@@ -483,15 +507,25 @@ void VKGSRender::set_viewport()
 	rsx::window_origin shader_window_origin = rsx::to_window_origin((shader_window >> 12) & 0xf);
 
 	//TODO set viewport rules into either program pipeline state or command buffer
+	LOG_ERROR(RSX, "Set viewport call unhandled!");
 }
 
 void VKGSRender::on_init_thread()
 {
 	GSRender::on_init_thread();
+
+	for (auto &attrib_buffer : m_gl_attrib_buffers)
+	{
+		attrib_buffer.create((*m_device), 65536, VK_FORMAT_R32G32B32A32_SFLOAT, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT);
+	}
 }
 
 void VKGSRender::on_exit()
 {
+	for (auto &attrib_buffer : m_gl_attrib_buffers)
+	{
+		attrib_buffer.destroy();
+	}
 }
 
 void VKGSRender::clear_surface(u32 mask)
@@ -500,7 +534,7 @@ void VKGSRender::clear_surface(u32 mask)
 	if (!(mask & 0xF3)) return;
 
 	if (m_current_present_image== 0xFFFF || recording) return;
-
+	//return;
 	begin_command_buffer_recording();
 
 	float depth_clear = 1.f;
@@ -564,7 +598,7 @@ void VKGSRender::clear_surface(u32 mask)
 	end_command_buffer_recording();
 	execute_command_buffer(false);
 
-	LOG_ERROR(RSX, ">>>> Clear surface finished");
+	//LOG_ERROR(RSX, ">>>> Clear surface finished");
 }
 
 bool VKGSRender::do_method(u32 cmd, u32 arg)
@@ -581,20 +615,21 @@ bool VKGSRender::do_method(u32 cmd, u32 arg)
 
 void VKGSRender::init_render_pass()
 {
+	//TODO: Create buffers as requested by the game. Render to swapchain for now..
 	/* Describe a render pass and framebuffer attachments */
 	VkAttachmentDescription attachments[2];
 	attachments[0].format = m_swap_chain->get_surface_format();
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;							//Set to clear removes warnings about empty contents after flip; overwrites previous calls
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;	//PRESENT_SRC_KHR??
 	attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-	attachments[1].format = VK_FORMAT_D24_UNORM_S8_UINT;						/* Depth buffer format. Should be more elegant than this */
+	attachments[1].format = VK_FORMAT_D16_UNORM;								/* Depth buffer format. Should be more elegant than this */
 	attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
-	attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
 	attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 	attachments[1].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[1].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -652,6 +687,47 @@ bool VKGSRender::load_program()
 	//1. Update scale-offset matrix
 	//2. Update vertex constants
 	//3. Update fragment constants
+	u8 *buf = (u8*)m_scale_offset_buffer.map(0, VK_WHOLE_SIZE);
+
+	//COORDINATE TRANSFORMS ARE ODD WITH THIS ONE
+	//COMPUTE TRANSFORM HERE FOR EXPERIMENTS
+	{
+		int clip_w = rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL] >> 16;
+		int clip_h = rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL] >> 16;
+
+		float scale_x = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_SCALE] / (clip_w / 2.f);
+		float offset_x = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_OFFSET] - (clip_w / 2.f);
+		offset_x /= clip_w / 2.f;
+
+		float scale_y = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_SCALE + 1] / (clip_h / 2.f);
+		float offset_y = ((float&)rsx::method_registers[NV4097_SET_VIEWPORT_OFFSET + 1] - (clip_h / 2.f));
+		offset_y /= clip_h / 2.f;
+
+		float scale_z = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_SCALE + 2];
+		float offset_z = (float&)rsx::method_registers[NV4097_SET_VIEWPORT_OFFSET + 2];
+
+		float one = 1.f;
+
+		stream_vector(buf, (u32&)scale_x, 0, 0, (u32&)offset_x);
+		stream_vector((char*)buf + 16, 0, (u32&)scale_y, 0, (u32&)offset_y);
+		stream_vector((char*)buf + 32, 0, 0, (u32&)scale_z, (u32&)offset_z);
+		stream_vector((char*)buf + 48, 0, 0, 0, (u32&)one);
+	}
+
+	m_scale_offset_buffer.unmap();
+
+	buf = (u8*)m_vertex_constants_buffer.map(0, VK_WHOLE_SIZE);
+	fill_vertex_program_constants_data(buf);
+	m_vertex_constants_buffer.unmap();
+
+	size_t fragment_constants_sz = m_prog_buffer.get_fragment_constants_buffer_size(fragment_program);
+	buf = (u8*)m_fragment_constants_buffer.map(0, fragment_constants_sz);
+	m_prog_buffer.fill_fragment_constans_buffer({ reinterpret_cast<float*>(buf), gsl::narrow<int>(fragment_constants_sz) }, fragment_program);
+	m_fragment_constants_buffer.unmap();
+
+	m_program->bind_uniform(vk::glsl::glsl_vertex_program, "ScaleOffsetBuffer", m_scale_offset_buffer);
+	m_program->bind_uniform(vk::glsl::glsl_vertex_program, "VertexConstantsBuffer", m_vertex_constants_buffer);
+	m_program->bind_uniform(vk::glsl::glsl_fragment_program, "FragmentConstantsBuffer", m_fragment_constants_buffer);
 
 	return true;
 }
@@ -773,17 +849,17 @@ void VKGSRender::begin_command_buffer_recording()
 	begin_infos.pNext = nullptr;
 	begin_infos.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-	if (m_submit_fence)
+/*	if (m_submit_fence)
 	{
-		VkResult error = vkWaitForFences(*m_device, 1, &m_submit_fence, VK_TRUE, 1000000L);
+		VkResult error = vkDeviceWaitIdle((*m_device));//vkWaitForFences(*m_device, 1, &m_submit_fence, VK_TRUE, ~0LL);
 		vkDestroyFence(*m_device, m_submit_fence, nullptr);
 		m_submit_fence = nullptr;
 
 		if (error)
 			LOG_ERROR(RSX, "vkWaitForFences failed with error 0x%X", error);
 
-		vkResetCommandBuffer(m_command_buffer, VK_COMMAND_BUFFER_RESET_RELEASE_RESOURCES_BIT);
-	}
+		vkResetCommandBuffer(m_command_buffer, 0);
+	}*/
 
 	CHECK_RESULT(vkBeginCommandBuffer(m_command_buffer, &begin_infos));
 	recording = true;
@@ -799,21 +875,23 @@ void VKGSRender::execute_command_buffer(bool wait)
 {
 	if (recording) throw;
 
-	if (m_submit_fence)
+/*	if (m_submit_fence)
 	{
-		VkResult error = vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, 1000000L);
+		VkResult error = vkDeviceWaitIdle((*m_device));//vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, 1000000L);
 		vkDestroyFence((*m_device), m_submit_fence, nullptr);
 		m_submit_fence = nullptr;
 
 		if (error) LOG_ERROR(RSX, "vkWaitForFence failed with error 0x%X", error);
 	}
 
+	vkDeviceWaitIdle((*m_device));
+
 	VkFenceCreateInfo fence_info;
 	fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	fence_info.flags = 0;
 	fence_info.pNext = nullptr;
 
-	vkCreateFence(*m_device, &fence_info, nullptr, &m_submit_fence);
+	vkCreateFence(*m_device, &fence_info, nullptr, &m_submit_fence);*/
 
 	VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	VkCommandBuffer cmd = m_command_buffer;
@@ -824,22 +902,14 @@ void VKGSRender::execute_command_buffer(bool wait)
 	infos.pNext = nullptr;
 	infos.pSignalSemaphores = nullptr;
 	infos.pWaitDstStageMask = &pipe_stage_flags;
-	infos.signalSemaphoreCount = 0;
-	
-	if (wait)
-	{
-		infos.waitSemaphoreCount = 1;
-		infos.pWaitSemaphores = &m_present_semaphore;
-	}
-	else
-	{
-		infos.waitSemaphoreCount = 0;
-		infos.pWaitSemaphores = nullptr;
-	}
-	
+	infos.signalSemaphoreCount = 0;	
+	infos.waitSemaphoreCount = 0;
+	infos.pWaitSemaphores = nullptr;
 	infos.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
 	CHECK_RESULT(vkQueueSubmit(m_swap_chain->get_present_queue(), 1, &infos, m_submit_fence));
+	CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
+	CHECK_RESULT(vkResetCommandBuffer(m_command_buffer, 0));
 }
 
 void VKGSRender::flip(int buffer)
@@ -881,7 +951,26 @@ void VKGSRender::flip(int buffer)
 		aspect_ratio.size = m_frame->client_size();
 	}
 
+	begin_command_buffer_recording();
+
+	VkImageMemoryBarrier barrier = { (VkStructureType)0 };
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.pNext = NULL;
+	barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+
+	barrier.image = m_swap_chain->get_swap_chain_image(m_current_present_image);
+	VkImageMemoryBarrier *pmemory_barrier = &barrier;
+	vkCmdPipelineBarrier(m_command_buffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr, 0, nullptr, 1, pmemory_barrier);
+
+	end_command_buffer_recording();
 	execute_command_buffer(false);
+	
 	//TODO
 
 	//Clear old screen
@@ -904,6 +993,7 @@ void VKGSRender::flip(int buffer)
 	vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
 	m_present_semaphore = nullptr;
 
+	m_draw_calls = 0;
 	dirty_frame = true;
 	m_frame->flip(m_context);
 }

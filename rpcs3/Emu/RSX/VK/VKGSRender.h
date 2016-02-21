@@ -23,12 +23,7 @@ private:
 
 	rsx::surface_info m_surface;
 
-	struct texture_buffer_pair
-	{
-		vk::texture *texture;
-		vk::buffer *buffer;
-	}
-	m_gl_attrib_buffers[rsx::limits::vertex_count];
+	vk::buffer m_gl_attrib_buffers[rsx::limits::vertex_count];
 
 public:
 	//vk::fbo draw_fbo;
@@ -63,6 +58,7 @@ private:
 	//Single render pass
 	VkRenderPass m_render_pass;
 
+	u32 m_draw_calls=0;
 	vk::framebuffer m_framebuffers[4];
 
 public:

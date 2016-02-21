@@ -3,21 +3,25 @@
 #include "Emu/RSX/RSXFragmentProgram.h"
 #include "Utilities/Thread.h"
 #include "VulkanAPI.h"
+#include "../VK/VKHelpers.h"
 
 struct VKFragmentDecompilerThread : public FragmentProgramDecompiler
 {
 	std::string& m_shader;
 	ParamArray& m_parrDummy;
+	std::vector<vk::glsl::__program_input> inputs;
+	class VKFragmentProgram *vk_prog;
 public:
-	VKFragmentDecompilerThread(std::string& shader, ParamArray& parr, const RSXFragmentProgram &prog, u32& size)
+	VKFragmentDecompilerThread(std::string& shader, ParamArray& parr, const RSXFragmentProgram &prog, u32& size, class VKFragmentProgram& dst)
 		: FragmentProgramDecompiler(prog, size)
 		, m_shader(shader)
 		, m_parrDummy(parr)
+		, vk_prog(&dst)
 	{
 	}
 
 	void Task();
-
+	const std::vector<vk::glsl::__program_input>& get_inputs() { return inputs; }
 protected:
 	virtual std::string getFloatTypeName(size_t elementCount) override;
 	virtual std::string getFunction(FUNCTION) override;
@@ -47,6 +51,8 @@ public:
 	std::string shader;
 	std::vector<size_t> FragmentConstantOffsetCache;
 
+	std::vector<vk::glsl::__program_input> uniforms;
+	void SetInputs(std::vector<vk::glsl::__program_input>& uniforms);
 	/**
 	 * Decompile a fragment shader located in the PS3's Memory.  This function operates synchronously.
 	 * @param prog RSXShaderProgram specifying the location and size of the shader in memory

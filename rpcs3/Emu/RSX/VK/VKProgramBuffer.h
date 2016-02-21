@@ -28,13 +28,14 @@ struct VKTraits
 	pipeline_storage_type build_pipeline(const vertex_program_type &vertexProgramData, const fragment_program_type &fragmentProgramData, const pipeline_properties &pipelineProperties)
 	{
 		pipeline_storage_type result(*vk::get_current_renderer());
+
+		std::vector<vk::glsl::__program_input> vertex_uniforms = vertexProgramData.uniforms;
+		std::vector<vk::glsl::__program_input> fragment_uniforms = fragmentProgramData.uniforms;
 		
 		result.attachVertexProgram(vertexProgramData.handle)
 			.attachFragmentProgram(fragmentProgramData.handle)
-			.bind_fragment_data_location("ocol0", 0)
-			.bind_fragment_data_location("ocol1", 1)
-			.bind_fragment_data_location("ocol2", 2)
-			.bind_fragment_data_location("ocol3", 3)
+			.load_uniforms(vk::glsl::glsl_vertex_program, vertex_uniforms)
+			.load_uniforms(vk::glsl::glsl_fragment_program, fragment_uniforms)
 			.make();
 
 		return result;

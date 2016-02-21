@@ -28,7 +28,7 @@ namespace
 
 // FIXME: these functions shouldn't access rsx::method_registers (global)
 
-void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_t index, const rsx::data_array_format_info &vertex_array_desc)
+void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_t index, const rsx::data_array_format_info &vertex_array_desc, bool force_expansion)
 {
 	Expects(vertex_array_desc.size > 0);
 
@@ -37,6 +37,10 @@ void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_
 	u32 address = base_offset + rsx::get_address(offset & 0x7fffffff, offset >> 31);
 
 	u32 element_size = rsx::get_vertex_type_size_on_host(vertex_array_desc.type, vertex_array_desc.size);
+	
+	if (force_expansion && vertex_array_desc.size == 3 &&
+		(vertex_array_desc.type == rsx::vertex_base_type::f || vertex_array_desc.type == rsx::vertex_base_type::s32k))
+		element_size = (sizeof(u32) * 4);
 
 	u32 base_index = rsx::method_registers[NV4097_SET_VERTEX_DATA_BASE_INDEX];
 
@@ -65,8 +69,20 @@ void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_
 				*c_dst++ = 0x3c00;
 			break;
 		}
-
 		case rsx::vertex_base_type::f:
+		{
+			auto* c_src = (const be_t<float>*)src;
+			float* c_dst = (float*)dst;
+
+			for (u32 j = 0; j < vertex_array_desc.size; ++j)
+			{
+				*c_dst++ = *c_src++;
+			}
+
+			if (vertex_array_desc.size == 3 && force_expansion)
+				*c_dst++ = 1.f;
+			break;
+		}
 		case rsx::vertex_base_type::s32k:
 		case rsx::vertex_base_type::ub256:
 		{
@@ -77,6 +93,9 @@ void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_
 			{
 				*c_dst++ = *c_src++;
 			}
+
+			if (vertex_array_desc.size == 3 && force_expansion)
+				*c_dst++ = ~(0L);
 			break;
 		}
 		case rsx::vertex_base_type::cmp:

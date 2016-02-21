@@ -6,7 +6,7 @@
 /**
  * Write count vertex attributes from index array buffer starting at first, using vertex_array_desc
  */
-void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_t index, const rsx::data_array_format_info &vertex_array_desc);
+void write_vertex_array_data_to_buffer(void *buffer, u32 first, u32 count, size_t index, const rsx::data_array_format_info &vertex_array_desc, bool force_expansion=false);
 
 /*
  * If primitive mode is not supported and need to be emulated (using an index buffer) returns false.

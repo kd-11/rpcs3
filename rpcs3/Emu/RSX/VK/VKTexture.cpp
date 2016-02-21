@@ -58,6 +58,8 @@ namespace vk
 
 		//First create the image
 		VkImageCreateInfo image_info;
+		memset(&image_info, 0, sizeof(image_info));
+
 		image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		image_info.pNext = nullptr;
 		image_info.imageType = VK_IMAGE_TYPE_2D;
@@ -72,14 +74,9 @@ namespace vk
 		image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 		CHECK_RESULT(vkCreateImage(device, &image_info, nullptr, &m_image_contents));
-
-		//Need to grab proper memory type bits using a function
-		//u32 type_bits = gpu_only ? VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT : VK_MEMORY_PROPERTY_HOST_CACHED_BIT;
-		//type_bits |= VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT;
-		u32 type_bits = 0;
 		
 		vkGetImageMemoryRequirements(device, m_image_contents, &m_memory_layout);
-		vram_allocation.allocate_from_pool(device, m_memory_layout.size, type_bits);
+		vram_allocation.allocate_from_pool(device, m_memory_layout.size, m_memory_layout.memoryTypeBits);
 
 		CHECK_RESULT(vkBindImageMemory(device, m_image_contents, vram_allocation, 0));
 

@@ -30,14 +30,16 @@ std::string VKFragmentDecompilerThread::compareFunction(COMPARE f, const std::st
 void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
 {
 	OS << "#version 420" << std::endl;
+	OS << "#extension GL_ARB_separate_shader_objects: enable" << std::endl << std::endl;
 }
 
 void VKFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
 {
+	int location = 16;
 	for (const ParamType& PT : m_parr.params[PF_PARAM_IN])
 	{
 		for (const ParamItem& PI : PT.items)
-			OS << "in " << PT.type << " " << PI.name << ";" << std::endl;
+			OS << "layout(location=" << location++ << ") in " << PT.type << " " << PI.name << ";" << std::endl;
 	}
 }
 
@@ -54,12 +56,14 @@ void VKFragmentDecompilerThread::insertOutputs(std::stringstream & OS)
 	for (int i = 0; i < sizeof(table) / sizeof(*table); ++i)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", table[i].second))
-			OS << "out vec4 " << table[i].first << ";" << std::endl;
+			OS << "layout(location=" << i << ") " << "out vec4 " << table[i].first << ";" << std::endl;
 	}
 }
 
 void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 {
+	int location = 1;
+
 	for (const ParamType& PT : m_parr.params[PF_PARAM_UNIFORM])
 	{
 		if (PT.type != "sampler1D" &&
@@ -76,11 +80,11 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 			if (m_prog.unnormalized_coords & (1 << index))
 				samplerType = "sampler2DRect";
 
-			OS << "uniform " << samplerType << " " << PI.name << ";" << std::endl;
+			OS << "layout(set=1, binding=" << location++ << ") uniform " << samplerType << " " << PI.name << ";" << std::endl;
 		}
 	}
 
-	OS << "layout(std140, binding = 2) uniform FragmentConstantsBuffer" << std::endl;
+	OS << "layout(std140, set=1, binding = 0) uniform FragmentConstantsBuffer" << std::endl;
 	OS << "{" << std::endl;
 
 	for (const ParamType& PT : m_parr.params[PF_PARAM_UNIFORM])
@@ -98,6 +102,15 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 	// A dummy value otherwise it's invalid to create an empty uniform buffer
 	OS << "	vec4 void_value;" << std::endl;
 	OS << "};" << std::endl;
+
+	vk::glsl::__program_input in;
+	in.location = 0;
+	in.domain = vk::glsl::glsl_fragment_program;
+	in.name = "FragmentConstantsBuffer";
+	in.type = vk::glsl::input_type_uniform_buffer;
+	in.bound_value = nullptr;
+
+	inputs.push_back(in);
 }
 
 void VKFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
@@ -154,6 +167,7 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 void VKFragmentDecompilerThread::Task()
 {
 	m_shader = Decompile();
+	vk_prog->SetInputs(inputs);
 }
 
 VKFragmentProgram::VKFragmentProgram()
@@ -168,7 +182,7 @@ VKFragmentProgram::~VKFragmentProgram()
 void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 {
 	u32 size;
-	VKFragmentDecompilerThread decompiler(shader, parr, prog, size);
+	VKFragmentDecompilerThread decompiler(shader, parr, prog, size, *this);
 	decompiler.Task();
 	
 	for (const ParamType& PT : decompiler.m_parr.params[PF_PARAM_UNIFORM])
@@ -185,10 +199,11 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 void VKFragmentProgram::Compile()
 {
-	const char *glsl_shader = shader.data();
+	const char *glsl_shader = shader.data();//"#version 450\n#extension GL_ARB_separate_shader_objects : enable\nlayout(location=0) out vec4 col;\nvoid main(){\ncol=vec4(1.f);\n}\n";
 	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(glsl_shader);
 
-	system("glslangValidator.exe -G -o frag.spv FragmentProgram.frag > fs_compile_log.log");
+	system("del frag.spv");
+	system("glslangValidator.exe -V -o frag.spv FragmentProgram.frag > fs_compile_log.log");
 	
 	fs::file spv_file = fs::file(fs::get_config_dir() + "frag.spv", fom::read);
 	u64 spir_v_length = spv_file.size();
@@ -228,5 +243,13 @@ void VKFragmentProgram::Delete()
 			vkDestroyShaderModule(dev, handle, NULL);
 			handle = nullptr;
 		}
+	}
+}
+
+void VKFragmentProgram::SetInputs(std::vector<vk::glsl::__program_input>& inputs)
+{
+	for (auto &it : inputs)
+	{
+		uniforms.push_back(it);
 	}
 }

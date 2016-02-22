@@ -6,6 +6,7 @@
 #define RSX_DEBUG 1
 
 #include "VKProgramBuffer.h"
+#include "../GCM.h"
 
 #pragma comment(lib, "vulkan-1.lib")
 
@@ -56,9 +57,14 @@ private:
 	bool dirty_frame = true;
 
 	//Single render pass
-	VkRenderPass m_render_pass;
-
+	VkRenderPass m_render_pass = nullptr;
 	u32 m_draw_calls=0;
+
+	rsx::surface_target m_current_targets;
+	u32 m_current_fbo = 0;
+	
+	VkFormat m_surface_format = VK_FORMAT_UNDEFINED;
+	vk::texture m_fbo_surfaces[4];
 	vk::framebuffer m_framebuffers[4];
 
 public:
@@ -69,7 +75,7 @@ private:
 	static u32 enable(u32 enable, u32 cap);
 	static u32 enable(u32 enable, u32 cap, u32 index);
 	void clear_surface(u32 mask);
-	void init_render_pass();
+	void init_render_pass(VkFormat surface_format, int num_draw_buffers, int *draw_buffers);
 	void destroy_render_pass();
 	void execute_command_buffer(bool wait);
 	void begin_command_buffer_recording();

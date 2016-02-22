@@ -54,5 +54,8 @@
     <ClCompile Include="Emu\RSX\VK\VulkanAPI.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\VK\VKProgramPipeline.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

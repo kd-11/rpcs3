@@ -180,9 +180,11 @@ namespace vk
 	{
 		if (!owner) return;
 
+		if (m_sampler)
+			vkDestroySampler((*owner), m_sampler, nullptr);
+
 		//Destroy all objects managed by this object
 		vkDestroyImageView((*owner), m_view, nullptr);
-		vkDestroySampler((*owner), m_sampler, nullptr);
 		vkDestroyImage((*owner), m_image_contents, nullptr);
 
 		vram_allocation.destroy();

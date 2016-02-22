@@ -80,6 +80,15 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 			if (m_prog.unnormalized_coords & (1 << index))
 				samplerType = "sampler2DRect";
 
+			vk::glsl::__program_input in;
+			in.location = location;
+			in.domain = vk::glsl::glsl_fragment_program;
+			in.name = PI.name;
+			in.type = vk::glsl::input_type_texture;
+			in.bound_value = nullptr;
+
+			inputs.push_back(in);
+
 			OS << "layout(set=1, binding=" << location++ << ") uniform " << samplerType << " " << PI.name << ";" << std::endl;
 		}
 	}
@@ -199,6 +208,8 @@ void VKFragmentProgram::Decompile(const RSXFragmentProgram& prog)
 
 void VKFragmentProgram::Compile()
 {
+	fs::file(fs::get_config_dir() + "FragmentProgram.frag", fom::rewrite).write(shader);
+
 	std::vector<u32> spir_v;
 	if (!vk::compile_glsl_to_spv(shader, vk::glsl::glsl_fragment_program, spir_v))
 		throw EXCEPTION("Failed to compile fragment shader");

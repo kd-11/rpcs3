@@ -37,6 +37,7 @@
     <ClCompile Include="Emu\RSX\VK\VKFragmentProgram.cpp" />
     <ClCompile Include="Emu\RSX\VK\VKGSRender.cpp" />
     <ClCompile Include="Emu\RSX\VK\VKHelpers.cpp" />
+    <ClCompile Include="Emu\RSX\VK\VKProgramPipeline.cpp" />
     <ClCompile Include="Emu\RSX\VK\VKTexture.cpp" />
     <ClCompile Include="Emu\RSX\VK\VKVertexProgram.cpp" />
     <ClCompile Include="Emu\RSX\VK\VulkanAPI.cpp" />

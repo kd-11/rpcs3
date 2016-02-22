@@ -52,10 +52,13 @@ namespace vk
 			return g_null_sampler;
 
 		VkSamplerCreateInfo sampler_info;
+		memset(&sampler_info, 0, sizeof(sampler_info));
+
 		sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 		sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 		sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
 		sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 		sampler_info.anisotropyEnable = VK_FALSE;
 		sampler_info.compareEnable = VK_FALSE;
 		sampler_info.pNext = nullptr;
@@ -76,17 +79,8 @@ namespace vk
 		if (g_null_image_view)
 			return g_null_image_view;
 
-		VkImageViewCreateInfo view_info;
-		view_info.format = VK_FORMAT_R8_UNORM;
-		view_info.image = nullptr;
-		view_info.pNext = nullptr;
-		view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		view_info.components = default_component_map();
-		view_info.subresourceRange = default_image_subresource_range();
-		view_info.flags = 0;
-
-		CHECK_RESULT(vkCreateImageView(g_current_renderer, &view_info, nullptr, &g_null_image_view));
+		g_null_texture.create(g_current_renderer, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, 4, 4);
+		g_null_image_view = g_null_texture;
 		return g_null_image_view;
 	}
 
@@ -97,6 +91,18 @@ namespace vk
 
 		g_null_buffer.create(g_current_renderer, 32, VK_FORMAT_R32_SFLOAT, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT);
 		return g_null_buffer;
+	}
+
+	void destroy_global_resources()
+	{
+		g_null_buffer.destroy();
+		g_null_texture.destroy();
+
+		if (g_null_sampler)
+			vkDestroySampler(g_current_renderer, g_null_sampler, nullptr);
+
+		g_null_sampler = nullptr;
+		g_null_image_view = nullptr;
 	}
 
 	void set_current_thread_ctx(const vk::context &ctx)
@@ -127,13 +133,14 @@ namespace vk
 
 		VkImageMemoryBarrier barrier;
 		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		barrier.pNext = nullptr;
 		barrier.newLayout = new_layout;
 		barrier.oldLayout = current_layout;
 		barrier.image = image;
 		barrier.srcAccessMask = 0;
 		barrier.dstAccessMask = 0;
-		barrier.dstQueueFamilyIndex = 0;
-		barrier.srcQueueFamilyIndex = 0;
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.subresourceRange = range;
 
 		//This section is lifted from the samples...

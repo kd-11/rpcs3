@@ -1,7 +1,7 @@
 #pragma once
 #include "Emu/RSX/GSRender.h"
 #include "VKHelpers.h"
-#include "VKTexture.h"
+#include "VKTextureCache.h"
 
 #define RSX_DEBUG 1
 
@@ -24,7 +24,8 @@ private:
 
 	rsx::surface_info m_surface;
 
-	vk::buffer m_gl_attrib_buffers[rsx::limits::vertex_count];
+	vk::buffer m_attrib_buffers[rsx::limits::vertex_count];
+	vk::texture_cache m_texture_cache;
 
 public:
 	//vk::fbo draw_fbo;

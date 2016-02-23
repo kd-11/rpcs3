@@ -221,6 +221,36 @@ namespace vk
 		rsc.limits.generalConstantMatrixVectorIndexing = 1;
 	}
 
+	static const varying_register_t varying_regs[] =
+	{
+		{ "diff_color", 0 },
+		{ "tc0", 1 },
+		{ "tc1", 2 },
+		{ "tc2", 3 },
+		{ "tc3", 4 },
+		{ "tc4", 5 },
+		{ "tc5", 6 },
+		{ "tc6", 7 },
+		{ "tc7", 8 },
+		{ "tc8", 9 },
+		{ "tc9", 10 },
+		{ "front_diff_color", 11 },
+		{ "front_spec_color", 12 },
+		{ "spec_color", 13 },
+		{ "fogc", 14 }
+	};
+
+	const varying_register_t & get_varying_register(const std::string & name)
+	{
+		for (const auto&t : varying_regs)
+		{
+			if (t.name == name)
+				return t;
+		}
+
+		throw EXCEPTION("Unknown register name: %s", name);
+	}
+
 	bool compile_glsl_to_spv(std::string& shader, glsl::program_domain domain, std::vector<u32>& spv)
 	{
 		EShLanguage lang = (domain == glsl::glsl_fragment_program) ? EShLangFragment : EShLangVertex;

@@ -143,15 +143,16 @@ static const reg_info reg_table[] =
 
 void VKVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::vector<ParamType> & outputs)
 {
-	int location = 16;
 	for (auto &i : reg_table)
 	{
 		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", i.src_reg) && i.need_declare)
 		{
+			const vk::varying_register_t &reg = vk::get_varying_register(i.name);
+			
 			if (i.name == "fogc")
-				OS << "layout(location=" << location++ << ") out float " << i.name << ";" << std::endl;
+				OS << "layout(location=" << reg.reg_location << ") out float " << i.name << ";" << std::endl;
 			else
-				OS << "layout(location=" << location++ << ") out vec4 " << i.name << ";" << std::endl;
+				OS << "layout(location=" << reg.reg_location << ") out vec4 " << i.name << ";" << std::endl;
 		}
 	}
 }
@@ -226,7 +227,7 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 	}
 
 	//Transpose maybe?
-	OS << "	//gl_Position = scaleOffsetMat * gl_Position;" << std::endl;
+	OS << "	//tc0 = vec4(0);" << std::endl;
 	OS << "	gl_Position = gl_Position * scaleOffsetMat;" << std::endl;
 	OS << "}" << std::endl;
 }

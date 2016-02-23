@@ -28,7 +28,7 @@
     <ClInclude Include="Emu\RSX\VK\VKGSRender.h" />
     <ClInclude Include="Emu\RSX\VK\VKHelpers.h" />
     <ClInclude Include="Emu\RSX\VK\VKProgramBuffer.h" />
-    <ClInclude Include="Emu\RSX\VK\VKTexture.h" />
+    <ClInclude Include="Emu\RSX\VK\VKTextureCache.h" />
     <ClInclude Include="Emu\RSX\VK\VKVertexProgram.h" />
     <ClInclude Include="Emu\RSX\VK\VulkanAPI.h" />
   </ItemGroup>

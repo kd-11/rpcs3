@@ -41,6 +41,39 @@ namespace vk
 		return subres;
 	}
 
+	void copy_texture(VkCommandBuffer cmd, texture &src, texture &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 width, u32 height, VkImageAspectFlagBits aspect)
+	{
+		VkImageSubresourceLayers a_src, a_dst;
+		a_src.aspectMask = aspect;
+		a_src.baseArrayLayer = 0;
+		a_src.layerCount = 1;
+		a_src.mipLevel = 0;
+
+		a_dst = a_src;
+
+		VkImageCopy rgn;
+		rgn.extent.depth = 1;
+		rgn.extent.width = width;
+		rgn.extent.height = height;
+		rgn.dstOffset = { 0, 0, 0 };
+		rgn.srcOffset = { 0, 0, 0 };
+		rgn.srcSubresource = a_src;
+		rgn.dstSubresource = a_dst;
+
+		if (srcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+			change_image_layout(cmd, src, srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, aspect);
+
+		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+			change_image_layout(cmd, dst, dstLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, aspect);
+
+		vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
+
+		if (srcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+			change_image_layout(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, aspect);
+		
+		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+			change_image_layout(cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dstLayout, aspect);
+	}
 
 	texture::texture(vk::swap_chain_image &img)
 	{
@@ -56,6 +89,20 @@ namespace vk
 	{
 		owner = &device;
 
+		VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
+		
+		if (usage & VK_IMAGE_USAGE_SAMPLED_BIT)
+		{
+			VkFormatProperties props;
+			vkGetPhysicalDeviceFormatProperties(device.gpu(), format, &props);
+
+			//Enable linear tiling if supported and we request a sampled image..
+			if (props.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+				tiling = VK_IMAGE_TILING_LINEAR;
+			else
+				usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		}
+
 		//First create the image
 		VkImageCreateInfo image_info;
 		memset(&image_info, 0, sizeof(image_info));
@@ -68,7 +115,7 @@ namespace vk
 		image_info.mipLevels = mipmaps;
 		image_info.arrayLayers = 1;
 		image_info.samples = VK_SAMPLE_COUNT_1_BIT;
-		image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+		image_info.tiling = tiling;
 		image_info.usage = usage;
 		image_info.flags = 0;
 		image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
@@ -143,18 +190,20 @@ namespace vk
 		sampler_info.unnormalizedCoordinates = VK_FALSE;
 		sampler_info.mipLodBias = 0;
 		sampler_info.maxAnisotropy = 0;
-		sampler_info.magFilter = VK_FILTER_NEAREST;
-		sampler_info.minFilter = VK_FILTER_NEAREST;
+		sampler_info.flags = 0;
+		sampler_info.maxLod = 0;
+		sampler_info.minLod = 0;
+		sampler_info.magFilter = VK_FILTER_LINEAR;
+		sampler_info.minFilter = VK_FILTER_LINEAR;
+		sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
 		sampler_info.compareOp = VK_COMPARE_OP_NEVER;
 		sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
 
 		CHECK_RESULT(vkCreateSampler((*owner), &sampler_info, nullptr, &m_sampler));
 	}
 
-	void texture::init(int index, rsx::texture& tex)
+	void texture::init(rsx::texture& tex)
 	{
-		//TODO check if mappable and throw otherwise
-
 		if (!m_sampler)
 			sampler_setup(VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_IMAGE_VIEW_TYPE_2D, default_component_map());
 
@@ -164,16 +213,40 @@ namespace vk
 		subres.arrayLayer = 0;
 
 		VkSubresourceLayout layout;
-		void *data;
+		u8 *data;
 
-		vkGetImageSubresourceLayout((*owner), m_image_contents, &subres, &layout);
-		CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, &data));
+		VkFormatProperties props;
+		vk::physical_device dev = owner->gpu();
+		vkGetPhysicalDeviceFormatProperties(dev, m_internal_format, &props);
 
-		//Should write bytes to the texture.
-		//For now, just clear
-		memset(data, 0x80, m_memory_layout.size);
+		if (props.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+		{
+			vkGetImageSubresourceLayout((*owner), m_image_contents, &subres, &layout);
+			
+			u16 alignment = 1;
+			while (alignment < 4096)
+			{
+				if (layout.rowPitch & alignment)
+					break;
 
-		vkUnmapMemory((*owner), vram_allocation);
+				alignment <<= 1;
+			}
+
+			u32 buffer_size = get_placed_texture_storage_size(tex, alignment);
+			if (buffer_size != layout.size)
+				throw EXCEPTION("Bad texture alignment computation!");
+
+			CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, (void**)&data));
+
+			gsl::span<gsl::byte> mapped{ (gsl::byte*)(data+layout.offset), gsl::narrow<int>(buffer_size) };
+			upload_placed_texture(mapped, tex, alignment);
+			
+			vkUnmapMemory((*owner), vram_allocation);
+		}
+		else
+		{
+			LOG_ERROR(RSX, "Texture upload failed: staging texture required!");
+		}
 	}
 
 	void texture::destroy()

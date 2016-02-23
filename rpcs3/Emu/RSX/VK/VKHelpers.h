@@ -62,6 +62,8 @@ namespace vk
 
 	void change_image_layout(VkCommandBuffer cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout, VkImageAspectFlags aspect_flags);
 
+	VkFormat get_compatible_sampler_format(u32 format);
+
 	class physical_device
 	{
 		VkPhysicalDevice dev = nullptr;
@@ -214,7 +216,7 @@ namespace vk
 			return false;
 		}
 
-		const vk::physical_device& gpu()
+		vk::physical_device& gpu()
 		{
 			return *pgpu;
 		}
@@ -308,7 +310,7 @@ namespace vk
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height);
 		void destroy();
 
-		void init(int index, rsx::texture &tex);
+		void init(rsx::texture &tex);
 
 		const VkFormat get_format();
 
@@ -1165,51 +1167,55 @@ namespace vk
 
 		class program
 		{
-			VkGraphicsPipelineCreateInfo pipeline;
-			VkPipelineCacheCreateInfo pipeline_cache_desc;
-			VkPipelineCache pipeline_cache;
-			VkPipelineVertexInputStateCreateInfo vi;
-			VkPipelineInputAssemblyStateCreateInfo ia;
-			VkPipelineRasterizationStateCreateInfo rs;
-			VkPipelineColorBlendStateCreateInfo cb;
-			VkPipelineDepthStencilStateCreateInfo ds;
-			VkPipelineViewportStateCreateInfo vp;
-			VkPipelineMultisampleStateCreateInfo ms;
-			VkDynamicState dynamic_state_descriptors[VK_DYNAMIC_STATE_RANGE_SIZE];
-			VkPipelineDynamicStateCreateInfo dynamic_state;
+			struct pipeline_state
+			{
+				VkGraphicsPipelineCreateInfo pipeline;
+				VkPipelineCacheCreateInfo pipeline_cache_desc;
+				VkPipelineCache pipeline_cache;
+				VkPipelineVertexInputStateCreateInfo vi;
+				VkPipelineInputAssemblyStateCreateInfo ia;
+				VkPipelineRasterizationStateCreateInfo rs;
+				VkPipelineColorBlendStateCreateInfo cb;
+				VkPipelineDepthStencilStateCreateInfo ds;
+				VkPipelineViewportStateCreateInfo vp;
+				VkPipelineMultisampleStateCreateInfo ms;
+				VkDynamicState dynamic_state_descriptors[VK_DYNAMIC_STATE_RANGE_SIZE];
+				VkPipelineDynamicStateCreateInfo dynamic_state;
 
-			VkPipelineColorBlendAttachmentState att_state[1];
+				VkPipelineColorBlendAttachmentState att_state[1];
 
-			VkPipelineShaderStageCreateInfo shader_stages[2];
-			VkRenderPass render_pass = nullptr;
-			VkShaderModule vs, fs;
-			VkPipeline pipeline_handle = nullptr;
+				VkPipelineShaderStageCreateInfo shader_stages[2];
+				VkRenderPass render_pass = nullptr;
+				VkShaderModule vs, fs;
+				VkPipeline pipeline_handle = nullptr;
+
+				VkDescriptorSetLayout descriptor_layouts[2];;
+				VkDescriptorSet descriptor_sets[2];
+				VkPipelineLayout pipeline_layout;
+
+				bool dirty;
+				bool in_use;
+			}
+			pstate;
 
 			vk::render_device *device = nullptr;
-			bool dirty;
-			bool in_use;
-
-			std::vector<__program_input> uniforms;
-			std::vector<__program_input> old_uniform_layout;
-			
+			std::vector<__program_input> uniforms;			
 			vk::descriptor_pool descriptor_pool;
-			VkDescriptorSetLayout descriptor_layouts[2] = { nullptr, nullptr };
-			VkDescriptorSet descriptor_sets[2] = { nullptr, nullptr };
-			VkPipelineLayout pipeline_layout = nullptr;
 
 			void init_pipeline();
 
 		public:
-			program() {}
+			program();
 			program(vk::render_device &renderer);
 
-			~program() {}
+			~program();
 
 			program& attach_device(vk::render_device &dev);
 			program& attachFragmentProgram(VkShaderModule prog);
 			program& attachVertexProgram(VkShaderModule prog);
 
 			void make();
+			void destroy();
 
 			void set_depth_compare_op(VkCompareOp op);
 			void set_depth_write_mask(VkBool32 write_enable);

@@ -35,11 +35,13 @@ void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
 
 void VKFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
 {
-	int location = 16;
 	for (const ParamType& PT : m_parr.params[PF_PARAM_IN])
 	{
 		for (const ParamItem& PI : PT.items)
-			OS << "layout(location=" << location++ << ") in " << PT.type << " " << PI.name << ";" << std::endl;
+		{
+			const vk::varying_register_t &reg = vk::get_varying_register(PI.name);
+			OS << "layout(location=" << reg.reg_location << ") in " << PT.type << " " << PI.name << ";" << std::endl;
+		}
 	}
 }
 

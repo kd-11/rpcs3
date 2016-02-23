@@ -388,12 +388,13 @@ void VKGSRender::end()
 	for (int i = 0; i < rsx::limits::textures_count; ++i)
 	{
 		if (!textures[i].enabled())
-		{
 			continue;
-		}
 
-		//TODO:
-		//Attach a sampler for this texture to the corresponding descriptor
+		if (m_program->has_uniform(vk::glsl::glsl_fragment_program, "tex" + std::to_string(i)))
+		{
+			vk::texture &tex = m_texture_cache.upload_texture(m_command_buffer, textures[i]);
+			m_program->bind_uniform(vk::glsl::glsl_fragment_program, "tex" + std::to_string(i), tex);
+		}
 	}
 
 	//initialize vertex attributes
@@ -457,7 +458,7 @@ void VKGSRender::end()
 			const u32 data_size = element_size * vertex_draw_count;
 			const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
 
-			auto &buffer = m_gl_attrib_buffers[index];
+			auto &buffer = m_attrib_buffers[index];
 
 			buffer.sub_data(0, data_size, vertex_arrays_data.data() + offset);
 			buffer.set_format(format);
@@ -517,7 +518,7 @@ void VKGSRender::end()
 				const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
 				u32 data_size = element_size * vertex_draw_count;
 
-				auto &buffer = m_gl_attrib_buffers[index];
+				auto &buffer = m_attrib_buffers[index];
 
 				if (vertex_info.size == 3)
 				{
@@ -546,7 +547,7 @@ void VKGSRender::end()
 					const size_t data_size = vertex_data.size();
 					const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
 
-					auto &buffer = m_gl_attrib_buffers[index];
+					auto &buffer = m_attrib_buffers[index];
 
 					buffer.sub_data(0, data_size, vertex_data.data());
 					buffer.set_format(format);
@@ -689,7 +690,7 @@ void VKGSRender::on_init_thread()
 {
 	GSRender::on_init_thread();
 
-	for (auto &attrib_buffer : m_gl_attrib_buffers)
+	for (auto &attrib_buffer : m_attrib_buffers)
 	{
 		attrib_buffer.create((*m_device), 65536, VK_FORMAT_R32G32B32A32_SFLOAT, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT);
 	}
@@ -697,7 +698,9 @@ void VKGSRender::on_init_thread()
 
 void VKGSRender::on_exit()
 {
-	for (auto &attrib_buffer : m_gl_attrib_buffers)
+	m_texture_cache.destroy();
+	
+	for (auto &attrib_buffer : m_attrib_buffers)
 	{
 		attrib_buffer.destroy();
 	}
@@ -1202,57 +1205,60 @@ void VKGSRender::flip(int buffer)
 		aspect_ratio.size = m_frame->client_size();
 	}
 
-	begin_command_buffer_recording();
+	if (m_render_pass)
+	{
+		begin_command_buffer_recording();
 
-	//Blit contents to screen..
-	VkImage image_to_flip = m_fbo_surfaces[0];
-	vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+		//Blit contents to screen..
+		VkImage image_to_flip = m_fbo_surfaces[0];
+		vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 
-	VkImage target_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
-	vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+		VkImage target_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
+		vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 
-	//TODO SCALING
+		//TODO SCALING
 
-	VkImageSubresourceLayers src, dst;
-	src.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-	src.baseArrayLayer = 0;
-	src.layerCount = 1;
-	src.mipLevel = 0;
+		VkImageSubresourceLayers src, dst;
+		src.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		src.baseArrayLayer = 0;
+		src.layerCount = 1;
+		src.mipLevel = 0;
 
-	dst = src;
+		dst = src;
 
-	VkImageCopy rgn;
-	rgn.extent.depth = 1;
-	rgn.extent.width = aspect_ratio.size.width;
-	rgn.extent.height = aspect_ratio.size.height;
-	rgn.dstOffset = { 0, 0, 0 };
-	rgn.srcOffset = { 0, 0, 0 };
-	rgn.srcSubresource = src;
-	rgn.dstSubresource = dst;
-	vkCmdCopyImage(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
+		VkImageCopy rgn;
+		rgn.extent.depth = 1;
+		rgn.extent.width = aspect_ratio.size.width;
+		rgn.extent.height = aspect_ratio.size.height;
+		rgn.dstOffset = { 0, 0, 0 };
+		rgn.srcOffset = { 0, 0, 0 };
+		rgn.srcSubresource = src;
+		rgn.dstSubresource = dst;
+		vkCmdCopyImage(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
 
-	vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-	vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
+		vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+		vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
 
-	end_command_buffer_recording();
-	execute_command_buffer(false);
+		end_command_buffer_recording();
+		execute_command_buffer(false);
 
-	VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);
-	
-	VkPresentInfoKHR present;
-	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-	present.pNext = nullptr;
-	present.swapchainCount = 1;
-	present.pSwapchains = &swap_chain;
-	present.pImageIndices = &m_current_present_image;
-	present.pWaitSemaphores = &m_present_semaphore;
-	present.waitSemaphoreCount = 1;
+		VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);
 
-	CHECK_RESULT(m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present));
-	
-	CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
-	vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
-	m_present_semaphore = nullptr;
+		VkPresentInfoKHR present;
+		present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		present.pNext = nullptr;
+		present.swapchainCount = 1;
+		present.pSwapchains = &swap_chain;
+		present.pImageIndices = &m_current_present_image;
+		present.pWaitSemaphores = &m_present_semaphore;
+		present.waitSemaphoreCount = 1;
+
+		CHECK_RESULT(m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present));
+
+		CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
+		vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
+		m_present_semaphore = nullptr;
+	}
 
 	m_draw_calls = 0;
 	dirty_frame = true;

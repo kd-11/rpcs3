@@ -22,13 +22,13 @@
     <ClInclude Include="Emu\RSX\VK\VKProgramBuffer.h">
       <Filter>Source Files</Filter>
     </ClInclude>
-    <ClInclude Include="Emu\RSX\VK\VKTexture.h">
-      <Filter>Source Files</Filter>
-    </ClInclude>
     <ClInclude Include="Emu\RSX\VK\VKVertexProgram.h">
       <Filter>Source Files</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\VK\VulkanAPI.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\VK\VKTextureCache.h">
       <Filter>Source Files</Filter>
     </ClInclude>
   </ItemGroup>

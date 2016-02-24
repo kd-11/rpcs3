@@ -111,7 +111,7 @@ namespace vk
 			return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
 		case rsx::primitive_type::line_loop:
 			requires_modification = true;
-			return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+			return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 		case rsx::primitive_type::line_strip:
 			return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
 		case rsx::primitive_type::points:
@@ -123,34 +123,42 @@ namespace vk
 		case rsx::primitive_type::triangle_fan:
 			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_FAN;
 		case rsx::primitive_type::quads:
+		case rsx::primitive_type::polygon:
 			requires_modification = true;
 			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 		case rsx::primitive_type::quad_strip:
-		case rsx::primitive_type::polygon:
+			return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+		default:
 			throw ("Unsupported primitive topology 0x%X", (u8)mode);
 		}
 	}
 
-	bool expand_quad_array_to_triangles(u32 vertex_draw_count, std::vector<u16>& indices)
+	/**
+	 * Expand line loop array to line strip array; simply loop back the last vertex to the first..
+	 */
+	u32 expand_line_loop_array_to_strip(u32 vertex_draw_count, std::vector<u16>& indices)
 	{
-		u32 num_quads = vertex_draw_count >> 2;
-		if (!num_quads)
-			return false;
+		int i = 0;
+		indices.resize(vertex_draw_count + 1);
+		
+		for (; i < vertex_draw_count; ++i)
+			indices[i] = i;
 
-		u32 num_tris = (num_quads * 2);
-		indices.reserve(num_tris * 3);
+		indices[i] = 0;
+		return indices.size();
+	}
 
-		for (u32 i = 0; i < num_quads; ++i)
-		{
-			indices.push_back(i);
-			indices.push_back(i + 1);
-			indices.push_back(i + 2);
-			indices.push_back(i);
-			indices.push_back(i + 2);
-			indices.push_back(i + 3);
-		}
+	template<typename T>
+	u32 expand_indexed_line_loop_to_strip(u32 original_count, const T* original_indices, std::vector<T>& indices)
+	{
+		indices.resize(original_count + 1);
 
-		return true;
+		int i = 0;
+		for (; i < original_count; ++i)
+			indices[i] = original_indices[i];
+
+		indices[i] = original_indices[0];
+		return indices.size();
 	}
 
 	VkFormat get_compatible_surface_format(rsx::surface_color_format color_format)
@@ -185,6 +193,41 @@ namespace vk
 		default:
 			LOG_ERROR(RSX, "Surface color buffer: Unsupported surface color format (0x%x)", color_format);
 			return VK_FORMAT_B8G8R8A8_UNORM;
+		}
+	}
+
+	VkBlendFactor get_blend_factor(u16 factor)
+	{
+		switch (factor)
+		{
+		case CELL_GCM_ONE: return VK_BLEND_FACTOR_ONE;
+		case CELL_GCM_ZERO: return VK_BLEND_FACTOR_ZERO;
+		case CELL_GCM_SRC_ALPHA: return VK_BLEND_FACTOR_SRC_ALPHA;
+		case CELL_GCM_DST_ALPHA: return VK_BLEND_FACTOR_DST_ALPHA;
+		case CELL_GCM_SRC_COLOR: return VK_BLEND_FACTOR_SRC_COLOR;
+		case CELL_GCM_DST_COLOR: return VK_BLEND_FACTOR_DST_COLOR;
+		case CELL_GCM_CONSTANT_COLOR: return VK_BLEND_FACTOR_CONSTANT_COLOR;
+		case CELL_GCM_CONSTANT_ALPHA: return VK_BLEND_FACTOR_CONSTANT_ALPHA;
+		case CELL_GCM_ONE_MINUS_SRC_COLOR: return VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR;
+		case CELL_GCM_ONE_MINUS_DST_COLOR: return VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR;
+		case CELL_GCM_ONE_MINUS_SRC_ALPHA: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+		case CELL_GCM_ONE_MINUS_DST_ALPHA: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+		case CELL_GCM_ONE_MINUS_CONSTANT_ALPHA: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA;
+		case CELL_GCM_ONE_MINUS_CONSTANT_COLOR: return VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR;
+		default:
+			throw EXCEPTION("Unknown blend factor 0x%X", factor);
+		}
+	};
+
+	VkBlendOp get_blend_op(u16 op)
+	{
+		switch (op)
+		{
+		case CELL_GCM_FUNC_ADD: return VK_BLEND_OP_ADD;
+		case CELL_GCM_FUNC_SUBTRACT: return VK_BLEND_OP_SUBTRACT;
+		case CELL_GCM_FUNC_REVERSE_SUBTRACT: return VK_BLEND_OP_REVERSE_SUBTRACT;
+		default:
+			throw EXCEPTION("Unknown blend op: 0x%X", op);
 		}
 	}
 }
@@ -308,16 +351,35 @@ void VKGSRender::begin()
 {
 	rsx::thread::begin();
 
+	//TODO: Fence sync, ring-buffers, etc
 	//CHECK_RESULT(vkDeviceWaitIdle((*m_device)));
 
 	if (!load_program())
 		return;
 
-/*	u32 color_mask = rsx::method_registers[NV4097_SET_COLOR_MASK];
+	if (!recording)
+		begin_command_buffer_recording();
+
+	init_buffers();
+
+	m_program->set_draw_buffer_count(m_nb_targets);
+
+	u32 color_mask = rsx::method_registers[NV4097_SET_COLOR_MASK];
 	bool color_mask_b = !!(color_mask & 0xff);
 	bool color_mask_g = !!((color_mask >> 8) & 0xff);
 	bool color_mask_r = !!((color_mask >> 16) & 0xff);
-	bool color_mask_a = !!((color_mask >> 24) & 0xff); */
+	bool color_mask_a = !!((color_mask >> 24) & 0xff);
+
+	VkColorComponentFlags mask = 0;
+	if (color_mask_a) mask |= VK_COLOR_COMPONENT_A_BIT;
+	if (color_mask_b) mask |= VK_COLOR_COMPONENT_B_BIT;
+	if (color_mask_g) mask |= VK_COLOR_COMPONENT_G_BIT;
+	if (color_mask_r) mask |= VK_COLOR_COMPONENT_R_BIT;
+
+	VkColorComponentFlags color_masks[4] = { mask };
+
+	u8 render_targets[] = { 0, 1, 2, 3 };
+	m_program->set_color_mask(m_nb_targets, render_targets, color_masks);
 
 	u32 depth_mask = rsx::method_registers[NV4097_SET_DEPTH_MASK];
 	u32 stencil_mask = rsx::method_registers[NV4097_SET_STENCIL_MASK];
@@ -328,18 +390,44 @@ void VKGSRender::begin()
 		m_program->set_depth_compare_op(vk::compare_op(rsx::method_registers[NV4097_SET_DEPTH_FUNC]));
 		m_program->set_depth_write_mask(rsx::method_registers[NV4097_SET_DEPTH_MASK]);
 	}
+	else
+		m_program->set_depth_test_enable(VK_FALSE);
+
+	if (rsx::method_registers[NV4097_SET_BLEND_ENABLE])
+	{
+		u32 sfactor = rsx::method_registers[NV4097_SET_BLEND_FUNC_SFACTOR];
+		u32 dfactor = rsx::method_registers[NV4097_SET_BLEND_FUNC_DFACTOR];
+
+		VkBlendFactor sfactor_rgb[4] = { vk::get_blend_factor(sfactor) };
+		VkBlendFactor sfactor_a[4] = { vk::get_blend_factor(sfactor >> 16) };
+		VkBlendFactor dfactor_rgb[4] = {vk::get_blend_factor(dfactor)};
+		VkBlendFactor dfactor_a[4] = { vk::get_blend_factor(dfactor >> 16) };
+
+		//TODO: Separate target blending
+
+		VkBool32 blend_state[4] = { VK_TRUE };
+
+		m_program->set_blend_state(m_nb_targets, render_targets, blend_state);
+		m_program->set_blend_func(m_nb_targets, render_targets, sfactor_rgb, dfactor_rgb, sfactor_a, dfactor_a);
+
+		u32 equation = rsx::method_registers[NV4097_SET_BLEND_EQUATION];
+		VkBlendOp equation_rgb[4] = { vk::get_blend_op(equation) };
+		VkBlendOp equation_a[4] = { vk::get_blend_op(equation >> 16) };
+
+		m_program->set_blend_op(m_nb_targets, render_targets, equation_rgb, equation_a);
+	}
+	else
+	{
+		VkBool32 blend_state[4] = { VK_FALSE };
+		m_program->set_blend_state(m_nb_targets, render_targets, blend_state);
+	}
+
+	u32 line_width = rsx::method_registers[NV4097_SET_LINE_WIDTH];
+	float actual_line_width = (line_width >> 3) + (line_width & 7) / 8.f;
+	
+	vkCmdSetLineWidth(m_command_buffer, actual_line_width);
 
 	//TODO: Set up other render-state parameters into the program pipeline
-	if (!recording)
-		begin_command_buffer_recording();
-
-	init_buffers();
-
-	//LOG_ERROR(RSX, ">>> Draw call begin!");
-
-/*	VkClearValue clear_values[2];
-	clear_values[0].color.float32[0] = 0.2f;
-	clear_values[1].depthStencil = { 1.0f, 0 };*/
 
 	VkRenderPassBeginInfo rp_begin;
 	rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -567,63 +655,71 @@ void VKGSRender::end()
 		}
 	}
 
-	m_program->use(m_command_buffer, m_render_pass, 0);
-
 	bool is_indexed_draw = (draw_command == rsx::draw_command::indexed);
 	bool index_buffer_filled = false;
-	bool primitives_modified = false;
+	bool primitives_emulated = false;
 	u32  index_count = 0;
+	VkIndexType index_format = VK_INDEX_TYPE_UINT16;
 
-	m_program->set_primitive_topology(vk::get_appropriate_topology(draw_mode, primitives_modified));
+	m_program->set_primitive_topology(vk::get_appropriate_topology(draw_mode, primitives_emulated));
+	m_program->use(m_command_buffer, m_render_pass, 0);
 
-	if (primitives_modified)
-	{
-		switch (draw_mode)
-		{
-		case rsx::primitive_type::line_loop:
-		{
-			std::vector<u16> indices;
-			if (!is_indexed_draw)
-			{
-				u32 idx = 0;
-				indices.resize(vertex_draw_count + 1);
-				for (; idx < vertex_draw_count; ++idx)
-					indices[idx] = idx;
-
-				indices[idx] = 0;
-				index_count = indices.size();
-				m_index_buffer.sub_data(0, index_count * sizeof(u16), indices.data());
-				m_index_buffer.set_format(VK_FORMAT_R16_UINT);
-
-				is_indexed_draw = true;
-				index_buffer_filled = true;
-			}
-			else
-				throw EXCEPTION("Cannot yet expand indexed line loops!");
-
-			break;
-		}
-		case rsx::primitive_type::quads:
+	if (primitives_emulated)
+	{	
+		//Line loops are line-strips with loop-back; using line-strips-with-adj doesnt work for vulkan
+		if (draw_mode == rsx::primitive_type::line_loop)
 		{
 			std::vector<u16> indices;
+
 			if (!is_indexed_draw)
 			{
-				if (!vk::expand_quad_array_to_triangles(vertex_draw_count, indices))
-					throw EXCEPTION("Failed to expand draw call for quads, numverts = %d", vertex_draw_count);
-
-				index_count = indices.size();
-				m_index_buffer.sub_data(0, index_count * sizeof(u16), indices.data());
-				m_index_buffer.set_format(VK_FORMAT_R16_UINT);
-
-				is_indexed_draw = true;
-				index_buffer_filled = true;
+				index_count = vk::expand_line_loop_array_to_strip(vertex_draw_count, indices);
+				m_index_buffer.sub_data(0, index_count*sizeof(u16), indices.data());
 			}
 			else
-				throw EXCEPTION("Cannot yet expand indexed quads!");
+			{
+				rsx::index_array_type indexed_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
+				if (indexed_type == rsx::index_array_type::u32)
+				{
+					index_format = VK_INDEX_TYPE_UINT32;
+					std::vector<u32> indices32;
+					
+					index_count = vk::expand_indexed_line_loop_to_strip(vertex_draw_count, (u32*)vertex_index_array.data(), indices32);
+					m_index_buffer.sub_data(0, index_count*sizeof(u32), indices32.data());
+				}
+				else
+				{
+					index_count = vk::expand_indexed_line_loop_to_strip(vertex_draw_count, (u16*)vertex_index_array.data(), indices);
+					m_index_buffer.sub_data(0, index_count*sizeof(u16), indices.data());
+				}
+			}
+		}
+		else
+		{
+			index_count = get_index_count(draw_mode, vertex_draw_count);
+			std::vector<u16> indices(index_count);
 
-			break;
+			if (is_indexed_draw)
+			{
+				rsx::index_array_type indexed_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
+				size_t index_size = get_index_type_size(indexed_type);
+
+				std::vector<std::pair<u32, u32>> ranges;
+				ranges.push_back(std::pair<u32, u32>(0, vertex_draw_count));
+
+				gsl::span<u16> dst = { (u16*)indices.data(), gsl::narrow<int>(index_count) };
+				write_index_array_data_to_buffer(dst, draw_mode, ranges);
+			}
+			else
+			{
+				write_index_array_for_non_indexed_non_native_primitive_to_buffer(reinterpret_cast<char*>(indices.data()), draw_mode, 0, vertex_draw_count);
+			}
+
+			m_index_buffer.sub_data(0, index_count * sizeof(u16), indices.data());
 		}
-		}
+
+		is_indexed_draw = true;
+		index_buffer_filled = true;
 	}
 	
 	if (!is_indexed_draw)
@@ -632,10 +728,32 @@ void VKGSRender::end()
 	{
 		if (index_buffer_filled)
 		{
-			vkCmdBindIndexBuffer(m_command_buffer, m_index_buffer, 0, VK_INDEX_TYPE_UINT16);
+			vkCmdBindIndexBuffer(m_command_buffer, m_index_buffer, 0, index_format);
 			vkCmdDrawIndexed(m_command_buffer, index_count, 1, 0, 0, 0);
 		}
-		LOG_ERROR(RSX, "Indexed draw!");
+		else
+		{
+			rsx::index_array_type indexed_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
+			VkIndexType itype = VK_INDEX_TYPE_UINT16;
+			VkFormat fmt = VK_FORMAT_R16_UINT;
+			u32 elem_size = get_index_type_size(indexed_type);
+
+			if (indexed_type == rsx::index_array_type::u32)
+			{
+				itype = VK_INDEX_TYPE_UINT32;
+				fmt = VK_FORMAT_R32_UINT;
+			}
+
+			u32 index_sz = vertex_index_array.size() / elem_size;
+			if (index_sz != vertex_draw_count)
+				LOG_ERROR(RSX, "Vertex draw count mismatch!");
+
+			m_index_buffer.sub_data(0, index_sz, vertex_index_array.data());
+			m_index_buffer.set_format(fmt);		//Unnecessary unless viewing contents in sampler...
+
+			vkCmdBindIndexBuffer(m_command_buffer, m_index_buffer, 0, itype);
+			vkCmdDrawIndexed(m_command_buffer, vertex_draw_count, 1, 0, 0, 0);
+		}
 	}
 
 	vkCmdEndRenderPass(m_command_buffer);
@@ -765,8 +883,12 @@ void VKGSRender::clear_surface(u32 mask)
 		color_clear_values.color.float32[3] = (float)clear_a / 255;
 
 		VkImageSubresourceRange range = vk::default_image_subresource_range();
-		VkImage color_image = m_fbo_surfaces[0];
-		vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &color_clear_values.color, 1, &range);
+
+		for (u32 i = 0; i < m_nb_targets; ++i)
+		{
+			VkImage color_image = m_fbo_surfaces[i];
+			vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &color_clear_values.color, 1, &range);
+		}
 	}
 
 	if (mask & 0x3)
@@ -979,7 +1101,8 @@ void VKGSRender::init_buffers(bool skip_reading)
 
 		case rsx::surface_target::surface_b:
 			draw_buffers[0] = 1;
-			num_targets = 1;
+			draw_buffers[1] = 0;
+			num_targets = 2;
 			m_current_fbo = 1;
 			break;
 
@@ -1008,6 +1131,7 @@ void VKGSRender::init_buffers(bool skip_reading)
 
 		init_render_pass(requested_format, num_targets, draw_buffers);
 		m_current_targets = fmt;
+		m_nb_targets = num_targets;
 	}
 
 	//TODO: if fbo is different from previous, recreate the fbo
@@ -1205,59 +1329,79 @@ void VKGSRender::flip(int buffer)
 		aspect_ratio.size = m_frame->client_size();
 	}
 
+	VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);
+	uint32_t next_image_temp = 0;
+
+	VkPresentInfoKHR present;
+	present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	present.pNext = nullptr;
+	present.swapchainCount = 1;
+	present.pSwapchains = &swap_chain;
+	present.pImageIndices = &m_current_present_image;
+	present.pWaitSemaphores = &m_present_semaphore;
+	present.waitSemaphoreCount = 1;
+
 	if (m_render_pass)
 	{
 		begin_command_buffer_recording();
 
-		//Blit contents to screen..
-		VkImage image_to_flip = m_fbo_surfaces[0];
-		vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+		if (m_present_semaphore)
+		{
+			//Blit contents to screen..
+			VkImage image_to_flip = m_fbo_surfaces[0];
+			vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 
-		VkImage target_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
-		vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+			VkImage target_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
+			vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 
-		//TODO SCALING
+			//TODO SCALING
 
-		VkImageSubresourceLayers src, dst;
-		src.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		src.baseArrayLayer = 0;
-		src.layerCount = 1;
-		src.mipLevel = 0;
+			VkImageSubresourceLayers src, dst;
+			src.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+			src.baseArrayLayer = 0;
+			src.layerCount = 1;
+			src.mipLevel = 0;
 
-		dst = src;
+			dst = src;
 
-		VkImageCopy rgn;
-		rgn.extent.depth = 1;
-		rgn.extent.width = aspect_ratio.size.width;
-		rgn.extent.height = aspect_ratio.size.height;
-		rgn.dstOffset = { 0, 0, 0 };
-		rgn.srcOffset = { 0, 0, 0 };
-		rgn.srcSubresource = src;
-		rgn.dstSubresource = dst;
-		vkCmdCopyImage(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
+			VkImageCopy rgn;
+			rgn.extent.depth = 1;
+			rgn.extent.width = aspect_ratio.size.width;
+			rgn.extent.height = aspect_ratio.size.height;
+			rgn.dstOffset = { 0, 0, 0 };
+			rgn.srcOffset = { 0, 0, 0 };
+			rgn.srcSubresource = src;
+			rgn.dstSubresource = dst;
+			vkCmdCopyImage(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
 
-		vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-		vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
+			vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+			vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
+		}
+		else
+		{
+			//No draw call was issued!
+			//TODO: Properly clear the background to rsx value
+			m_swap_chain->acquireNextImageKHR((*m_device), (*m_swap_chain), ~0ULL, VK_NULL_HANDLE, VK_NULL_HANDLE, &next_image_temp);
+
+			VkImageSubresourceRange range = vk::default_image_subresource_range();
+			VkClearColorValue clear_black = { 0 };
+			vkCmdClearColorImage(m_command_buffer, m_swap_chain->get_swap_chain_image(next_image_temp), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &clear_black, 1, &range);
+			
+			present.pImageIndices = &next_image_temp;
+			present.waitSemaphoreCount = 0;
+		}
 
 		end_command_buffer_recording();
 		execute_command_buffer(false);
 
-		VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);
-
-		VkPresentInfoKHR present;
-		present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-		present.pNext = nullptr;
-		present.swapchainCount = 1;
-		present.pSwapchains = &swap_chain;
-		present.pImageIndices = &m_current_present_image;
-		present.pWaitSemaphores = &m_present_semaphore;
-		present.waitSemaphoreCount = 1;
-
 		CHECK_RESULT(m_swap_chain->queuePresentKHR(m_swap_chain->get_present_queue(), &present));
-
 		CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
-		vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
-		m_present_semaphore = nullptr;
+		
+		if (m_present_semaphore)
+		{
+			vkDestroySemaphore((*m_device), m_present_semaphore, nullptr);
+			m_present_semaphore = nullptr;
+		}
 	}
 
 	m_draw_calls = 0;

@@ -63,6 +63,7 @@ private:
 
 	rsx::surface_target m_current_targets;
 	u32 m_current_fbo = 0;
+	u32 m_nb_targets = 0;
 	
 	VkFormat m_surface_format = VK_FORMAT_UNDEFINED;
 	vk::texture m_fbo_surfaces[4];

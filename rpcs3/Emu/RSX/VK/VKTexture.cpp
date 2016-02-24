@@ -85,12 +85,12 @@ namespace vk
 		owner = nullptr;
 	}
 
-	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only)
+	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle)
 	{
 		owner = &device;
 
 		VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
-		
+
 		if (usage & VK_IMAGE_USAGE_SAMPLED_BIT)
 		{
 			VkFormatProperties props;
@@ -121,7 +121,7 @@ namespace vk
 		image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 		CHECK_RESULT(vkCreateImage(device, &image_info, nullptr, &m_image_contents));
-		
+
 		vkGetImageMemoryRequirements(device, m_image_contents, &m_memory_layout);
 		vram_allocation.allocate_from_pool(device, m_memory_layout.size, m_memory_layout.memoryTypeBits);
 
@@ -133,7 +133,7 @@ namespace vk
 		view_info.pNext = nullptr;
 		view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 		view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		view_info.components = default_component_map();
+		view_info.components = swizzle;
 		view_info.subresourceRange = default_image_subresource_range();
 		view_info.flags = 0;
 
@@ -147,6 +147,11 @@ namespace vk
 		m_mipmaps = mipmaps;
 		m_internal_format = format;
 		m_flags = usage;
+	}
+
+	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only)
+	{
+		create(device, format, usage, width, height, mipmaps, gpu_only, vk::default_component_map());
 	}
 
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height)
@@ -223,16 +228,17 @@ namespace vk
 		{
 			vkGetImageSubresourceLayout((*owner), m_image_contents, &subres, &layout);
 			
-			u16 alignment = 1;
-			while (alignment < 4096)
+			u16 alignment = 4096;
+			while (alignment > 1)
 			{
-				if (layout.rowPitch & alignment)
+				//Test if is wholly divisible by alignment..
+				if (!(layout.rowPitch & (alignment-1)))
 					break;
 
-				alignment <<= 1;
+				alignment >>= 1;
 			}
 
-			u32 buffer_size = get_placed_texture_storage_size(tex, alignment);
+			u32 buffer_size = get_placed_texture_storage_size(tex, alignment, alignment);
 			if (buffer_size != layout.size)
 				throw EXCEPTION("Bad texture alignment computation!");
 

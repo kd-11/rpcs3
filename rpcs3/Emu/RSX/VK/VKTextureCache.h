@@ -93,9 +93,10 @@ namespace vk
 			u32 raw_format = tex.format();
 			u32 format = raw_format & ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN);
 
-			VkFormat vk_format = get_compatible_sampler_format(format);
+			VkComponentMapping mapping;
+			VkFormat vk_format = get_compatible_sampler_format(format, mapping, tex.remap());
 
-			cto.uploaded_texture.create(*vk::get_current_renderer(), vk_format, VK_IMAGE_USAGE_SAMPLED_BIT, tex.width(), tex.height());
+			cto.uploaded_texture.create(*vk::get_current_renderer(), vk_format, VK_IMAGE_USAGE_SAMPLED_BIT, tex.width(), tex.height(), 1, false, mapping);
 			cto.uploaded_texture.init(tex);
 
 			change_image_layout(cmd, cto.uploaded_texture, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);

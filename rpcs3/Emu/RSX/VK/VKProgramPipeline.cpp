@@ -17,6 +17,59 @@ namespace vk
 			device = &renderer;
 		}
 
+		program::program(program&& other)
+		{
+			//This object does not yet exist in a valid state. Clear the original
+			memset(&pstate, 0, sizeof(pstate));
+
+			pipeline_state tmp;
+			memcpy(&tmp, &pstate, sizeof pstate);
+			memcpy(&pstate, &other.pstate, sizeof pstate);
+			memcpy(&other.pstate, &tmp, sizeof pstate);
+
+			std::vector<__program_input> tmp_uniforms = uniforms;
+			uniforms = other.uniforms;
+			other.uniforms = tmp_uniforms;
+
+			vk::descriptor_pool tmp_pool;
+			descriptor_pool = other.descriptor_pool;
+			other.descriptor_pool = tmp_pool;
+
+			vk::render_device *tmp_dev = device;
+			device = other.device;
+			other.device = tmp_dev;
+
+			bool _uniforms_changed = uniforms_changed;
+			uniforms_changed = other.uniforms_changed;
+			other.uniforms_changed = _uniforms_changed;
+		}
+
+		program& program::operator = (program&& other)
+		{
+			pipeline_state tmp;
+			memcpy(&tmp, &pstate, sizeof pstate);
+			memcpy(&pstate, &other.pstate, sizeof pstate);
+			memcpy(&other.pstate, &tmp, sizeof pstate);
+
+			std::vector<__program_input> tmp_uniforms = uniforms;
+			uniforms = other.uniforms;
+			other.uniforms = tmp_uniforms;
+
+			vk::descriptor_pool tmp_pool;
+			descriptor_pool = other.descriptor_pool;
+			other.descriptor_pool = tmp_pool;
+
+			vk::render_device *tmp_dev = device;
+			device = other.device;
+			other.device = tmp_dev;
+
+			bool _uniforms_changed = uniforms_changed;
+			uniforms_changed = other.uniforms_changed;
+			other.uniforms_changed = _uniforms_changed;
+
+			return *this;
+		}
+
 		void program::init_pipeline()
 		{
 			pstate.dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -39,16 +92,21 @@ namespace vk
 			pstate.rs.depthBiasEnable = VK_FALSE;
 
 			pstate.cb.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-			pstate.att_state[0].colorWriteMask = 0xf;
-			pstate.att_state[0].blendEnable = VK_FALSE;
 			pstate.cb.attachmentCount = 1;
 			pstate.cb.pAttachments = pstate.att_state;
+
+			for (int i = 0; i < 4; ++i)
+			{
+				pstate.att_state[i].colorWriteMask = 0xf;
+				pstate.att_state[i].blendEnable = VK_FALSE;
+			}
 
 			pstate.vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 			pstate.vp.viewportCount = 1;
 			pstate.dynamic_state_descriptors[pstate.dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_VIEWPORT;
 			pstate.vp.scissorCount = 1;
 			pstate.dynamic_state_descriptors[pstate.dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_SCISSOR;
+			pstate.dynamic_state_descriptors[pstate.dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_LINE_WIDTH;
 
 			pstate.ds.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
 			pstate.ds.depthTestEnable = VK_FALSE;
@@ -84,7 +142,11 @@ namespace vk
 			pstate.pipeline_cache_desc.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
 		}
 
-		program::~program() {}
+		program::~program() 
+		{
+			LOG_ERROR(RSX, "Program destructor invoked!");
+			destroy();
+		}
 
 		program& program::attach_device(vk::render_device &dev)
 		{
@@ -151,6 +213,94 @@ namespace vk
 			{
 				pstate.ia.topology = topology;
 				pstate.dirty = true;
+			}
+		}
+
+		void program::set_color_mask(int num_targets, u8* targets, VkColorComponentFlags* flags)
+		{
+			if (num_targets)
+			{
+				for (u8 idx = 0; idx < num_targets; ++idx)
+				{
+					u8 &id = targets[idx];
+					if (pstate.att_state[id].colorWriteMask != flags[idx])
+					{
+						pstate.att_state[id].colorWriteMask = flags[idx];
+						pstate.dirty = true;
+					}
+				}
+			}
+		}
+
+		void program::set_blend_state(int num_targets, u8* targets, VkBool32* enable)
+		{
+			if (num_targets)
+			{
+				for (u8 idx = 0; idx < num_targets; ++idx)
+				{
+					u8 &id = targets[idx];
+					if (pstate.att_state[id].blendEnable != enable[idx])
+					{
+						pstate.att_state[id].blendEnable = enable[idx];
+						pstate.dirty = true;
+					}
+				}
+			}
+		}
+
+		void program::set_blend_func(int num_targets, u8* targets, VkBlendFactor* src_color, VkBlendFactor* dst_color, VkBlendFactor* src_alpha, VkBlendFactor* dst_alpha)
+		{
+			if (num_targets)
+			{
+				for (u8 idx = 0; idx < num_targets; ++idx)
+				{
+					u8 &id = targets[idx];
+					if (pstate.att_state[id].srcColorBlendFactor != src_color[idx])
+					{
+						pstate.att_state[id].srcColorBlendFactor = src_color[idx];
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].dstColorBlendFactor != dst_color[idx])
+					{
+						pstate.att_state[id].dstColorBlendFactor = dst_color[idx];
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].srcAlphaBlendFactor != src_alpha[idx])
+					{
+						pstate.att_state[id].srcAlphaBlendFactor = src_alpha[idx];
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].dstAlphaBlendFactor != dst_alpha[idx])
+					{
+						pstate.att_state[id].dstAlphaBlendFactor = dst_alpha[idx];
+						pstate.dirty = true;
+					}
+				}
+			}
+		}
+
+		void program::set_blend_op(int num_targets, u8* targets, VkBlendOp* color_ops, VkBlendOp* alpha_ops)
+		{
+			if (num_targets)
+			{
+				for (u8 idx = 0; idx < num_targets; ++idx)
+				{
+					u8 &id = targets[idx];
+					if (pstate.att_state[id].colorBlendOp != color_ops[idx])
+					{
+						pstate.att_state[id].colorBlendOp = color_ops[idx];
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].alphaBlendOp != alpha_ops[idx])
+					{
+						pstate.att_state[id].alphaBlendOp = alpha_ops[idx];
+						pstate.dirty = true;
+					}
+				}
 			}
 		}
 
@@ -294,7 +444,7 @@ namespace vk
 						buffer.range = buf->size();
 					}
 					else
-						throw EXCEPTION("UBO was not bound: %s", input.name);
+						LOG_ERROR(RSX, "UBO was not bound: %s", input.name);
 
 					memset(&write, 0, sizeof(write));
 					write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -320,7 +470,7 @@ namespace vk
 						buffer.range = buf->size();
 					}
 					else
-						throw EXCEPTION("Texel buffer was not bound: %s", input.name);
+						LOG_ERROR(RSX, "Texel buffer was not bound: %s", input.name);
 
 					memset(&write, 0, sizeof(write));
 					write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER;
@@ -362,6 +512,15 @@ namespace vk
 			descriptor_pool.destroy();
 		}
 
+		void program::set_draw_buffer_count(u8 draw_buffers)
+		{
+			if (pstate.num_targets != draw_buffers)
+			{
+				pstate.num_targets = draw_buffers;
+				pstate.dirty = true;
+			}
+		}
+
 		program& program::load_uniforms(program_domain domain, std::vector<__program_input>& inputs)
 		{
 			std::vector<__program_input> store = uniforms;
@@ -381,7 +540,11 @@ namespace vk
 
 		void program::use(vk::command_buffer& commands, VkRenderPass pass, u32 subpass)
 		{
-			update_descriptors();
+			if (uniforms_changed)
+			{
+				update_descriptors();
+				uniforms_changed = false;
+			}
 
 			if (pstate.dirty)
 			{
@@ -390,6 +553,7 @@ namespace vk
 
 				pstate.dynamic_state.pDynamicStates = pstate.dynamic_state_descriptors;
 				pstate.cb.pAttachments = pstate.att_state;
+				pstate.cb.attachmentCount = pstate.num_targets;
 
 				//Reconfigure this..
 				pstate.pipeline.pVertexInputState = &pstate.vi;
@@ -434,6 +598,7 @@ namespace vk
 				if (uniform.name == uniform_name &&
 					uniform.domain == domain)
 				{
+					uniforms_changed = true;
 					uniform.bound_value = &_texture;
 					uniform.type = input_type_texture;
 
@@ -451,6 +616,7 @@ namespace vk
 				if (uniform.name == uniform_name &&
 					uniform.domain == domain)
 				{
+					uniforms_changed = true;
 					uniform.bound_value = &_buffer;
 					uniform.type = input_type_uniform_buffer;
 
@@ -473,6 +639,7 @@ namespace vk
 				if (uniform.name == uniform_name &&
 					uniform.domain == domain)
 				{
+					uniforms_changed = true;
 					uniform.bound_value = &_buffer;
 					uniform.type = input_type_texel_buffer;
 
@@ -497,7 +664,8 @@ namespace vk
 					vkDestroyPipelineCache((*device), pstate.pipeline_cache, nullptr);
 			}
 
-			memset(this, 0, sizeof(program));
+			memset(&pstate, 0, sizeof pstate);
+			device = nullptr;
 		}
 	}
 }

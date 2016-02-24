@@ -62,7 +62,7 @@ namespace vk
 
 	void change_image_layout(VkCommandBuffer cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout, VkImageAspectFlags aspect_flags);
 
-	VkFormat get_compatible_sampler_format(u32 format);
+	VkFormat get_compatible_sampler_format(u32 format, VkComponentMapping& mapping, u8 swizzle_mask=0);
 
 	class physical_device
 	{
@@ -306,6 +306,7 @@ namespace vk
 		texture() {}
 		~texture() {}
 
+		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle);
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only);
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height);
 		void destroy();
@@ -416,8 +417,9 @@ namespace vk
 			if (!data) return;
 			if ((offset + size) > m_size)
 			{
+				vk::render_device *tmp_owner = owner;
 				destroy();
-				create((*owner), size, m_internal_format, m_usage, m_flags);
+				create((*tmp_owner), size, m_internal_format, m_usage, m_flags);
 			}
 
 			u8 *dst = (u8*)map(offset, size);
@@ -429,10 +431,13 @@ namespace vk
 
 		void destroy()
 		{
+			if (!owner) return;
+
 			vkDestroyBufferView((*owner), m_view, nullptr);
 			vkDestroyBuffer((*owner), m_buffer, nullptr);
 			vram.destroy();
 
+			owner = nullptr;
 			m_view = nullptr;
 			m_buffer = nullptr;
 		}
@@ -629,6 +634,7 @@ namespace vk
 			queuePresentKHR = (PFN_vkQueuePresentKHR)vkGetDeviceProcAddr(dev, "vkQueuePresentKHR");
 
 			vkGetDeviceQueue(dev, _graphics_queue, 0, &vk_graphics_queue);
+			vkGetDeviceQueue(dev, _present_queue, 0, &vk_present_queue);
 
 			m_present_queue = _present_queue;
 			m_graphics_queue = _graphics_queue;
@@ -1109,7 +1115,7 @@ namespace vk
 		void create(vk::render_device &dev, VkDescriptorPoolSize *sizes, u32 size_descriptors_count)
 		{
 			VkDescriptorPoolCreateInfo infos;
-			infos.flags = 0;
+			infos.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 			infos.maxSets = 2;
 			infos.pNext = nullptr;
 			infos.poolSizeCount = size_descriptors_count;
@@ -1182,7 +1188,7 @@ namespace vk
 				VkDynamicState dynamic_state_descriptors[VK_DYNAMIC_STATE_RANGE_SIZE];
 				VkPipelineDynamicStateCreateInfo dynamic_state;
 
-				VkPipelineColorBlendAttachmentState att_state[1];
+				VkPipelineColorBlendAttachmentState att_state[4];
 
 				VkPipelineShaderStageCreateInfo shader_stages[2];
 				VkRenderPass render_pass = nullptr;
@@ -1193,10 +1199,14 @@ namespace vk
 				VkDescriptorSet descriptor_sets[2];
 				VkPipelineLayout pipeline_layout;
 
+				int num_targets = 1;
+
 				bool dirty;
 				bool in_use;
 			}
 			pstate;
+
+			bool uniforms_changed = true;
 
 			vk::render_device *device = nullptr;
 			std::vector<__program_input> uniforms;			
@@ -1206,6 +1216,8 @@ namespace vk
 
 		public:
 			program();
+			program(const program&) = delete;
+			program(program&& other);
 			program(vk::render_device &renderer);
 
 			~program();
@@ -1217,14 +1229,21 @@ namespace vk
 			void make();
 			void destroy();
 
+			//Render state stuff...
 			void set_depth_compare_op(VkCompareOp op);
 			void set_depth_write_mask(VkBool32 write_enable);
 			void set_depth_test_enable(VkBool32 state);
 			void set_primitive_topology(VkPrimitiveTopology topology);
+			void set_color_mask(int num_targets, u8* targets, VkColorComponentFlags *flags);
+			void set_blend_state(int num_targets, u8* targets, VkBool32 *enable);
+			void set_blend_func(int num_targets, u8* targets, VkBlendFactor *src_color, VkBlendFactor *dst_color, VkBlendFactor *src_alpha, VkBlendFactor *dst_alpha);
+			void set_blend_op(int num_targets, u8* targets, VkBlendOp* color_ops, VkBlendOp* alpha_ops);
 			
 			void init_descriptor_layout();
 			void update_descriptors();
 			void destroy_descriptors();
+
+			void set_draw_buffer_count(u8 draw_buffers);
 
 			program& load_uniforms(program_domain domain, std::vector<__program_input>& inputs);
 
@@ -1234,6 +1253,9 @@ namespace vk
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::texture &_texture);
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::buffer &_buffer);
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::buffer &_buffer, bool is_texel_store);
+
+			program& operator = (const program&) = delete;
+			program& operator = (program&& other);
 		};
 	}
 }

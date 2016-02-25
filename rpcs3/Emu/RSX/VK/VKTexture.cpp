@@ -159,9 +159,21 @@ namespace vk
 		create(device, format, usage, width, height, 1, false);
 	}
 
-	u32 texture::vk_wrap_mode(u32 gcm_wrap)
+	VkSamplerAddressMode texture::vk_wrap_mode(u32 gcm_wrap)
 	{
-		return 0;
+		switch (gcm_wrap)
+		{
+		case CELL_GCM_TEXTURE_WRAP: return VK_SAMPLER_ADDRESS_MODE_REPEAT;
+		case CELL_GCM_TEXTURE_MIRROR: return VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT;
+		case CELL_GCM_TEXTURE_CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		case CELL_GCM_TEXTURE_BORDER: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+		case CELL_GCM_TEXTURE_CLAMP: return VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+		case CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP_TO_EDGE: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+		case CELL_GCM_TEXTURE_MIRROR_ONCE_BORDER: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+		case CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP: return VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE;
+		default:
+			throw EXCEPTION("unhandled texture clamp mode 0x%X", gcm_wrap);
+		}
 	}
 
 	float texture::max_aniso(u32 gcm_aniso)
@@ -182,13 +194,17 @@ namespace vk
 		return 1.0f;
 	}
 
-	void texture::sampler_setup(VkSamplerAddressMode clamp_mode, VkImageViewType type, VkComponentMapping swizzle)
+	void texture::sampler_setup(rsx::texture &tex, VkImageViewType type, VkComponentMapping swizzle)
 	{
+		VkSamplerAddressMode clamp_s = vk_wrap_mode(tex.wrap_s());
+		VkSamplerAddressMode clamp_t = vk_wrap_mode(tex.wrap_t());
+		VkSamplerAddressMode clamp_r = vk_wrap_mode(tex.wrap_r());
+
 		VkSamplerCreateInfo sampler_info;
 		sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-		sampler_info.addressModeU = clamp_mode;
-		sampler_info.addressModeV = clamp_mode;
-		sampler_info.addressModeW = clamp_mode;
+		sampler_info.addressModeU = clamp_s;
+		sampler_info.addressModeV = clamp_t;
+		sampler_info.addressModeW = clamp_r;
 		sampler_info.anisotropyEnable = VK_FALSE;
 		sampler_info.compareEnable = VK_FALSE;
 		sampler_info.pNext = nullptr;
@@ -210,7 +226,7 @@ namespace vk
 	void texture::init(rsx::texture& tex)
 	{
 		if (!m_sampler)
-			sampler_setup(VK_SAMPLER_ADDRESS_MODE_REPEAT, VK_IMAGE_VIEW_TYPE_2D, default_component_map());
+			sampler_setup(tex, VK_IMAGE_VIEW_TYPE_2D, default_component_map());
 
 		VkImageSubresource subres;
 		subres.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -267,6 +283,11 @@ namespace vk
 		vkDestroyImage((*owner), m_image_contents, nullptr);
 
 		vram_allocation.destroy();
+
+		owner = nullptr;
+		m_sampler = nullptr;
+		m_view = nullptr;
+		m_image_contents = nullptr;
 	}
 
 	const VkFormat texture::get_format()

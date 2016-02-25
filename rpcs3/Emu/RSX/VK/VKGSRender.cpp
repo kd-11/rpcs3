@@ -335,17 +335,13 @@ VKGSRender::~VKGSRender()
 	delete m_swap_chain;
 }
 
-u32 VKGSRender::enable(u32 condition, u32 cap)
+bool VKGSRender::on_access_violation(u32 address, bool is_writing)
 {
-	return condition;
-}
+	if (is_writing)
+		return m_texture_cache.invalidate_address(address);
 
-u32 VKGSRender::enable(u32 condition, u32 cap, u32 index)
-{
-	return condition;
+	return false;
 }
-
-extern CellGcmContextData current_context;
 
 void VKGSRender::begin()
 {
@@ -1227,17 +1223,14 @@ void VKGSRender::begin_command_buffer_recording()
 	begin_infos.pNext = nullptr;
 	begin_infos.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 
-/*	if (m_submit_fence)
+	if (m_submit_fence)
 	{
-		VkResult error = vkDeviceWaitIdle((*m_device));//vkWaitForFences(*m_device, 1, &m_submit_fence, VK_TRUE, ~0LL);
+		vkWaitForFences(*m_device, 1, &m_submit_fence, VK_TRUE, ~0ULL);
 		vkDestroyFence(*m_device, m_submit_fence, nullptr);
 		m_submit_fence = nullptr;
 
-		if (error)
-			LOG_ERROR(RSX, "vkWaitForFences failed with error 0x%X", error);
-
-		vkResetCommandBuffer(m_command_buffer, 0);
-	}*/
+		CHECK_RESULT(vkResetCommandBuffer(m_command_buffer, 0));
+	}
 
 	CHECK_RESULT(vkBeginCommandBuffer(m_command_buffer, &begin_infos));
 	recording = true;
@@ -1251,25 +1244,18 @@ void VKGSRender::end_command_buffer_recording()
 
 void VKGSRender::execute_command_buffer(bool wait)
 {
-	if (recording) throw;
+	if (recording)
+		throw EXCEPTION("execute_command_buffer called before end_command_buffer_recording()!");
 
-/*	if (m_submit_fence)
-	{
-		VkResult error = vkDeviceWaitIdle((*m_device));//vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, 1000000L);
-		vkDestroyFence((*m_device), m_submit_fence, nullptr);
-		m_submit_fence = nullptr;
-
-		if (error) LOG_ERROR(RSX, "vkWaitForFence failed with error 0x%X", error);
-	}
-
-	vkDeviceWaitIdle((*m_device));
+	if (m_submit_fence)
+		throw EXCEPTION("Synchronization deadlock!");
 
 	VkFenceCreateInfo fence_info;
 	fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	fence_info.flags = 0;
 	fence_info.pNext = nullptr;
 
-	vkCreateFence(*m_device, &fence_info, nullptr, &m_submit_fence);*/
+	CHECK_RESULT(vkCreateFence(*m_device, &fence_info, nullptr, &m_submit_fence));
 
 	VkPipelineStageFlags pipe_stage_flags = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
 	VkCommandBuffer cmd = m_command_buffer;
@@ -1287,7 +1273,6 @@ void VKGSRender::execute_command_buffer(bool wait)
 
 	CHECK_RESULT(vkQueueSubmit(m_swap_chain->get_present_queue(), 1, &infos, m_submit_fence));
 	CHECK_RESULT(vkQueueWaitIdle(m_swap_chain->get_present_queue()));
-	CHECK_RESULT(vkResetCommandBuffer(m_command_buffer, 0));
 }
 
 void VKGSRender::flip(int buffer)
@@ -1327,6 +1312,17 @@ void VKGSRender::flip(int buffer)
 	else
 	{
 		aspect_ratio.size = m_frame->client_size();
+	}
+
+	//Check if anything is waiting in queue and submit it if possible..
+	if (m_submit_fence)
+	{
+		CHECK_RESULT(vkWaitForFences((*m_device), 1, &m_submit_fence, VK_TRUE, ~0ULL));
+		
+		vkDestroyFence((*m_device), m_submit_fence, nullptr);
+		m_submit_fence = nullptr;
+
+		CHECK_RESULT(vkResetCommandBuffer(m_command_buffer, 0));
 	}
 
 	VkSwapchainKHR swap_chain = (VkSwapchainKHR)(*m_swap_chain);

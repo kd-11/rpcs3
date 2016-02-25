@@ -50,6 +50,8 @@ private:
 	//Vulkan internals
 	u32 m_current_present_image = 0xFFFF;
 	VkSemaphore m_present_semaphore = nullptr;
+
+	u32 m_current_sync_buffer_index = 0;
 	VkFence m_submit_fence = nullptr;
 
 	vk::command_pool m_command_buffer_pool;
@@ -98,4 +100,6 @@ protected:
 	void on_exit() override;
 	bool do_method(u32 id, u32 arg) override;
 	void flip(int buffer) override;
+
+	bool on_access_violation(u32 address, bool is_writing) override;
 };

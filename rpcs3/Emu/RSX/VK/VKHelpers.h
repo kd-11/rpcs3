@@ -172,7 +172,7 @@ namespace vk
 			device.pNext = NULL;
 			device.queueCreateInfoCount = 1;
 			device.pQueueCreateInfos = &queue;
-			device.enabledLayerCount = 9;
+			device.enabledLayerCount = 0;
 			device.ppEnabledLayerNames = validation_layers;
 			device.enabledExtensionCount = 1;
 			device.ppEnabledExtensionNames = requested_extensions;
@@ -297,9 +297,9 @@ namespace vk
 		u32 m_height;
 		u32 m_mipmaps;
 
-		u32  vk_wrap_mode(u32 gcm_wrap_mode);
+		VkSamplerAddressMode vk_wrap_mode(u32 gcm_wrap_mode);
 		float max_aniso(u32 gcm_aniso);
-		void sampler_setup(VkSamplerAddressMode clamp_mode, VkImageViewType type, VkComponentMapping swizzle);
+		void sampler_setup(rsx::texture& tex, VkImageViewType type, VkComponentMapping swizzle);
 
 	public:
 		texture(vk::swap_chain_image &img);
@@ -950,7 +950,7 @@ namespace vk
 			instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 			instance_info.pNext = nullptr;
 			instance_info.pApplicationInfo = &app;
-			instance_info.enabledLayerCount = 9;
+			instance_info.enabledLayerCount = 0;
 			instance_info.ppEnabledLayerNames = validation_layers;
 			instance_info.enabledExtensionCount = 3;
 			instance_info.ppEnabledExtensionNames = requested_extensions;

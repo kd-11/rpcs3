@@ -30,30 +30,56 @@ namespace vk
 	private:
 		std::vector<cached_texture_object> m_cache;
 
-	public:
-
-		texture_cache() {}
-		~texture_cache() {}
-
-		void destroy()
+		bool lock_memory_region(u32 start, u32 size)
 		{
-			for (cached_texture_object &tex : m_cache)
-			{
-				tex.uploaded_texture.destroy();
-				tex.exists = false;
-			}
+			static const u32 memory_page_size = 4096;
+			start = start & ~(memory_page_size - 1);
+			size = (u32)align(size, memory_page_size);
+
+			return vm::page_protect(start, size, 0, 0, vm::page_writable);
 		}
 
-		cached_texture_object& find_cached_texture(u32 rsx_address, u32 rsx_size, bool confirm_dimensions=false, u16 width=0, u16 height=0, u16 mipmaps=0)
+		bool unlock_memory_region(u32 start, u32 size)
 		{
-			for (cached_texture_object &tex: m_cache)
+			static const u32 memory_page_size = 4096;
+			start = start & ~(memory_page_size - 1);
+			size = (u32)align(size, memory_page_size);
+
+			return vm::page_protect(start, size, 0, vm::page_writable, 0);
+		}
+
+		bool region_overlaps(u32 base1, u32 limit1, u32 base2, u32 limit2)
+		{
+			//Check for memory area overlap. unlock page(s) if needed and add this index to array.
+			//Axis separation test
+			const u32 &block_start = base1;
+			const u32 block_end = limit1;
+
+			if (limit2 < block_start) return false;
+			if (base2 > block_end) return false;
+
+			u32 min_separation = (limit2 - base2) + (limit1 - base1);
+			u32 range_limit = (block_end > limit2) ? block_end : limit2;
+			u32 range_base = (block_start < base2) ? block_start : base2;
+
+			u32 actual_separation = (range_limit - range_base);
+
+			if (actual_separation < min_separation)
+				return true;
+
+			return false;
+		}
+
+		cached_texture_object& find_cached_texture(u32 rsx_address, u32 rsx_size, bool confirm_dimensions = false, u16 width = 0, u16 height = 0, u16 mipmaps = 0)
+		{
+			for (cached_texture_object &tex : m_cache)
 			{
 				if (!tex.dirty && tex.exists &&
 					tex.native_rsx_address == rsx_address &&
 					tex.native_rsx_size == rsx_size)
 				{
 					if (!confirm_dimensions) return tex;
-					
+
 					if (tex.width == width && tex.height == height && tex.mipmaps == mipmaps)
 						return tex;
 					else
@@ -81,6 +107,40 @@ namespace vk
 			return m_cache[m_cache.size() - 1];
 		}
 
+		void lock_object(cached_texture_object &obj)
+		{
+			static const u32 memory_page_size = 4096;
+			obj.protected_rgn_start = obj.native_rsx_address & ~(memory_page_size - 1);
+			obj.protected_rgn_end = (u32)align(obj.native_rsx_size, memory_page_size);
+			obj.protected_rgn_end += obj.protected_rgn_start;
+
+			lock_memory_region(obj.protected_rgn_start, obj.native_rsx_size);
+		}
+
+		void unlock_object(cached_texture_object &obj)
+		{
+			unlock_memory_region(obj.protected_rgn_start, obj.native_rsx_size);
+		}
+
+	public:
+
+		texture_cache() {}
+		~texture_cache() {}
+
+		void destroy()
+		{
+			for (cached_texture_object &tex : m_cache)
+			{
+				if (tex.exists)
+				{
+					tex.uploaded_texture.destroy();
+					tex.exists = false;
+				}
+			}
+
+			m_cache.resize(0);
+		}
+
 		vk::texture& upload_texture(command_buffer cmd, rsx::texture &tex)
 		{
 			const u32 texaddr = rsx::get_address(tex.offset(), tex.location());
@@ -105,8 +165,30 @@ namespace vk
 			cto.dirty = false;
 			cto.native_rsx_address = texaddr;
 			cto.native_rsx_size = range;
-
+			
+			lock_object(cto);
 			return cto.uploaded_texture;
+		}
+
+		bool invalidate_address(u32 rsx_address)
+		{
+			for (cached_texture_object &tex : m_cache)
+			{
+				if (tex.dirty) continue;
+
+				if (rsx_address >= tex.protected_rgn_start &&
+					rsx_address < tex.protected_rgn_end)
+				{
+					unlock_object(tex);
+
+					tex.native_rsx_address = 0;
+					tex.dirty = true;
+
+					return true;
+				}
+			}
+
+			return false;
 		}
 	};
 }

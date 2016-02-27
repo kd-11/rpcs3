@@ -35,10 +35,14 @@ namespace vk
 		u8 remap_b = (swizzle_mask >> 6) & 0x3;
 
 		VkComponentSwizzle map_table[] = { VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_A };
-		swizzle.a = map_table[remap_a];
-		swizzle.b = map_table[remap_b];
-		swizzle.g = map_table[remap_g];
-		swizzle.r = map_table[remap_r];
+		
+		VkComponentMapping remapped;
+		remapped.a = map_table[remap_a];
+		remapped.b = map_table[remap_b];
+		remapped.g = map_table[remap_g];
+		remapped.r = map_table[remap_r];
+
+		swizzle = default_component_map();
 
 		switch (format)
 		{
@@ -48,19 +52,19 @@ namespace vk
 			return VK_FORMAT_R8_UNORM;
 		}
 		case CELL_GCM_TEXTURE_A1R5G5B5: return VK_FORMAT_A1R5G5B5_UNORM_PACK16;
-		case CELL_GCM_TEXTURE_A4R4G4B4:
-		{
-			//swizzle = { VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_A, VK_COMPONENT_SWIZZLE_B };
-			return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
-		}
+		case CELL_GCM_TEXTURE_A4R4G4B4: return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_R5G6B5: return VK_FORMAT_R5G6B5_UNORM_PACK16;
 		case CELL_GCM_TEXTURE_A8R8G8B8:
 		{
+			swizzle = remapped;
 			return VK_FORMAT_B8G8R8A8_UNORM;
 		}
 		case CELL_GCM_TEXTURE_COMPRESSED_DXT1: return VK_FORMAT_BC1_RGBA_UNORM_BLOCK;
 		case CELL_GCM_TEXTURE_COMPRESSED_DXT23: return VK_FORMAT_BC2_UNORM_BLOCK;
-		case CELL_GCM_TEXTURE_COMPRESSED_DXT45: return VK_FORMAT_BC3_UNORM_BLOCK;
+		case CELL_GCM_TEXTURE_COMPRESSED_DXT45: 
+		{
+			return VK_FORMAT_BC3_UNORM_BLOCK;
+		}
 		case CELL_GCM_TEXTURE_G8B8:
 		{
 			swizzle = { VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_ONE, VK_COMPONENT_SWIZZLE_ONE };
@@ -84,6 +88,7 @@ namespace vk
 		}
 		case CELL_GCM_TEXTURE_D8R8G8B8:
 		{
+			swizzle = remapped;
 			swizzle.a = VK_COMPONENT_SWIZZLE_ONE;
 			return VK_FORMAT_B8G8R8A8_UNORM;
 		}

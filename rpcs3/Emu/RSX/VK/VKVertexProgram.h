@@ -8,7 +8,7 @@
 struct VKVertexDecompilerThread : public VertexProgramDecompiler
 {
 	std::string &m_shader;
-	std::vector<vk::glsl::__program_input> inputs;
+	std::vector<vk::glsl::program_input> inputs;
 	class VKVertexProgram *vk_prog;
 protected:
 	virtual std::string getFloatTypeName(size_t elementCount) override;
@@ -34,7 +34,7 @@ public:
 	}
 
 	void Task();
-	const std::vector<vk::glsl::__program_input>& get_inputs() { return inputs; }
+	const std::vector<vk::glsl::program_input>& get_inputs() { return inputs; }
 };
 
 class VKVertexProgram
@@ -47,11 +47,11 @@ public:
 	VkShaderModule handle = nullptr;
 	int id;
 	std::string shader;
-	std::vector<vk::glsl::__program_input> uniforms;
+	std::vector<vk::glsl::program_input> uniforms;
 
 	void Decompile(const RSXVertexProgram& prog);
 	void Compile();
-	void SetInputs(std::vector<vk::glsl::__program_input>& inputs);
+	void SetInputs(std::vector<vk::glsl::program_input>& inputs);
 
 private:
 	void Delete();

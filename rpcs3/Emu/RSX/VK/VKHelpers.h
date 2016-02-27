@@ -14,6 +14,8 @@
 #include "VulkanAPI.h"
 #include "../GCM.h"
 
+#define VK_ENABLED_LAYER_COUNT 9
+
 namespace rsx
 {
 	class texture;
@@ -42,6 +44,7 @@ namespace vk
 	class render_device;
 	class swap_chain_image;
 	class physical_device;
+	class command_buffer;
 
 	vk::context *get_current_thread_ctx();
 	void set_current_thread_ctx(const vk::context &ctx);
@@ -61,6 +64,8 @@ namespace vk
 	void destroy_global_resources();
 
 	void change_image_layout(VkCommandBuffer cmd, VkImage image, VkImageLayout current_layout, VkImageLayout new_layout, VkImageAspectFlags aspect_flags);
+	void copy_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 width, u32 height, u32 mipmaps, VkImageAspectFlagBits aspect);
+	void copy_scaled_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 src_width, u32 src_height, u32 dst_width, u32 dst_height, u32 mipmaps, VkImageAspectFlagBits aspect);
 
 	VkFormat get_compatible_sampler_format(u32 format, VkComponentMapping& mapping, u8 swizzle_mask=0);
 
@@ -172,7 +177,7 @@ namespace vk
 			device.pNext = NULL;
 			device.queueCreateInfoCount = 1;
 			device.pQueueCreateInfos = &queue;
-			device.enabledLayerCount = 0;
+			device.enabledLayerCount = VK_ENABLED_LAYER_COUNT;
 			device.ppEnabledLayerNames = validation_layers;
 			device.enabledExtensionCount = 1;
 			device.ppEnabledExtensionNames = requested_extensions;
@@ -289,6 +294,7 @@ namespace vk
 		VkMemoryRequirements m_memory_layout;
 		VkFormat m_internal_format;
 		VkImageUsageFlags m_flags;
+		VkImageLayout m_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
 		vk::memory_block vram_allocation;
 		vk::render_device *owner = nullptr;
@@ -296,6 +302,9 @@ namespace vk
 		u32 m_width;
 		u32 m_height;
 		u32 m_mipmaps;
+
+		vk::texture *staging_texture = nullptr;
+		bool ready = false;
 
 		VkSamplerAddressMode vk_wrap_mode(u32 gcm_wrap_mode);
 		float max_aniso(u32 gcm_aniso);
@@ -306,12 +315,18 @@ namespace vk
 		texture() {}
 		~texture() {}
 
+		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, VkImageTiling tiling, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle);
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle);
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only);
 		void create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height);
 		void destroy();
 
-		void init(rsx::texture &tex);
+		void init(rsx::texture &tex, vk::command_buffer &cmd, bool ignore_checks);
+		void init(rsx::texture &tex, vk::command_buffer &cmd);
+		void flush(vk::command_buffer & cmd);
+
+		void change_layout(vk::command_buffer &cmd, VkImageLayout new_layout);
+		VkImageLayout get_layout();
 
 		const VkFormat get_format();
 
@@ -950,7 +965,7 @@ namespace vk
 			instance_info.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 			instance_info.pNext = nullptr;
 			instance_info.pApplicationInfo = &app;
-			instance_info.enabledLayerCount = 0;
+			instance_info.enabledLayerCount = VK_ENABLED_LAYER_COUNT;
 			instance_info.ppEnabledLayerNames = validation_layers;
 			instance_info.enabledExtensionCount = 3;
 			instance_info.ppEnabledExtensionNames = requested_extensions;
@@ -1161,11 +1176,27 @@ namespace vk
 			input_type_texture = 2
 		};
 
-		struct __program_input
+		struct bound_sampler
+		{
+			VkImageView image_view = nullptr;
+			VkSampler sampler = nullptr;
+		};
+
+		struct bound_buffer
+		{
+			VkBufferView buffer_view = nullptr;
+			VkBuffer buffer = nullptr;
+			u32 offset = 0;
+			u32 size = 0;
+		};
+
+		struct program_input
 		{
 			program_domain domain;
 			program_input_type type;
-			void *bound_value;
+			
+			bound_buffer as_buffer;
+			bound_sampler as_sampler;
 
 			int location;
 			std::string name;
@@ -1209,7 +1240,7 @@ namespace vk
 			bool uniforms_changed = true;
 
 			vk::render_device *device = nullptr;
-			std::vector<__program_input> uniforms;			
+			std::vector<program_input> uniforms;			
 			vk::descriptor_pool descriptor_pool;
 
 			void init_pipeline();
@@ -1245,11 +1276,12 @@ namespace vk
 
 			void set_draw_buffer_count(u8 draw_buffers);
 
-			program& load_uniforms(program_domain domain, std::vector<__program_input>& inputs);
+			program& load_uniforms(program_domain domain, std::vector<program_input>& inputs);
 
 			void use(vk::command_buffer& commands, VkRenderPass pass, u32 subpass);
 
 			bool has_uniform(program_domain domain, std::string uniform_name);
+			bool bind_uniform(program_domain domain, std::string uniform_name);
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::texture &_texture);
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::buffer &_buffer);
 			bool bind_uniform(program_domain domain, std::string uniform_name, vk::buffer &_buffer, bool is_texel_store);

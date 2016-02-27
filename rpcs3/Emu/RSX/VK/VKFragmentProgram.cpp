@@ -82,12 +82,11 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 			if (m_prog.unnormalized_coords & (1 << index))
 				samplerType = "sampler2DRect";
 
-			vk::glsl::__program_input in;
+			vk::glsl::program_input in;
 			in.location = location;
 			in.domain = vk::glsl::glsl_fragment_program;
 			in.name = PI.name;
 			in.type = vk::glsl::input_type_texture;
-			in.bound_value = nullptr;
 
 			inputs.push_back(in);
 
@@ -114,12 +113,11 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 	OS << "	vec4 void_value;" << std::endl;
 	OS << "};" << std::endl;
 
-	vk::glsl::__program_input in;
+	vk::glsl::program_input in;
 	in.location = 0;
 	in.domain = vk::glsl::glsl_fragment_program;
 	in.name = "FragmentConstantsBuffer";
 	in.type = vk::glsl::input_type_uniform_buffer;
-	in.bound_value = nullptr;
 
 	inputs.push_back(in);
 }
@@ -249,7 +247,7 @@ void VKFragmentProgram::Delete()
 	}
 }
 
-void VKFragmentProgram::SetInputs(std::vector<vk::glsl::__program_input>& inputs)
+void VKFragmentProgram::SetInputs(std::vector<vk::glsl::program_input>& inputs)
 {
 	for (auto &it : inputs)
 	{

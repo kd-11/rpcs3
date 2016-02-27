@@ -41,7 +41,7 @@ namespace vk
 		return subres;
 	}
 
-	void copy_texture(VkCommandBuffer cmd, texture &src, texture &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 width, u32 height, VkImageAspectFlagBits aspect)
+	void copy_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 width, u32 height, u32 mipmaps, VkImageAspectFlagBits aspect)
 	{
 		VkImageSubresourceLayers a_src, a_dst;
 		a_src.aspectMask = aspect;
@@ -66,13 +66,66 @@ namespace vk
 		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
 			change_image_layout(cmd, dst, dstLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, aspect);
 
-		vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
+		for (int mip_level = 0; mip_level < mipmaps; ++mip_level)
+		{
+			vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
+
+			rgn.srcSubresource.mipLevel++;
+			rgn.dstSubresource.mipLevel++;
+		}
 
 		if (srcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
 			change_image_layout(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, aspect);
-		
+
 		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
 			change_image_layout(cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dstLayout, aspect);
+	}
+
+	void copy_scaled_image(VkCommandBuffer cmd, VkImage & src, VkImage & dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 src_width, u32 src_height, u32 dst_width, u32 dst_height, u32 mipmaps, VkImageAspectFlagBits aspect)
+	{
+		VkImageSubresourceLayers a_src, a_dst;
+		a_src.aspectMask = aspect;
+		a_src.baseArrayLayer = 0;
+		a_src.layerCount = 1;
+		a_src.mipLevel = 0;
+
+		a_dst = a_src;
+
+		VkImageBlit rgn;
+		rgn.srcOffsets[0] = { 0, 0, 0 };
+		rgn.srcOffsets[1] = { (int32_t)src_width, (int32_t)src_height, 1 };
+		rgn.dstOffsets[0] = { 0, 0, 0 };
+		rgn.dstOffsets[1] = { (int32_t)dst_width, (int32_t)dst_height, 1 };
+		rgn.dstSubresource = a_dst;
+		rgn.srcSubresource = a_src;
+
+		if (srcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+			change_image_layout(cmd, src, srcLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, aspect);
+
+		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+			change_image_layout(cmd, dst, dstLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, aspect);
+
+		for (int mip_level = 0; mip_level < mipmaps; ++mip_level)
+		{
+			vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn, VK_FILTER_LINEAR);
+
+			rgn.srcSubresource.mipLevel++;
+			rgn.dstSubresource.mipLevel++;
+		}
+
+		if (srcLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL)
+			change_image_layout(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, srcLayout, aspect);
+
+		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+			change_image_layout(cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, dstLayout, aspect);
+	}
+
+	void copy_texture(VkCommandBuffer cmd, texture &src, texture &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 width, u32 height, u32 mipmaps, VkImageAspectFlagBits aspect)
+	{
+		VkImage isrc = (VkImage)src;
+		VkImage idst = (VkImage)dst;
+		
+		copy_image(cmd, isrc, idst, srcLayout, dstLayout, width, height, mipmaps, aspect);
 	}
 
 	texture::texture(vk::swap_chain_image &img)
@@ -85,23 +138,9 @@ namespace vk
 		owner = nullptr;
 	}
 
-	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle)
+	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, VkImageTiling tiling, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle)
 	{
 		owner = &device;
-
-		VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
-
-		if (usage & VK_IMAGE_USAGE_SAMPLED_BIT)
-		{
-			VkFormatProperties props;
-			vkGetPhysicalDeviceFormatProperties(device.gpu(), format, &props);
-
-			//Enable linear tiling if supported and we request a sampled image..
-			if (props.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
-				tiling = VK_IMAGE_TILING_LINEAR;
-			else
-				usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-		}
 
 		//First create the image
 		VkImageCreateInfo image_info;
@@ -147,6 +186,27 @@ namespace vk
 		m_mipmaps = mipmaps;
 		m_internal_format = format;
 		m_flags = usage;
+
+		ready = true;
+	}
+
+	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle)
+	{
+		VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
+
+		if (usage & VK_IMAGE_USAGE_SAMPLED_BIT)
+		{
+			VkFormatProperties props;
+			vkGetPhysicalDeviceFormatProperties(device.gpu(), format, &props);
+
+			//Enable linear tiling if supported and we request a sampled image..
+			if (props.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+				tiling = VK_IMAGE_TILING_LINEAR;
+			else
+				usage |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+		}
+
+		create(device, format, usage, tiling, width, height, mipmaps, gpu_only, swizzle);
 	}
 
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only)
@@ -205,15 +265,15 @@ namespace vk
 		sampler_info.addressModeU = clamp_s;
 		sampler_info.addressModeV = clamp_t;
 		sampler_info.addressModeW = clamp_r;
-		sampler_info.anisotropyEnable = VK_FALSE;
+		sampler_info.anisotropyEnable = VK_TRUE;
 		sampler_info.compareEnable = VK_FALSE;
 		sampler_info.pNext = nullptr;
 		sampler_info.unnormalizedCoordinates = VK_FALSE;
-		sampler_info.mipLodBias = 0;
-		sampler_info.maxAnisotropy = 0;
+		sampler_info.mipLodBias = tex.bias();
+		sampler_info.maxAnisotropy = max_aniso(tex.max_aniso());
 		sampler_info.flags = 0;
-		sampler_info.maxLod = 0;
-		sampler_info.minLod = 0;
+		sampler_info.maxLod = tex.max_lod();
+		sampler_info.minLod = tex.min_lod();
 		sampler_info.magFilter = VK_FILTER_LINEAR;
 		sampler_info.minFilter = VK_FILTER_LINEAR;
 		sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
@@ -223,7 +283,7 @@ namespace vk
 		CHECK_RESULT(vkCreateSampler((*owner), &sampler_info, nullptr, &m_sampler));
 	}
 
-	void texture::init(rsx::texture& tex)
+	void texture::init(rsx::texture& tex, vk::command_buffer &cmd, bool ignore_checks)
 	{
 		if (!m_sampler)
 			sampler_setup(tex, VK_IMAGE_VIEW_TYPE_2D, default_component_map());
@@ -233,42 +293,111 @@ namespace vk
 		subres.mipLevel = 0;
 		subres.arrayLayer = 0;
 
-		VkSubresourceLayout layout;
 		u8 *data;
 
 		VkFormatProperties props;
 		vk::physical_device dev = owner->gpu();
 		vkGetPhysicalDeviceFormatProperties(dev, m_internal_format, &props);
 
-		if (props.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
+		if (ignore_checks || props.linearTilingFeatures & VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT)
 		{
-			vkGetImageSubresourceLayout((*owner), m_image_contents, &subres, &layout);
-			
-			u16 alignment = 4096;
-			while (alignment > 1)
-			{
-				//Test if is wholly divisible by alignment..
-				if (!(layout.rowPitch & (alignment-1)))
-					break;
+			std::vector<std::pair<u16, VkSubresourceLayout>> layout_alignment(tex.mipmap());
 
-				alignment >>= 1;
+			for (u32 i = 0; i < tex.mipmap(); ++i)
+			{
+				layout_alignment[i].first = 4096;
+				vkGetImageSubresourceLayout((*owner), m_image_contents, &subres, &layout_alignment[i].second);				
+				
+				while (layout_alignment[i].first > 1)
+				{
+					//Test if is wholly divisible by alignment..
+					if (!(layout_alignment[i].second.rowPitch & (layout_alignment[i].first - 1)))
+						break;
+
+					layout_alignment[i].first >>= 1;
+				}
+
+				subres.mipLevel++;
 			}
 
-			u32 buffer_size = get_placed_texture_storage_size(tex, alignment, alignment);
-			if (buffer_size != layout.size)
-				throw EXCEPTION("Bad texture alignment computation!");
+			if (tex.mipmap() == 1)
+			{
+				u32 buffer_size = get_placed_texture_storage_size(tex, layout_alignment[0].first, layout_alignment[0].first);
+				if (buffer_size != layout_alignment[0].second.size)
+					throw EXCEPTION("Bad texture alignment computation!");
 
-			CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, (void**)&data));
+				CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, (void**)&data));
+				gsl::span<gsl::byte> mapped{ (gsl::byte*)(data + layout_alignment[0].second.offset), gsl::narrow<int>(layout_alignment[0].second.size) };
 
-			gsl::span<gsl::byte> mapped{ (gsl::byte*)(data+layout.offset), gsl::narrow<int>(buffer_size) };
-			upload_placed_texture(mapped, tex, alignment);
-			
-			vkUnmapMemory((*owner), vram_allocation);
+				upload_placed_texture(mapped, tex, layout_alignment[0].first);
+				vkUnmapMemory((*owner), vram_allocation);
+			}
+			else
+			{
+				auto &layer_props = layout_alignment[layout_alignment.size() - 1].second;
+				u32 max_size = layer_props.offset + layer_props.size;
+
+				if (m_memory_layout.size < max_size)
+					throw EXCEPTION("Failed to upload texture. Invalid memory block size.");
+
+				int index= 0;
+				std::vector<std::pair<u32, u32>> layout_offset_info(tex.mipmap());
+				
+				for (auto &mip_info : layout_offset_info)
+				{
+					auto &alignment = layout_alignment[index].first;
+					auto &layout = layout_alignment[index++].second;
+					
+					mip_info = std::make_pair(layout.offset, layout.rowPitch);
+				}
+
+				CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, (void**)&data));
+				gsl::span<gsl::byte> mapped{ (gsl::byte*)(data), gsl::narrow<int>(m_memory_layout.size) };
+
+				upload_texture_mipmaps(mapped, tex, layout_offset_info);
+				vkUnmapMemory((*owner), vram_allocation);
+			}
 		}
-		else
+		else if (!ignore_checks)
 		{
-			LOG_ERROR(RSX, "Texture upload failed: staging texture required!");
+			if (!staging_texture)
+			{
+				staging_texture = new texture();
+				staging_texture->create((*owner), m_internal_format, VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_TILING_LINEAR, m_width, m_height, tex.mipmap(), false, default_component_map());
+			}
+
+			staging_texture->init(tex, cmd, true);
+			staging_texture->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+			ready = false;
 		}
+	}
+
+	void texture::init(rsx::texture &tex, vk::command_buffer &cmd)
+	{
+		init(tex, cmd, false);
+	}
+
+	void texture::flush(vk::command_buffer &cmd)
+	{
+		if (!ready)
+		{
+			vk::copy_texture(cmd, *staging_texture, *this, staging_texture->get_layout(), m_layout, m_width, m_height, m_mipmaps, VK_IMAGE_ASPECT_COLOR_BIT);
+			ready = true;
+		}
+	}
+
+	void texture::change_layout(vk::command_buffer &cmd, VkImageLayout new_layout)
+	{
+		if (m_layout == new_layout) return;
+
+		vk::change_image_layout(cmd, m_image_contents, m_layout, new_layout, VK_IMAGE_ASPECT_COLOR_BIT);
+		m_layout = new_layout;
+	}
+
+	VkImageLayout texture::get_layout()
+	{
+		return m_layout;
 	}
 
 	void texture::destroy()
@@ -288,6 +417,13 @@ namespace vk
 		m_sampler = nullptr;
 		m_view = nullptr;
 		m_image_contents = nullptr;
+
+		if (staging_texture)
+		{
+			staging_texture->destroy();
+			delete staging_texture;
+			staging_texture = nullptr;
+		}
 	}
 
 	const VkFormat texture::get_format()

@@ -27,7 +27,7 @@ namespace vk
 			memcpy(&pstate, &other.pstate, sizeof pstate);
 			memcpy(&other.pstate, &tmp, sizeof pstate);
 
-			std::vector<__program_input> tmp_uniforms = uniforms;
+			std::vector<program_input> tmp_uniforms = uniforms;
 			uniforms = other.uniforms;
 			other.uniforms = tmp_uniforms;
 
@@ -51,7 +51,7 @@ namespace vk
 			memcpy(&pstate, &other.pstate, sizeof pstate);
 			memcpy(&other.pstate, &tmp, sizeof pstate);
 
-			std::vector<__program_input> tmp_uniforms = uniforms;
+			std::vector<program_input> tmp_uniforms = uniforms;
 			uniforms = other.uniforms;
 			other.uniforms = tmp_uniforms;
 
@@ -415,13 +415,14 @@ namespace vk
 					image.sampler = null_sampler();
 					image.imageView = null_image_view();
 
-					if (input.bound_value)
+					if (input.as_sampler.sampler && input.as_sampler.image_view)
 					{
-						vk::texture *tex = (vk::texture *)input.bound_value;
-						image.imageView = (*tex);
-						image.sampler = (*tex);
+						image.imageView = input.as_sampler.image_view;
+						image.sampler = input.as_sampler.sampler;
 						image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 					}
+					else
+						LOG_ERROR(RSX, "Texture object was not bound: %s", input.name);
 
 					memset(&write, 0, sizeof(write));
 					write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -437,11 +438,10 @@ namespace vk
 					buffer.offset = 0;
 					buffer.range = 0;
 
-					if (input.bound_value)
+					if (input.as_buffer.buffer)
 					{
-						vk::buffer *buf = (vk::buffer *)input.bound_value;
-						buffer.buffer = (*buf);
-						buffer.range = buf->size();
+						buffer.buffer = input.as_buffer.buffer;
+						buffer.range = input.as_buffer.size;
 					}
 					else
 						LOG_ERROR(RSX, "UBO was not bound: %s", input.name);
@@ -462,12 +462,11 @@ namespace vk
 					buffer.offset = 0;
 					buffer.range = 0;
 
-					if (input.bound_value)
+					if (input.as_buffer.buffer && input.as_buffer.buffer_view)
 					{
-						vk::buffer *buf = (vk::buffer *)input.bound_value;
-						buffer_view = (*buf);
-						buffer.buffer = (*buf);
-						buffer.range = buf->size();
+						buffer_view = input.as_buffer.buffer_view;
+						buffer.buffer = input.as_buffer.buffer;
+						buffer.range = input.as_buffer.size;
 					}
 					else
 						LOG_ERROR(RSX, "Texel buffer was not bound: %s", input.name);
@@ -492,6 +491,9 @@ namespace vk
 			}
 
 			if (!descriptor_writers.size()) return;
+			if (descriptor_writers.size() != uniforms.size())
+				throw EXCEPTION("Undefined uniform detected");
+
 			vkUpdateDescriptorSets((*device), descriptor_writers.size(), descriptor_writers.data(), 0, nullptr);
 		}
 
@@ -521,9 +523,9 @@ namespace vk
 			}
 		}
 
-		program& program::load_uniforms(program_domain domain, std::vector<__program_input>& inputs)
+		program& program::load_uniforms(program_domain domain, std::vector<program_input>& inputs)
 		{
-			std::vector<__program_input> store = uniforms;
+			std::vector<program_input> store = uniforms;
 			uniforms.resize(0);
 
 			for (auto &item : store)
@@ -540,7 +542,7 @@ namespace vk
 
 		void program::use(vk::command_buffer& commands, VkRenderPass pass, u32 subpass)
 		{
-			if (uniforms_changed)
+			if (/*uniforms_changed*/true)
 			{
 				update_descriptors();
 				uniforms_changed = false;
@@ -591,6 +593,34 @@ namespace vk
 			return false;
 		}
 
+		bool program::bind_uniform(program_domain domain, std::string uniform_name)
+		{
+			for (auto &uniform : uniforms)
+			{
+				if (uniform.name == uniform_name &&
+					uniform.domain == domain)
+				{
+					switch (uniform.type)
+					{
+					case input_type_texel_buffer:
+					case input_type_uniform_buffer:
+						uniform.as_buffer.buffer = nullptr;
+						uniform.as_buffer.buffer_view = nullptr;
+					case input_type_texture:
+						uniform.as_sampler.image_view = nullptr;
+						uniform.as_sampler.sampler = nullptr;
+					default:
+						throw EXCEPTION("Unhandled program input type");
+					}
+
+					uniforms_changed = true;
+					return true;
+				}
+			}
+
+			return false;
+		}
+
 		bool program::bind_uniform(program_domain domain, std::string uniform_name, vk::texture &_texture)
 		{
 			for (auto &uniform : uniforms)
@@ -598,10 +628,18 @@ namespace vk
 				if (uniform.name == uniform_name &&
 					uniform.domain == domain)
 				{
-					uniforms_changed = true;
-					uniform.bound_value = &_texture;
-					uniform.type = input_type_texture;
+					VkImageView view = _texture;
+					VkSampler sampler = _texture;
 
+					if (uniform.as_sampler.image_view != view ||
+						uniform.as_sampler.sampler != sampler)
+					{
+						uniform.as_sampler.image_view = view;
+						uniform.as_sampler.sampler = sampler;
+						uniforms_changed = true;
+					}
+
+					uniform.type = input_type_texture;
 					return true;
 				}
 			}
@@ -616,10 +654,20 @@ namespace vk
 				if (uniform.name == uniform_name &&
 					uniform.domain == domain)
 				{
-					uniforms_changed = true;
-					uniform.bound_value = &_buffer;
-					uniform.type = input_type_uniform_buffer;
+					VkBuffer buf = _buffer;
+					u32 size = _buffer.size();
 
+					if (uniform.as_buffer.buffer != buf ||
+						uniform.as_buffer.size != size)
+					{
+						uniform.as_buffer.size = size;
+						uniform.as_buffer.buffer = buf;
+						uniform.as_buffer.buffer_view = nullptr;	//UBOs cannot be viewed!
+
+						uniforms_changed = true;
+					}
+
+					uniform.type = input_type_uniform_buffer;
 					return true;
 				}
 			}
@@ -639,10 +687,22 @@ namespace vk
 				if (uniform.name == uniform_name &&
 					uniform.domain == domain)
 				{
-					uniforms_changed = true;
-					uniform.bound_value = &_buffer;
-					uniform.type = input_type_texel_buffer;
+					VkBuffer buf = _buffer;
+					VkBufferView view = _buffer;
+					u32 size = _buffer.size();
 
+					if (uniform.as_buffer.buffer != buf ||
+						uniform.as_buffer.buffer_view != view ||
+						uniform.as_buffer.size != size)
+					{
+						uniform.as_buffer.size = size;
+						uniform.as_buffer.buffer = buf;
+						uniform.as_buffer.buffer_view = view;
+
+						uniforms_changed = true;
+					}
+
+					uniform.type = input_type_texel_buffer;
 					return true;
 				}
 			}

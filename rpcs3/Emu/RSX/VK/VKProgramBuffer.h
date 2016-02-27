@@ -29,8 +29,8 @@ struct VKTraits
 	{
 		pipeline_storage_type result(*vk::get_current_renderer());
 
-		std::vector<vk::glsl::__program_input> vertex_uniforms = vertexProgramData.uniforms;
-		std::vector<vk::glsl::__program_input> fragment_uniforms = fragmentProgramData.uniforms;
+		std::vector<vk::glsl::program_input> vertex_uniforms = vertexProgramData.uniforms;
+		std::vector<vk::glsl::program_input> fragment_uniforms = fragmentProgramData.uniforms;
 		
 		result.attachVertexProgram(vertexProgramData.handle)
 			.attachFragmentProgram(fragmentProgramData.handle)

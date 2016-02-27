@@ -25,6 +25,11 @@ size_t get_placed_texture_storage_size(const rsx::texture &texture, size_t rowPi
 std::vector<MipmapLevelInfo> upload_placed_texture(gsl::span<gsl::byte> mapped_buffer, const rsx::texture &texture, size_t rowPitchAlignement);
 
 /**
+* Upload mipmaps individually by specifying exact offsets and pitch for target block.
+*/
+void upload_texture_mipmaps(gsl::span<gsl::byte> mapped_buffer, const rsx::texture &texture, std::vector<std::pair<u32, u32>> alignment_offset_info);
+
+/**
 * Get number of bytes occupied by texture in RSX mem
 */
 size_t get_texture_size(const rsx::texture &texture);

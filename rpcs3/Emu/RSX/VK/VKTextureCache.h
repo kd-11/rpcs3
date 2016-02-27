@@ -94,8 +94,11 @@ namespace vk
 			{
 				if (tex.dirty)
 				{
-					tex.uploaded_texture.destroy();
-					tex.exists = false;
+					if (tex.exists)
+					{
+						tex.uploaded_texture.destroy();
+						tex.exists = false;
+					}
 
 					return tex;
 				}
@@ -148,7 +151,12 @@ namespace vk
 
 			cached_texture_object& cto = find_cached_texture(texaddr, range, false);
 			if (cto.exists && !cto.dirty)
+			{
+				VkImage img = cto.uploaded_texture;
+				if (!img)
+					throw EXCEPTION("Who deleted me!");
 				return cto.uploaded_texture;
+			}
 
 			u32 raw_format = tex.format();
 			u32 format = raw_format & ~(CELL_GCM_TEXTURE_LN | CELL_GCM_TEXTURE_UN);
@@ -156,10 +164,9 @@ namespace vk
 			VkComponentMapping mapping;
 			VkFormat vk_format = get_compatible_sampler_format(format, mapping, tex.remap());
 
-			cto.uploaded_texture.create(*vk::get_current_renderer(), vk_format, VK_IMAGE_USAGE_SAMPLED_BIT, tex.width(), tex.height(), 1, false, mapping);
-			cto.uploaded_texture.init(tex);
-
-			change_image_layout(cmd, cto.uploaded_texture, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
+			cto.uploaded_texture.create(*vk::get_current_renderer(), vk_format, VK_IMAGE_USAGE_SAMPLED_BIT, tex.width(), tex.height(), tex.mipmap(), false, mapping);
+			cto.uploaded_texture.init(tex, cmd);
+			cto.uploaded_texture.change_layout(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 			cto.exists = true;
 			cto.dirty = false;
@@ -167,6 +174,11 @@ namespace vk
 			cto.native_rsx_size = range;
 			
 			lock_object(cto);
+
+			VkImage img = cto.uploaded_texture;
+			if (!img)
+				throw EXCEPTION("Who deleted me!");
+
 			return cto.uploaded_texture;
 		}
 
@@ -189,6 +201,16 @@ namespace vk
 			}
 
 			return false;
+		}
+
+		void flush(vk::command_buffer &cmd)
+		{
+			//Finish all pending transactions for any cache managed textures..
+			for (cached_texture_object &tex : m_cache)
+			{
+				if (tex.dirty || !tex.exists) continue;
+				tex.uploaded_texture.flush(cmd);
+			}
 		}
 	};
 }

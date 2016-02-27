@@ -35,12 +35,11 @@ void VKVertexDecompilerThread::insertHeader(std::stringstream &OS)
 	OS << "	mat4 scaleOffsetMat;" << std::endl;
 	OS << "};" << std::endl;
 
-	vk::glsl::__program_input in;
+	vk::glsl::program_input in;
 	in.location = 0;
 	in.domain = vk::glsl::glsl_vertex_program;
 	in.name = "ScaleOffsetBuffer";
 	in.type = vk::glsl::input_type_uniform_buffer;
-	in.bound_value = nullptr;
 
 	inputs.push_back(in);
 }
@@ -72,12 +71,11 @@ void VKVertexDecompilerThread::insertInputs(std::stringstream & OS, const std::v
 			{
 				if (PI.name == std::get<1>(item))
 				{
-					vk::glsl::__program_input in;
+					vk::glsl::program_input in;
 					in.location = location;
 					in.domain = vk::glsl::glsl_vertex_program;
 					in.name = PI.name + "_buffer";
 					in.type = vk::glsl::input_type_texel_buffer;
-					in.bound_value = nullptr;
 
 					this->inputs.push_back(in);
 
@@ -95,12 +93,11 @@ void VKVertexDecompilerThread::insertConstants(std::stringstream & OS, const std
 	OS << "	vec4 vc[468];" << std::endl;
 	OS << "};" << std::endl;
 
-	vk::glsl::__program_input in;
+	vk::glsl::program_input in;
 	in.location = 1;
 	in.domain = vk::glsl::glsl_vertex_program;
 	in.name = "VertexConstantsBuffer";
 	in.type = vk::glsl::input_type_uniform_buffer;
-	in.bound_value = nullptr;
 
 	inputs.push_back(in);
 }
@@ -295,7 +292,7 @@ void VKVertexProgram::Delete()
 	}
 }
 
-void VKVertexProgram::SetInputs(std::vector<vk::glsl::__program_input>& inputs)
+void VKVertexProgram::SetInputs(std::vector<vk::glsl::program_input>& inputs)
 {
 	for (auto &it : inputs)
 	{

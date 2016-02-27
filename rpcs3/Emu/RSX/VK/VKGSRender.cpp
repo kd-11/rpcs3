@@ -471,11 +471,14 @@ void VKGSRender::end()
 	//setup textures
 	for (int i = 0; i < rsx::limits::textures_count; ++i)
 	{
-		if (!textures[i].enabled())
-			continue;
-
 		if (m_program->has_uniform(vk::glsl::glsl_fragment_program, "tex" + std::to_string(i)))
 		{
+			if (!textures[i].enabled())
+			{
+				m_program->bind_uniform(vk::glsl::glsl_fragment_program, "tex" + std::to_string(i));
+				continue;
+			}
+
 			vk::texture &tex = m_texture_cache.upload_texture(m_command_buffer, textures[i]);
 			m_program->bind_uniform(vk::glsl::glsl_fragment_program, "tex" + std::to_string(i), tex);
 		}
@@ -753,6 +756,8 @@ void VKGSRender::end()
 	}
 
 	vkCmdEndRenderPass(m_command_buffer);
+
+	m_texture_cache.flush(m_command_buffer);
 
 	recording = false;
 	end_command_buffer_recording();
@@ -1345,33 +1350,11 @@ void VKGSRender::flip(int buffer)
 		{
 			//Blit contents to screen..
 			VkImage image_to_flip = m_fbo_surfaces[0];
-			vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-
 			VkImage target_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
-			vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
 
 			//TODO SCALING
-
-			VkImageSubresourceLayers src, dst;
-			src.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-			src.baseArrayLayer = 0;
-			src.layerCount = 1;
-			src.mipLevel = 0;
-
-			dst = src;
-
-			VkImageCopy rgn;
-			rgn.extent.depth = 1;
-			rgn.extent.width = aspect_ratio.size.width;
-			rgn.extent.height = aspect_ratio.size.height;
-			rgn.dstOffset = { 0, 0, 0 };
-			rgn.srcOffset = { 0, 0, 0 };
-			rgn.srcSubresource = src;
-			rgn.dstSubresource = dst;
-			vkCmdCopyImage(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
-
-			vk::change_image_layout(m_command_buffer, image_to_flip, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-			vk::change_image_layout(m_command_buffer, target_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
+			vk::copy_scaled_image(m_command_buffer, image_to_flip, target_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+									buffer_width, buffer_height, aspect_ratio.width, aspect_ratio.height, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 		}
 		else
 		{

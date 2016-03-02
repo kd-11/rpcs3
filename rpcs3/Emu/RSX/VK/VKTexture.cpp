@@ -176,8 +176,11 @@ namespace vk
 		view_info.subresourceRange = default_image_subresource_range();
 		view_info.flags = 0;
 
-		if (usage == VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+		if (usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+		{
 			view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT/* | VK_IMAGE_ASPECT_STENCIL_BIT*/;
+			m_image_aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+		}
 
 		CHECK_RESULT(vkCreateImageView(device, &view_info, nullptr, &m_view));
 
@@ -186,6 +189,34 @@ namespace vk
 		m_mipmaps = mipmaps;
 		m_internal_format = format;
 		m_flags = usage;
+
+		if (usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT ||
+			usage & VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT)
+		{
+			VkSamplerAddressMode clamp_s = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			VkSamplerAddressMode clamp_t = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+			VkSamplerAddressMode clamp_r = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+
+			VkSamplerCreateInfo sampler_info;
+			sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+			sampler_info.addressModeU = clamp_s;
+			sampler_info.addressModeV = clamp_t;
+			sampler_info.addressModeW = clamp_r;
+			sampler_info.anisotropyEnable = VK_FALSE;
+			sampler_info.compareEnable = VK_FALSE;
+			sampler_info.pNext = nullptr;
+			sampler_info.unnormalizedCoordinates = VK_FALSE;
+			sampler_info.mipLodBias = 0;
+			sampler_info.maxAnisotropy = 0;
+			sampler_info.flags = 0;
+			sampler_info.magFilter = VK_FILTER_LINEAR;
+			sampler_info.minFilter = VK_FILTER_LINEAR;
+			sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+			sampler_info.compareOp = VK_COMPARE_OP_NEVER;
+			sampler_info.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+
+			CHECK_RESULT(vkCreateSampler((*owner), &sampler_info, nullptr, &m_sampler));
+		}
 
 		ready = true;
 	}
@@ -382,22 +413,41 @@ namespace vk
 	{
 		if (!ready)
 		{
-			vk::copy_texture(cmd, *staging_texture, *this, staging_texture->get_layout(), m_layout, m_width, m_height, m_mipmaps, VK_IMAGE_ASPECT_COLOR_BIT);
+			vk::copy_texture(cmd, *staging_texture, *this, staging_texture->get_layout(), m_layout, m_width, m_height, m_mipmaps, m_image_aspect);
 			ready = true;
 		}
+	}
+
+	void texture::init_debug()
+	{
+		void *data;
+		CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, (void**)&data));
+
+		memset(data, 0xFF, m_memory_layout.size);
+		vkUnmapMemory((*owner), vram_allocation);
 	}
 
 	void texture::change_layout(vk::command_buffer &cmd, VkImageLayout new_layout)
 	{
 		if (m_layout == new_layout) return;
 
-		vk::change_image_layout(cmd, m_image_contents, m_layout, new_layout, VK_IMAGE_ASPECT_COLOR_BIT);
+		vk::change_image_layout(cmd, m_image_contents, m_layout, new_layout, m_image_aspect);
 		m_layout = new_layout;
 	}
 
 	VkImageLayout texture::get_layout()
 	{
 		return m_layout;
+	}
+
+	const u32 texture::width()
+	{
+		return m_width;
+	}
+
+	const u32 texture::height()
+	{
+		return m_height;
 	}
 
 	void texture::destroy()

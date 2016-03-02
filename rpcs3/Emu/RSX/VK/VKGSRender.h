@@ -2,6 +2,7 @@
 #include "Emu/RSX/GSRender.h"
 #include "VKHelpers.h"
 #include "VKTextureCache.h"
+#include "VKRenderTargets.h"
 
 #define RSX_DEBUG 1
 
@@ -16,16 +17,15 @@ private:
 	VKFragmentProgram m_fragment_prog;
 	VKVertexProgram m_vertex_prog;
 
-	vk::texture m_textures[rsx::limits::textures_count];
-	vk::texture m_vertex_textures[rsx::limits::vertex_textures_count];
-
 	vk::glsl::program *m_program;
 	vk::context m_thread_context;
 
 	rsx::surface_info m_surface;
 
 	vk::buffer m_attrib_buffers[rsx::limits::vertex_count];
+	
 	vk::texture_cache m_texture_cache;
+	rsx::vk_render_targets m_rtts;
 
 public:
 	//vk::fbo draw_fbo;
@@ -33,12 +33,8 @@ public:
 private:
 	VKProgramBuffer m_prog_buffer;
 
-	vk::texture m_draw_tex_color[rsx::limits::color_buffers_count];
-	vk::texture m_draw_tex_depth_stencil;
-
 	vk::render_device *m_device;
 	vk::swap_chain* m_swap_chain;
-	vk::texture m_depth_buffer;
 	//buffer
 
 	vk::buffer m_scale_offset_buffer;
@@ -61,29 +57,25 @@ private:
 
 	//Single render pass
 	VkRenderPass m_render_pass = nullptr;
-	u32 m_draw_calls=0;
-
-	rsx::surface_target m_current_targets;
-	u32 m_current_fbo = 0;
-	u32 m_nb_targets = 0;
 	
-	VkFormat m_surface_format = VK_FORMAT_UNDEFINED;
-	vk::texture m_fbo_surfaces[4];
-	vk::framebuffer m_framebuffers[4];
+	u32 m_draw_calls = 0;
+	
+	u8 m_draw_buffers_count = 0;
+	vk::framebuffer m_framebuffer;
 
 public:
 	VKGSRender();
 	~VKGSRender();
 
 private:
-	static u32 enable(u32 enable, u32 cap);
-	static u32 enable(u32 enable, u32 cap, u32 index);
 	void clear_surface(u32 mask);
-	void init_render_pass(VkFormat surface_format, int num_draw_buffers, int *draw_buffers);
+	void init_render_pass(VkFormat surface_format, VkFormat depth_format, u8 num_draw_buffers, u8 *draw_buffers);
 	void destroy_render_pass();
 	void execute_command_buffer(bool wait);
 	void begin_command_buffer_recording();
 	void end_command_buffer_recording();
+
+	void prepare_rtts();
 
 public:
 	bool load_program();

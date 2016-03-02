@@ -68,6 +68,8 @@ namespace vk
 	void copy_scaled_image(VkCommandBuffer cmd, VkImage &src, VkImage &dst, VkImageLayout srcLayout, VkImageLayout dstLayout, u32 src_width, u32 src_height, u32 dst_width, u32 dst_height, u32 mipmaps, VkImageAspectFlagBits aspect);
 
 	VkFormat get_compatible_sampler_format(u32 format, VkComponentMapping& mapping, u8 swizzle_mask=0);
+	VkFormat get_compatible_surface_format(rsx::surface_color_format color_format);
+	VkFormat get_compatible_depth_surface_format(rsx::surface_depth_format depth_format);
 
 	class physical_device
 	{
@@ -294,6 +296,7 @@ namespace vk
 		VkMemoryRequirements m_memory_layout;
 		VkFormat m_internal_format;
 		VkImageUsageFlags m_flags;
+		VkImageAspectFlagBits m_image_aspect = VK_IMAGE_ASPECT_COLOR_BIT;
 		VkImageLayout m_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
 		vk::memory_block vram_allocation;
@@ -325,9 +328,14 @@ namespace vk
 		void init(rsx::texture &tex, vk::command_buffer &cmd);
 		void flush(vk::command_buffer & cmd);
 
+		//Fill with debug color 0xFF
+		void init_debug();
+
 		void change_layout(vk::command_buffer &cmd, VkImageLayout new_layout);
 		VkImageLayout get_layout();
 
+		const u32 width();
+		const u32 height();
 		const VkFormat get_format();
 
 		operator VkSampler();
@@ -455,6 +463,7 @@ namespace vk
 			owner = nullptr;
 			m_view = nullptr;
 			m_buffer = nullptr;
+			m_internal_format = VK_FORMAT_UNDEFINED;
 		}
 
 		void set_format(VkFormat format)
@@ -463,7 +472,10 @@ namespace vk
 				return;
 
 			if (m_view)
+			{
 				vkDestroyBufferView((*owner), m_view, nullptr);
+				m_view = nullptr;
+			}
 
 			VkFormatProperties format_properties;
 			vk::physical_device dev = owner->gpu();
@@ -1267,8 +1279,12 @@ namespace vk
 			void set_primitive_topology(VkPrimitiveTopology topology);
 			void set_color_mask(int num_targets, u8* targets, VkColorComponentFlags *flags);
 			void set_blend_state(int num_targets, u8* targets, VkBool32 *enable);
+			void set_blend_state(int num_targets, u8* targets, VkBool32 enable);
 			void set_blend_func(int num_targets, u8* targets, VkBlendFactor *src_color, VkBlendFactor *dst_color, VkBlendFactor *src_alpha, VkBlendFactor *dst_alpha);
+			void set_blend_func(int num_targets, u8 * targets, VkBlendFactor src_color, VkBlendFactor dst_color, VkBlendFactor src_alpha, VkBlendFactor dst_alpha);
 			void set_blend_op(int num_targets, u8* targets, VkBlendOp* color_ops, VkBlendOp* alpha_ops);
+
+			void set_blend_op(int num_targets, u8 * targets, VkBlendOp color_op, VkBlendOp alpha_op);
 			
 			void init_descriptor_layout();
 			void update_descriptors();

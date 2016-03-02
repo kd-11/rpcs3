@@ -248,6 +248,19 @@ namespace vk
 			}
 		}
 
+		void program::set_blend_state(int num_targets, u8 *targets, VkBool32 enable)
+		{
+			for (u8 idx = 0; idx < num_targets; ++idx)
+			{
+				u8 &id = targets[idx];
+				if (pstate.att_state[id].blendEnable != enable)
+				{
+					pstate.att_state[id].blendEnable = enable;
+					pstate.dirty = true;
+				}
+			}
+		}
+
 		void program::set_blend_func(int num_targets, u8* targets, VkBlendFactor* src_color, VkBlendFactor* dst_color, VkBlendFactor* src_alpha, VkBlendFactor* dst_alpha)
 		{
 			if (num_targets)
@@ -282,6 +295,40 @@ namespace vk
 			}
 		}
 
+		void program::set_blend_func(int num_targets, u8* targets, VkBlendFactor src_color, VkBlendFactor dst_color, VkBlendFactor src_alpha, VkBlendFactor dst_alpha)
+		{
+			if (num_targets)
+			{
+				for (u8 idx = 0; idx < num_targets; ++idx)
+				{
+					u8 &id = targets[idx];
+					if (pstate.att_state[id].srcColorBlendFactor != src_color)
+					{
+						pstate.att_state[id].srcColorBlendFactor = src_color;
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].dstColorBlendFactor != dst_color)
+					{
+						pstate.att_state[id].dstColorBlendFactor = dst_color;
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].srcAlphaBlendFactor != src_alpha)
+					{
+						pstate.att_state[id].srcAlphaBlendFactor = src_alpha;
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].dstAlphaBlendFactor != dst_alpha)
+					{
+						pstate.att_state[id].dstAlphaBlendFactor = dst_alpha;
+						pstate.dirty = true;
+					}
+				}
+			}
+		}
+
 		void program::set_blend_op(int num_targets, u8* targets, VkBlendOp* color_ops, VkBlendOp* alpha_ops)
 		{
 			if (num_targets)
@@ -298,6 +345,28 @@ namespace vk
 					if (pstate.att_state[id].alphaBlendOp != alpha_ops[idx])
 					{
 						pstate.att_state[id].alphaBlendOp = alpha_ops[idx];
+						pstate.dirty = true;
+					}
+				}
+			}
+		}
+
+		void program::set_blend_op(int num_targets, u8* targets, VkBlendOp color_op, VkBlendOp alpha_op)
+		{
+			if (num_targets)
+			{
+				for (u8 idx = 0; idx < num_targets; ++idx)
+				{
+					u8 &id = targets[idx];
+					if (pstate.att_state[id].colorBlendOp != color_op)
+					{
+						pstate.att_state[id].colorBlendOp = color_op;
+						pstate.dirty = true;
+					}
+
+					if (pstate.att_state[id].alphaBlendOp != alpha_op)
+					{
+						pstate.att_state[id].alphaBlendOp = alpha_op;
 						pstate.dirty = true;
 					}
 				}
@@ -419,7 +488,7 @@ namespace vk
 					{
 						image.imageView = input.as_sampler.image_view;
 						image.sampler = input.as_sampler.sampler;
-						image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+						image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
 					}
 					else
 						LOG_ERROR(RSX, "Texture object was not bound: %s", input.name);
@@ -600,18 +669,10 @@ namespace vk
 				if (uniform.name == uniform_name &&
 					uniform.domain == domain)
 				{
-					switch (uniform.type)
-					{
-					case input_type_texel_buffer:
-					case input_type_uniform_buffer:
-						uniform.as_buffer.buffer = nullptr;
-						uniform.as_buffer.buffer_view = nullptr;
-					case input_type_texture:
-						uniform.as_sampler.image_view = nullptr;
-						uniform.as_sampler.sampler = nullptr;
-					default:
-						throw EXCEPTION("Unhandled program input type");
-					}
+					uniform.as_buffer.buffer = nullptr;
+					uniform.as_buffer.buffer_view = nullptr;
+					uniform.as_sampler.image_view = nullptr;
+					uniform.as_sampler.sampler = nullptr;
 
 					uniforms_changed = true;
 					return true;
@@ -698,6 +759,9 @@ namespace vk
 						uniform.as_buffer.size = size;
 						uniform.as_buffer.buffer = buf;
 						uniform.as_buffer.buffer_view = view;
+
+						if (!view)
+							throw EXCEPTION("Invalid buffer passed as texel storage");
 
 						uniforms_changed = true;
 					}

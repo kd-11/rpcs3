@@ -196,6 +196,38 @@ namespace vk
 		}
 	}
 
+	VkFormat get_compatible_depth_surface_format(rsx::surface_depth_format format)
+	{
+		switch (format)
+		{
+		case rsx::surface_depth_format::z16: return VK_FORMAT_D16_UNORM;
+		case rsx::surface_depth_format::z24s8: return VK_FORMAT_D16_UNORM;
+		}
+		throw EXCEPTION("Invalid format (0x%x)", format);
+	}
+
+	std::vector<u8> get_draw_buffers(rsx::surface_target fmt)
+	{
+		switch (fmt)
+		{
+		case rsx::surface_target::none:
+			return{};
+		case rsx::surface_target::surface_a:
+			return{ 0 };
+		case rsx::surface_target::surface_b:
+			return{ 1 };
+		case rsx::surface_target::surfaces_a_b:
+			return{ 0, 1 };
+		case rsx::surface_target::surfaces_a_b_c:
+			return{ 0, 1, 2 };
+		case rsx::surface_target::surfaces_a_b_c_d:
+			return{ 0, 1, 2, 3 };
+		default:
+			LOG_ERROR(RSX, "Bad surface color target: %d", fmt);
+			return{};
+		}
+	}
+
 	VkBlendFactor get_blend_factor(u16 factor)
 	{
 		switch (factor)
@@ -316,19 +348,12 @@ VKGSRender::~VKGSRender()
 	m_fragment_constants_buffer.destroy();
 	m_index_buffer.destroy();
 
-	for (int i = 0; i < 4; ++i)
-	{
-		m_fbo_surfaces[i].destroy();
-		m_framebuffers[i].destroy();
-	}
-
 	if (m_render_pass)
 		destroy_render_pass();
 
 	m_command_buffer.destroy();
 	m_command_buffer_pool.destroy();
 
-	m_depth_buffer.destroy();
 	m_swap_chain->destroy();
 
 	m_thread_context.close();
@@ -358,7 +383,7 @@ void VKGSRender::begin()
 
 	init_buffers();
 
-	m_program->set_draw_buffer_count(m_nb_targets);
+	m_program->set_draw_buffer_count(m_draw_buffers_count);
 
 	u32 color_mask = rsx::method_registers[NV4097_SET_COLOR_MASK];
 	bool color_mask_b = !!(color_mask & 0xff);
@@ -375,7 +400,7 @@ void VKGSRender::begin()
 	VkColorComponentFlags color_masks[4] = { mask };
 
 	u8 render_targets[] = { 0, 1, 2, 3 };
-	m_program->set_color_mask(m_nb_targets, render_targets, color_masks);
+	m_program->set_color_mask(m_draw_buffers_count, render_targets, color_masks);
 
 	u32 depth_mask = rsx::method_registers[NV4097_SET_DEPTH_MASK];
 	u32 stencil_mask = rsx::method_registers[NV4097_SET_STENCIL_MASK];
@@ -394,28 +419,29 @@ void VKGSRender::begin()
 		u32 sfactor = rsx::method_registers[NV4097_SET_BLEND_FUNC_SFACTOR];
 		u32 dfactor = rsx::method_registers[NV4097_SET_BLEND_FUNC_DFACTOR];
 
-		VkBlendFactor sfactor_rgb[4] = { vk::get_blend_factor(sfactor) };
-		VkBlendFactor sfactor_a[4] = { vk::get_blend_factor(sfactor >> 16) };
-		VkBlendFactor dfactor_rgb[4] = {vk::get_blend_factor(dfactor)};
-		VkBlendFactor dfactor_a[4] = { vk::get_blend_factor(dfactor >> 16) };
+		VkBlendFactor sfactor_rgb = vk::get_blend_factor(sfactor);
+		VkBlendFactor sfactor_a = vk::get_blend_factor(sfactor >> 16);
+		VkBlendFactor dfactor_rgb = vk::get_blend_factor(dfactor);
+		VkBlendFactor dfactor_a = vk::get_blend_factor(dfactor >> 16);
 
 		//TODO: Separate target blending
 
-		VkBool32 blend_state[4] = { VK_TRUE };
+		VkBool32 blend_state = VK_TRUE;
 
-		m_program->set_blend_state(m_nb_targets, render_targets, blend_state);
-		m_program->set_blend_func(m_nb_targets, render_targets, sfactor_rgb, dfactor_rgb, sfactor_a, dfactor_a);
+		m_program->set_blend_state(m_draw_buffers_count, render_targets, blend_state);
+		m_program->set_blend_func(m_draw_buffers_count, render_targets, sfactor_rgb, dfactor_rgb, sfactor_a, dfactor_a);
+		//m_program->set_blend_func(m_draw_buffers_count, render_targets, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE);
 
 		u32 equation = rsx::method_registers[NV4097_SET_BLEND_EQUATION];
-		VkBlendOp equation_rgb[4] = { vk::get_blend_op(equation) };
-		VkBlendOp equation_a[4] = { vk::get_blend_op(equation >> 16) };
+		VkBlendOp equation_rgb = vk::get_blend_op(equation);
+		VkBlendOp equation_a = vk::get_blend_op(equation >> 16);
 
-		m_program->set_blend_op(m_nb_targets, render_targets, equation_rgb, equation_a);
+		m_program->set_blend_op(m_draw_buffers_count, render_targets, equation_rgb, equation_a);
 	}
 	else
 	{
-		VkBool32 blend_state[4] = { VK_FALSE };
-		m_program->set_blend_state(m_nb_targets, render_targets, blend_state);
+		VkBool32 blend_state = VK_FALSE;
+		m_program->set_blend_state(m_draw_buffers_count, render_targets, blend_state);
 	}
 
 	u32 line_width = rsx::method_registers[NV4097_SET_LINE_WIDTH];
@@ -429,7 +455,7 @@ void VKGSRender::begin()
 	rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
 	rp_begin.pNext = NULL;
 	rp_begin.renderPass = m_render_pass;
-	rp_begin.framebuffer = m_framebuffers[m_current_fbo];
+	rp_begin.framebuffer = m_framebuffer;
 	rp_begin.renderArea.offset.x = 0;
 	rp_begin.renderArea.offset.y = 0;
 	rp_begin.renderArea.extent.width = m_frame->client_size().width;
@@ -469,6 +495,7 @@ void VKGSRender::end()
 	//3. Texture setup
 
 	//setup textures
+	vk::texture *texture0 = nullptr;
 	for (int i = 0; i < rsx::limits::textures_count; ++i)
 	{
 		if (m_program->has_uniform(vk::glsl::glsl_fragment_program, "tex" + std::to_string(i)))
@@ -479,8 +506,9 @@ void VKGSRender::end()
 				continue;
 			}
 
-			vk::texture &tex = m_texture_cache.upload_texture(m_command_buffer, textures[i]);
+			vk::texture &tex = (texture0)? (*texture0): m_texture_cache.upload_texture(m_command_buffer, textures[i], m_rtts);
 			m_program->bind_uniform(vk::glsl::glsl_fragment_program, "tex" + std::to_string(i), tex);
+			texture0 = &tex;
 		}
 	}
 
@@ -550,7 +578,9 @@ void VKGSRender::end()
 			buffer.sub_data(0, data_size, vertex_arrays_data.data() + offset);
 			buffer.set_format(format);
 			//Attach buffer to texture
-			//texture->copy_from(*buffer, gl_type);
+			
+			if (vertex_info.size == 3)
+				LOG_ERROR(RSX, "3-component vertex attribute %s not handled properly", reg_table[index]);
 
 			//Link texture to uniform location
 			m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], buffer, true);
@@ -639,8 +669,8 @@ void VKGSRender::end()
 					buffer.sub_data(0, data_size, vertex_data.data());
 					buffer.set_format(format);
 
-					//Attach buffer to texture
-					//texture->copy_from(*buffer, gl_type);
+					if (vertex_info.size == 3)
+						LOG_ERROR(RSX, "3-component vertex attribute %s not handled properly", reg_table[index]);
 
 					//Link texture to uniform
 					m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index], buffer, true);
@@ -830,9 +860,12 @@ void VKGSRender::clear_surface(u32 mask)
 	//TODO: Build clear commands into current renderpass descriptor set
 	if (!(mask & 0xF3)) return;
 
-	if (m_current_present_image== 0xFFFF || recording) return;
-	//return;
-	begin_command_buffer_recording();
+	if (m_current_present_image== 0xFFFF) return;
+
+	bool was_recording = recording;
+
+	if (!was_recording)
+		begin_command_buffer_recording();
 
 	float depth_clear = 1.f;
 	u32   stencil_clear = 0.f;
@@ -854,7 +887,7 @@ void VKGSRender::clear_surface(u32 mask)
 		depth_stencil_clear_values.depthStencil.stencil = stencil_clear;
 	}
 
-	if (mask & 0x2)
+/*	if (mask & 0x2)
 	{
 		u8 clear_stencil = rsx::method_registers[NV4097_SET_ZSTENCIL_CLEAR_VALUE] & 0xff;
 		u32 stencil_mask = rsx::method_registers[NV4097_SET_STENCIL_MASK];
@@ -862,7 +895,7 @@ void VKGSRender::clear_surface(u32 mask)
 		//TODO set stencil mask
 		depth_range.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
 		depth_stencil_clear_values.depthStencil.stencil = stencil_mask;
-	}
+	}*/
 
 	if (mask & 0xF0)
 	{
@@ -885,20 +918,25 @@ void VKGSRender::clear_surface(u32 mask)
 
 		VkImageSubresourceRange range = vk::default_image_subresource_range();
 
-		for (u32 i = 0; i < m_nb_targets; ++i)
+		for (u32 i = 0; i < m_rtts.m_bound_render_targets.size(); ++i)
 		{
-			VkImage color_image = m_fbo_surfaces[i];
-			vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &color_clear_values.color, 1, &range);
+			if (std::get<1>(m_rtts.m_bound_render_targets[i]) == nullptr) continue;
+
+			VkImage color_image = (*std::get<1>(m_rtts.m_bound_render_targets[i]));
+			vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, &color_clear_values.color, 1, &range);
 		}
 	}
 
 	if (mask & 0x3)
-		vkCmdClearDepthStencilImage(m_command_buffer, m_depth_buffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, &depth_stencil_clear_values.depthStencil, 1, &depth_range);
+		vkCmdClearDepthStencilImage(m_command_buffer, (*std::get<1>(m_rtts.m_bound_depth_stencil)), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, &depth_stencil_clear_values.depthStencil, 1, &depth_range);
 
-	end_command_buffer_recording();
-	execute_command_buffer(false);
+	if (!was_recording)
+	{
+		end_command_buffer_recording();
+		execute_command_buffer(false);
+	}
 
-	//LOG_ERROR(RSX, ">>>> Clear surface finished");
+	recording = was_recording;
 }
 
 bool VKGSRender::do_method(u32 cmd, u32 arg)
@@ -913,7 +951,7 @@ bool VKGSRender::do_method(u32 cmd, u32 arg)
 	}
 }
 
-void VKGSRender::init_render_pass(VkFormat surface_format, int num_draw_buffers, int *draw_buffers)
+void VKGSRender::init_render_pass(VkFormat surface_format, VkFormat depth_format, u8 num_draw_buffers, u8 *draw_buffers)
 {
 	//TODO: Create buffers as requested by the game. Render to swapchain for now..
 	/* Describe a render pass and framebuffer attachments */
@@ -1052,132 +1090,6 @@ bool VKGSRender::load_program()
 	return true;
 }
 
-void VKGSRender::init_buffers(bool skip_reading)
-{
-	u32 surface_format = rsx::method_registers[NV4097_SET_SURFACE_FORMAT];
-
-	u32 clip_horizontal = rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL];
-	u32 clip_vertical = rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL];
-
-	u32 clip_width = clip_horizontal >> 16;
-	u32 clip_height = clip_vertical >> 16;
-	u32 clip_x = clip_horizontal;
-	u32 clip_y = clip_vertical;
-
-	VkFormat requested_format = vk::get_compatible_surface_format((rsx::surface_color_format)surface_format);
-
-	if (dirty_frame)
-	{
-		//Prepare surface for new frame
-		VkSemaphoreCreateInfo semaphore_info;
-		semaphore_info.flags = 0;
-		semaphore_info.pNext = nullptr;
-		semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-		vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &m_present_semaphore);
-
-		VkFence nullFence = VK_NULL_HANDLE;
-		CHECK_RESULT(vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, m_present_semaphore, nullFence, &m_current_present_image));
-
-		dirty_frame = false;
-	}
-
-	//Choose the number of outputs and initialize render pass descriptor accordingly
-	rsx::surface_target fmt = rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET]);
-
-	if (fmt != m_current_targets || m_render_pass == nullptr)
-	{
-		m_current_fbo = 0;
-
-		u32 num_targets = 0;
-		int draw_buffers[] = {0, 1, 2, 3};
-
-		switch (fmt)
-		{
-		case rsx::surface_target::none: break;
-
-		case rsx::surface_target::surface_a:
-			num_targets = 1;
-			break;
-
-		case rsx::surface_target::surface_b:
-			draw_buffers[0] = 1;
-			draw_buffers[1] = 0;
-			num_targets = 2;
-			m_current_fbo = 1;
-			break;
-
-		case rsx::surface_target::surfaces_a_b:
-			num_targets = 2;
-			m_current_fbo = 1;
-			break;
-
-		case rsx::surface_target::surfaces_a_b_c:
-			num_targets = 3;
-			m_current_fbo = 2;
-			break;
-
-		case rsx::surface_target::surfaces_a_b_c_d:
-			num_targets = 4;
-			m_current_fbo = 3;
-			break;
-
-		default:
-			LOG_ERROR(RSX, "Bad surface color target: %d", rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET]);
-			break;
-		}
-
-		if (m_render_pass)
-			destroy_render_pass();
-
-		init_render_pass(requested_format, num_targets, draw_buffers);
-		m_current_targets = fmt;
-		m_nb_targets = num_targets;
-	}
-
-	//TODO: if fbo is different from previous, recreate the fbo
-	if (m_surface_format != requested_format)
-	{
-		u32 width = clip_width;
-		u32 height = clip_height;
-
-		for (vk::texture &tex : m_fbo_surfaces)
-		{
-			tex.destroy();
-			tex.create((*m_device), requested_format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT, width, height);
-			vk::change_image_layout(m_command_buffer, tex, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT);
-		}
-
-		m_depth_buffer.destroy();
-		m_depth_buffer.create((*m_device), VK_FORMAT_D16_UNORM, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, width, height);
-		vk::change_image_layout(m_command_buffer, m_depth_buffer, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT);
-
-		for (int i = 0; i < 4; ++i)
-		{
-			vk::framebuffer &surf = m_framebuffers[i];
-			VkImageView attachments[5];
-
-			for (int j = 0; j <= i; ++j)
-				attachments[j] = m_fbo_surfaces[j];
-
-			attachments[i + 1] = m_depth_buffer;
-
-			surf.destroy();
-			surf.create((*m_device), m_render_pass, attachments, i + 2, width, height);
-		}
-
-		m_surface_format = requested_format;
-		clear_surface(0xF3);
-	}
-
-	if (!skip_reading)
-	{
-		read_buffers();
-	}
-
-	set_viewport();
-}
-
 static const u32 mr_color_offset[rsx::limits::color_buffers_count] =
 {
 	NV4097_SET_SURFACE_COLOR_AOFFSET,
@@ -1201,6 +1113,34 @@ static const u32 mr_color_pitch[rsx::limits::color_buffers_count] =
 	NV4097_SET_SURFACE_PITCH_C,
 	NV4097_SET_SURFACE_PITCH_D
 };
+
+void VKGSRender::init_buffers(bool skip_reading)
+{
+	if (dirty_frame)
+	{
+		//Prepare surface for new frame
+		VkSemaphoreCreateInfo semaphore_info;
+		semaphore_info.flags = 0;
+		semaphore_info.pNext = nullptr;
+		semaphore_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+		vkCreateSemaphore((*m_device), &semaphore_info, nullptr, &m_present_semaphore);
+
+		VkFence nullFence = VK_NULL_HANDLE;
+		CHECK_RESULT(vkAcquireNextImageKHR((*m_device), (*m_swap_chain), 0, m_present_semaphore, nullFence, &m_current_present_image));
+
+		dirty_frame = false;
+	}
+
+	prepare_rtts();
+
+	if (!skip_reading)
+	{
+		read_buffers();
+	}
+
+	set_viewport();
+}
 
 void VKGSRender::read_buffers()
 {
@@ -1245,6 +1185,74 @@ void VKGSRender::end_command_buffer_recording()
 {
 	recording = false;
 	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
+}
+
+void VKGSRender::prepare_rtts()
+{
+	u32 surface_format = rsx::method_registers[NV4097_SET_SURFACE_FORMAT];
+
+	if (!m_rtts_dirty)
+		return;
+
+	m_rtts_dirty = false;
+	bool reconfigure_render_pass = true;
+
+	if (m_surface.format != surface_format)
+	{
+		m_surface.unpack(surface_format);
+//		reconfigure_render_pass = true;
+	}
+
+	m_rtts.prepare_render_target(&m_command_buffer,
+		rsx::method_registers[NV4097_SET_SURFACE_FORMAT],
+		rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL], rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL],
+		rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET]),
+		get_color_surface_addresses(), get_zeta_surface_address(),
+		(*m_device));
+
+	//Bind created rtts as current fbo...
+	VkImageView attachments[5];
+	std::vector<u8> draw_buffers = vk::get_draw_buffers(rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET]));
+
+	m_framebuffer.destroy();
+	std::vector<VkImageView> fbo_images;
+
+	for (u8 index: draw_buffers)
+	{
+		vk::texture *raw = std::get<1>(m_rtts.m_bound_render_targets[index]);
+		VkImageView as_image = (*raw);
+		fbo_images.push_back(as_image);
+
+		raw->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+	}
+
+	if (std::get<1>(m_rtts.m_bound_depth_stencil) != nullptr)
+	{
+		vk::texture *raw = (std::get<1>(m_rtts.m_bound_depth_stencil));
+		VkImageView depth_image = (*raw);
+		fbo_images.push_back(depth_image);
+
+		raw->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+	}
+
+	if (reconfigure_render_pass)
+	{
+		//Create render pass with draw_buffers information
+		//Somewhat simliar to glDrawBuffers
+
+		if (m_render_pass)
+			destroy_render_pass();
+
+		init_render_pass(vk::get_compatible_surface_format(m_surface.color_format),
+			vk::get_compatible_depth_surface_format(m_surface.depth_format),
+			draw_buffers.size(),
+			draw_buffers.data());
+	}
+
+	m_framebuffer.create((*m_device), m_render_pass, fbo_images.data(), fbo_images.size(),
+						rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL], rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL]);
+
+	m_draw_buffers_count = draw_buffers.size();
 }
 
 void VKGSRender::execute_command_buffer(bool wait)
@@ -1349,10 +1357,14 @@ void VKGSRender::flip(int buffer)
 		if (m_present_semaphore)
 		{
 			//Blit contents to screen..
-			VkImage image_to_flip = m_fbo_surfaces[0];
-			VkImage target_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
+			VkImage image_to_flip = nullptr;
+			
+			if (std::get<1>(m_rtts.m_bound_render_targets[0]) != nullptr)
+				image_to_flip = (*std::get<1>(m_rtts.m_bound_render_targets[0]));
+			else
+				image_to_flip = (*std::get<1>(m_rtts.m_bound_render_targets[1]));
 
-			//TODO SCALING
+			VkImage target_image = m_swap_chain->get_swap_chain_image(m_current_present_image);
 			vk::copy_scaled_image(m_command_buffer, image_to_flip, target_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
 									buffer_width, buffer_height, aspect_ratio.width, aspect_ratio.height, 1, VK_IMAGE_ASPECT_COLOR_BIT);
 		}
@@ -1382,6 +1394,10 @@ void VKGSRender::flip(int buffer)
 			m_present_semaphore = nullptr;
 		}
 	}
+
+	//Feed back damaged resources to the main cache for management...
+	m_texture_cache.merge_dirty_textures(m_rtts.invalidated_resources);
+	m_rtts.invalidated_resources.clear();
 
 	m_draw_calls = 0;
 	dirty_frame = true;

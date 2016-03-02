@@ -31,6 +31,9 @@
     <ClInclude Include="Emu\RSX\VK\VKTextureCache.h">
       <Filter>Source Files</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\RSX\VK\VKRenderTargets.h">
+      <Filter>Source Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Emu\RSX\VK\VKGSRender.cpp">

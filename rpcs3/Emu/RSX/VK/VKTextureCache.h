@@ -1,5 +1,6 @@
 #pragma once
 #include "stdafx.h"
+#include "VKRenderTargets.h"
 #include "VKGSRender.h"
 #include "../Common/TextureUtils.h"
 
@@ -29,6 +30,8 @@ namespace vk
 	{
 	private:
 		std::vector<cached_texture_object> m_cache;
+		vk::texture debug_texture;
+		bool debugger_init = false;
 
 		bool lock_memory_region(u32 start, u32 size)
 		{
@@ -144,10 +147,24 @@ namespace vk
 			m_cache.resize(0);
 		}
 
-		vk::texture& upload_texture(command_buffer cmd, rsx::texture &tex)
+		vk::texture& upload_texture(command_buffer cmd, rsx::texture &tex, rsx::vk_render_targets &m_rtts)
 		{
 			const u32 texaddr = rsx::get_address(tex.offset(), tex.location());
 			const u32 range = (u32)get_texture_size(tex);
+
+			//First check if it exists as an rtt...
+			vk::texture *rtt_texture = nullptr;
+			if (rtt_texture = m_rtts.get_texture_from_render_target_if_applicable(texaddr))
+			{
+				LOG_ERROR(RSX, "Recovered texture @0x%X from rtt cache", texaddr);
+				//return debug_texture;
+				return *rtt_texture;
+			}
+
+			if (rtt_texture = m_rtts.get_texture_from_depth_stencil_if_applicable(texaddr))
+			{
+				return *rtt_texture;
+			}
 
 			cached_texture_object& cto = find_cached_texture(texaddr, range, false);
 			if (cto.exists && !cto.dirty)
@@ -166,7 +183,7 @@ namespace vk
 
 			cto.uploaded_texture.create(*vk::get_current_renderer(), vk_format, VK_IMAGE_USAGE_SAMPLED_BIT, tex.width(), tex.height(), tex.mipmap(), false, mapping);
 			cto.uploaded_texture.init(tex, cmd);
-			cto.uploaded_texture.change_layout(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+			cto.uploaded_texture.change_layout(cmd, VK_IMAGE_LAYOUT_GENERAL);
 
 			cto.exists = true;
 			cto.dirty = false;
@@ -210,6 +227,28 @@ namespace vk
 			{
 				if (tex.dirty || !tex.exists) continue;
 				tex.uploaded_texture.flush(cmd);
+			}
+
+			if (!debugger_init)
+			{
+				debug_texture.create(*vk::get_current_renderer(), VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, 32, 32, 1, false);
+				debug_texture.init_debug();
+				debugger_init = true;
+			}
+		}
+
+		void merge_dirty_textures(std::list<vk::texture> dirty_textures)
+		{
+			for (vk::texture &tex : dirty_textures)
+			{
+				cached_texture_object cto;
+				cto.uploaded_texture = tex;
+				cto.locked = false;
+				cto.exists = true;
+				cto.dirty = true;
+				cto.native_rsx_address = 0;
+
+				m_cache.push_back(cto);
 			}
 		}
 	};

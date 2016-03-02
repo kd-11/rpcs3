@@ -14,22 +14,24 @@ namespace rsx
 		using command_list_type = vk::command_buffer*;
 		using download_buffer_object = void*;
 
-		static vk::texture create_new_surface(u32 address, surface_color_format format, size_t width, size_t height, vk::render_device &device)
+		static vk::texture create_new_surface(u32 address, surface_color_format format, size_t width, size_t height, vk::render_device &device, vk::command_buffer *cmd)
 		{
 			VkFormat requested_format = vk::get_compatible_surface_format(format);
 			
 			vk::texture rtt;
 			rtt.create(device, requested_format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|VK_IMAGE_USAGE_SAMPLED_BIT, width, height);
+			rtt.change_layout(*cmd, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 			return rtt;
 		}
 
-		static vk::texture create_new_surface(u32 address, surface_depth_format format, size_t width, size_t height, vk::render_device &device)
+		static vk::texture create_new_surface(u32 address, surface_depth_format format, size_t width, size_t height, vk::render_device &device, vk::command_buffer *cmd)
 		{
 			VkFormat requested_format = vk::get_compatible_depth_surface_format(format);
 
 			vk::texture rtt;
 			rtt.create(device, requested_format, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT|VK_IMAGE_USAGE_SAMPLED_BIT, width, height);
+			rtt.change_layout(*cmd, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 			
 			return rtt;
 		}
@@ -41,7 +43,7 @@ namespace rsx
 
 		static void prepare_rtt_for_sampling(vk::command_buffer* pcmd, vk::texture *surface)
 		{
-			surface->change_layout(*pcmd, VK_IMAGE_LAYOUT_GENERAL);
+			surface->change_layout(*pcmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
 
 		static void prepare_ds_for_drawing(vk::command_buffer* pcmd, vk::texture *surface)
@@ -51,7 +53,7 @@ namespace rsx
 
 		static void prepare_ds_for_sampling(vk::command_buffer* pcmd, vk::texture *surface)
 		{
-			surface->change_layout(*pcmd, VK_IMAGE_LAYOUT_GENERAL);
+			surface->change_layout(*pcmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 		}
 
 		static bool rtt_has_format_width_height(const vk::texture &rtt, surface_color_format format, size_t width, size_t height)

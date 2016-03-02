@@ -373,6 +373,14 @@ namespace vk
 			}
 		}
 
+		void program::set_primitive_restart(VkBool32 state)
+		{
+			if (pstate.ia.primitiveRestartEnable != state)
+			{
+				pstate.ia.primitiveRestartEnable = state;
+			}
+		}
+
 		void program::init_descriptor_layout()
 		{
 			if (pstate.descriptor_layouts[0] != nullptr)
@@ -480,7 +488,7 @@ namespace vk
 				case input_type_texture:
 				{
 					auto &image = images[image_index++];
-					image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+					image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 					image.sampler = null_sampler();
 					image.imageView = null_image_view();
 
@@ -488,7 +496,7 @@ namespace vk
 					{
 						image.imageView = input.as_sampler.image_view;
 						image.sampler = input.as_sampler.sampler;
-						image.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+						image.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 					}
 					else
 						LOG_ERROR(RSX, "Texture object was not bound: %s", input.name);

@@ -14,7 +14,8 @@
 #include "VulkanAPI.h"
 #include "../GCM.h"
 
-#define VK_ENABLED_LAYER_COUNT 9
+//Set to 9 to enable all debug layers. Will cause significant slowdowns. Eventually to be replaced with GUI checkbox
+#define VK_ENABLED_LAYER_COUNT 0
 
 namespace rsx
 {
@@ -535,7 +536,6 @@ namespace vk
 		{
 			VkFramebufferCreateInfo infos;
 			infos.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-			infos.attachmentCount = 1;
 			infos.flags = 0;
 			infos.width = width;
 			infos.height = height;
@@ -1283,8 +1283,8 @@ namespace vk
 			void set_blend_func(int num_targets, u8* targets, VkBlendFactor *src_color, VkBlendFactor *dst_color, VkBlendFactor *src_alpha, VkBlendFactor *dst_alpha);
 			void set_blend_func(int num_targets, u8 * targets, VkBlendFactor src_color, VkBlendFactor dst_color, VkBlendFactor src_alpha, VkBlendFactor dst_alpha);
 			void set_blend_op(int num_targets, u8* targets, VkBlendOp* color_ops, VkBlendOp* alpha_ops);
-
 			void set_blend_op(int num_targets, u8 * targets, VkBlendOp color_op, VkBlendOp alpha_op);
+			void set_primitive_restart(VkBool32 state);
 			
 			void init_descriptor_layout();
 			void update_descriptors();

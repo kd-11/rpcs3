@@ -355,7 +355,17 @@ namespace vk
 			{
 				u32 buffer_size = get_placed_texture_storage_size(tex, layout_alignment[0].first, layout_alignment[0].first);
 				if (buffer_size != layout_alignment[0].second.size)
-					throw EXCEPTION("Bad texture alignment computation!");
+				{
+					if (buffer_size > layout_alignment[0].second.size)
+					{
+						throw EXCEPTION("Bad texture alignment computation!");
+					}
+					else
+					{
+						LOG_ERROR(RSX, "Bad texture alignment computation: expected size=%d bytes, computed=%d bytes, alignment=%d, hw pitch=%d",
+							layout_alignment[0].second.size, buffer_size, layout_alignment[0].first, layout_alignment[0].second.rowPitch);
+					}
+				}
 
 				CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, (void**)&data));
 				gsl::span<gsl::byte> mapped{ (gsl::byte*)(data + layout_alignment[0].second.offset), gsl::narrow<int>(layout_alignment[0].second.size) };
@@ -369,7 +379,9 @@ namespace vk
 				u32 max_size = layer_props.offset + layer_props.size;
 
 				if (m_memory_layout.size < max_size)
+				{
 					throw EXCEPTION("Failed to upload texture. Invalid memory block size.");
+				}
 
 				int index= 0;
 				std::vector<std::pair<u32, u32>> layout_offset_info(tex.mipmap());

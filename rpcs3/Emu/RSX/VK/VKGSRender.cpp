@@ -402,14 +402,13 @@ void VKGSRender::begin()
 	u8 render_targets[] = { 0, 1, 2, 3 };
 	m_program->set_color_mask(m_draw_buffers_count, render_targets, color_masks);
 
-	u32 depth_mask = rsx::method_registers[NV4097_SET_DEPTH_MASK];
-	u32 stencil_mask = rsx::method_registers[NV4097_SET_STENCIL_MASK];
+	//TODO stencil mask
+	m_program->set_depth_write_mask(rsx::method_registers[NV4097_SET_DEPTH_MASK]);
 
 	if (rsx::method_registers[NV4097_SET_DEPTH_TEST_ENABLE])
 	{
 		m_program->set_depth_test_enable(VK_TRUE);
 		m_program->set_depth_compare_op(vk::compare_op(rsx::method_registers[NV4097_SET_DEPTH_FUNC]));
-		m_program->set_depth_write_mask(rsx::method_registers[NV4097_SET_DEPTH_MASK]);
 	}
 	else
 		m_program->set_depth_test_enable(VK_FALSE);
@@ -443,6 +442,19 @@ void VKGSRender::begin()
 		VkBool32 blend_state = VK_FALSE;
 		m_program->set_blend_state(m_draw_buffers_count, render_targets, blend_state);
 	}
+
+	if (rsx::method_registers[NV4097_SET_RESTART_INDEX_ENABLE])
+	{
+		if (rsx::method_registers[NV4097_SET_RESTART_INDEX] != 0xFFFF &&
+			rsx::method_registers[NV4097_SET_RESTART_INDEX] != 0xFFFFFFFF)
+		{
+			LOG_ERROR(RSX, "Custom primitive restart index 0x%X. Should rewrite index buffer with proper value!", rsx::method_registers[NV4097_SET_RESTART_INDEX]);
+		}
+
+		m_program->set_primitive_restart(VK_TRUE);
+	}
+	else
+		m_program->set_primitive_restart(VK_FALSE);
 
 	u32 line_width = rsx::method_registers[NV4097_SET_LINE_WIDTH];
 	float actual_line_width = (line_width >> 3) + (line_width & 7) / 8.f;
@@ -867,6 +879,8 @@ void VKGSRender::clear_surface(u32 mask)
 	if (!was_recording)
 		begin_command_buffer_recording();
 
+	init_buffers();
+
 	float depth_clear = 1.f;
 	u32   stencil_clear = 0.f;
 
@@ -1200,15 +1214,23 @@ void VKGSRender::prepare_rtts()
 	if (m_surface.format != surface_format)
 	{
 		m_surface.unpack(surface_format);
-//		reconfigure_render_pass = true;
+		reconfigure_render_pass = true;
 	}
 
+	u32 clip_horizontal = rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL];
+	u32 clip_vertical = rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL];
+
+	u32 clip_width = clip_horizontal >> 16;
+	u32 clip_height = clip_vertical >> 16;
+	u32 clip_x = clip_horizontal;
+	u32 clip_y = clip_vertical;
+
 	m_rtts.prepare_render_target(&m_command_buffer,
-		rsx::method_registers[NV4097_SET_SURFACE_FORMAT],
-		rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL], rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL],
+		surface_format,
+		clip_horizontal, clip_vertical,
 		rsx::to_surface_target(rsx::method_registers[NV4097_SET_SURFACE_COLOR_TARGET]),
 		get_color_surface_addresses(), get_zeta_surface_address(),
-		(*m_device));
+		(*m_device), &m_command_buffer);
 
 	//Bind created rtts as current fbo...
 	VkImageView attachments[5];
@@ -1222,8 +1244,6 @@ void VKGSRender::prepare_rtts()
 		vk::texture *raw = std::get<1>(m_rtts.m_bound_render_targets[index]);
 		VkImageView as_image = (*raw);
 		fbo_images.push_back(as_image);
-
-		raw->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 	}
 
 	if (std::get<1>(m_rtts.m_bound_depth_stencil) != nullptr)
@@ -1231,8 +1251,6 @@ void VKGSRender::prepare_rtts()
 		vk::texture *raw = (std::get<1>(m_rtts.m_bound_depth_stencil));
 		VkImageView depth_image = (*raw);
 		fbo_images.push_back(depth_image);
-
-		raw->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 	}
 
 	if (reconfigure_render_pass)
@@ -1250,7 +1268,7 @@ void VKGSRender::prepare_rtts()
 	}
 
 	m_framebuffer.create((*m_device), m_render_pass, fbo_images.data(), fbo_images.size(),
-						rsx::method_registers[NV4097_SET_SURFACE_CLIP_HORIZONTAL], rsx::method_registers[NV4097_SET_SURFACE_CLIP_VERTICAL]);
+						clip_width, clip_height);
 
 	m_draw_buffers_count = draw_buffers.size();
 }
@@ -1358,7 +1376,7 @@ void VKGSRender::flip(int buffer)
 		{
 			//Blit contents to screen..
 			VkImage image_to_flip = nullptr;
-			
+
 			if (std::get<1>(m_rtts.m_bound_render_targets[0]) != nullptr)
 				image_to_flip = (*std::get<1>(m_rtts.m_bound_render_targets[0]));
 			else
@@ -1395,7 +1413,7 @@ void VKGSRender::flip(int buffer)
 		}
 	}
 
-	//Feed back damaged resources to the main cache for management...
+	//Feed back damaged resources to the main texture cache for management...
 	m_texture_cache.merge_dirty_textures(m_rtts.invalidated_resources);
 	m_rtts.invalidated_resources.clear();
 

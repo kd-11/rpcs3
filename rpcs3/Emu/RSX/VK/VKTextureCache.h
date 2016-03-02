@@ -30,8 +30,6 @@ namespace vk
 	{
 	private:
 		std::vector<cached_texture_object> m_cache;
-		vk::texture debug_texture;
-		bool debugger_init = false;
 
 		bool lock_memory_region(u32 start, u32 size)
 		{
@@ -156,8 +154,6 @@ namespace vk
 			vk::texture *rtt_texture = nullptr;
 			if (rtt_texture = m_rtts.get_texture_from_render_target_if_applicable(texaddr))
 			{
-				LOG_ERROR(RSX, "Recovered texture @0x%X from rtt cache", texaddr);
-				//return debug_texture;
 				return *rtt_texture;
 			}
 
@@ -169,9 +165,6 @@ namespace vk
 			cached_texture_object& cto = find_cached_texture(texaddr, range, false);
 			if (cto.exists && !cto.dirty)
 			{
-				VkImage img = cto.uploaded_texture;
-				if (!img)
-					throw EXCEPTION("Who deleted me!");
 				return cto.uploaded_texture;
 			}
 
@@ -183,7 +176,7 @@ namespace vk
 
 			cto.uploaded_texture.create(*vk::get_current_renderer(), vk_format, VK_IMAGE_USAGE_SAMPLED_BIT, tex.width(), tex.height(), tex.mipmap(), false, mapping);
 			cto.uploaded_texture.init(tex, cmd);
-			cto.uploaded_texture.change_layout(cmd, VK_IMAGE_LAYOUT_GENERAL);
+			cto.uploaded_texture.change_layout(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 			cto.exists = true;
 			cto.dirty = false;
@@ -191,10 +184,6 @@ namespace vk
 			cto.native_rsx_size = range;
 			
 			lock_object(cto);
-
-			VkImage img = cto.uploaded_texture;
-			if (!img)
-				throw EXCEPTION("Who deleted me!");
 
 			return cto.uploaded_texture;
 		}
@@ -227,13 +216,6 @@ namespace vk
 			{
 				if (tex.dirty || !tex.exists) continue;
 				tex.uploaded_texture.flush(cmd);
-			}
-
-			if (!debugger_init)
-			{
-				debug_texture.create(*vk::get_current_renderer(), VK_FORMAT_B8G8R8A8_UNORM, VK_IMAGE_USAGE_SAMPLED_BIT, 32, 32, 1, false);
-				debug_texture.init_debug();
-				debugger_init = true;
 			}
 		}
 

@@ -125,7 +125,7 @@ namespace vk
 		dst_data.resize(dst_size);
 
 		T* src = const_cast<T*>(src_data);
-		T* dst = reinterpret_cast<T*>(dst.data());
+		T* dst = reinterpret_cast<T*>(dst_data.data());
 
 		for (u32 index = 0; index < vertex_count; ++index)
 		{
@@ -148,21 +148,21 @@ namespace vk
 	}
 
 	template <typename T, u32 padding>
-	void copy_inlined_data_to_buffer(const void *src_data, const void *dst_data, u32 vertex_count, rsx::vertex_base_type type, u8 src_channels, u8 dst_channels, u16 element_size, u16 stride)
+	void copy_inlined_data_to_buffer(void *src_data, void *dst_data, u32 vertex_count, rsx::vertex_base_type type, u8 src_channels, u8 dst_channels, u16 element_size, u16 stride)
 	{
-		u8 *src = src_data;
-		u8 *dst = dst_data;
+		u8 *src = static_cast<u8*>(src_data);
+		u8 *dst = static_cast<u8*>(dst_data);
 
 		for (u32 i = 0; i < vertex_count; ++i)
 		{
-			T* src_ptr = reinterpret_cast<T*>src;
-			T* dst_ptr = reinterpret_cast<T*>dst;
+			T* src_ptr = reinterpret_cast<T*>(src);
+			T* dst_ptr = reinterpret_cast<T*>(dst);
 
 			switch (type)
 			{
 			case rsx::vertex_base_type::ub:
 			{
-				if (nb_channels == 4)
+				if (src_channels == 4)
 				{
 					dst[0] = src[3];
 					dst[1] = src[2];
@@ -391,7 +391,7 @@ VKGSRender::upload_vertex_data()
 				}
 
 				const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
-				const u32 data_size = element_size * vertex_draw_count;
+				const u32 data_size = element_size * num_stored_verts;
 
 				auto &buffer = m_attrib_buffers[index];
 
@@ -513,7 +513,7 @@ VKGSRender::upload_vertex_data()
 		index_buffer_filled = true;
 	}
 
-	if (!index_buffer_filled)
+	if (!index_buffer_filled && is_indexed_draw)
 	{
 		rsx::index_array_type indexed_type = rsx::to_index_array_type(rsx::method_registers[NV4097_SET_INDEX_ARRAY_DMA] >> 4);
 		index_format = VK_INDEX_TYPE_UINT16;

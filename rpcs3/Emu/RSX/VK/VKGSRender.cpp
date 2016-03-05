@@ -321,7 +321,6 @@ void VKGSRender::begin()
 
 		m_program->set_blend_state(m_draw_buffers_count, render_targets, blend_state);
 		m_program->set_blend_func(m_draw_buffers_count, render_targets, sfactor_rgb, dfactor_rgb, sfactor_a, dfactor_a);
-		//m_program->set_blend_func(m_draw_buffers_count, render_targets, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE);
 
 		u32 equation = rsx::method_registers[NV4097_SET_BLEND_EQUATION];
 		VkBlendOp equation_rgb = vk::get_blend_op(equation);

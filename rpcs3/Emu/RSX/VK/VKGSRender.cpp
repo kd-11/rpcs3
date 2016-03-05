@@ -624,7 +624,7 @@ void VKGSRender::init_render_pass(VkFormat surface_format, VkFormat depth_format
 	template_color_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 	VkAttachmentReference depth_reference;
-	depth_reference.attachment = 1;
+	depth_reference.attachment = num_draw_buffers;
 	depth_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
 	//Fill in draw_buffers information...

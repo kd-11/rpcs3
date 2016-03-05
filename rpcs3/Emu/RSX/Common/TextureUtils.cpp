@@ -202,7 +202,7 @@ size_t get_texture_block_edge(u32 format)
 }
 
 
-size_t get_placed_texture_storage_size(const rsx::texture &texture, size_t rowPitchAlignement)
+size_t get_placed_texture_storage_size(const rsx::texture &texture, size_t rowPitchAlignement, size_t mipmapAlignment)
 {
 	size_t w = texture.width(), h = texture.height(), d = MAX2(texture.depth(), 1);
 
@@ -218,7 +218,7 @@ size_t get_placed_texture_storage_size(const rsx::texture &texture, size_t rowPi
 	for (unsigned mipmap = 0; mipmap < texture.mipmap(); ++mipmap)
 	{
 		size_t rowPitch = align(blockSizeInByte * widthInBlocks, rowPitchAlignement);
-		result += align(rowPitch * heightInBlocks * d, 512);
+		result += align(rowPitch * heightInBlocks * d, mipmapAlignment);
 		heightInBlocks = MAX2(heightInBlocks / 2, 1);
 		widthInBlocks = MAX2(widthInBlocks / 2, 1);
 	}

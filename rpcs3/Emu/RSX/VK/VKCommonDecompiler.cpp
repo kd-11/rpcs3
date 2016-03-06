@@ -237,6 +237,7 @@ namespace vk
 		{ "front_diff_color", 11 },
 		{ "front_spec_color", 12 },
 		{ "spec_color", 13 },
+		{ "fog_c", 14 },
 		{ "fogc", 14 }
 	};
 

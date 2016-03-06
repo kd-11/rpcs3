@@ -221,7 +221,6 @@ VKGSRender::upload_vertex_data()
 {
 	//initialize vertex attributes
 	std::vector<u8> vertex_arrays_data;
-	u32 vertex_arrays_offsets[rsx::limits::vertex_count];
 
 	const std::string reg_table[] =
 	{
@@ -238,8 +237,6 @@ VKGSRender::upload_vertex_data()
 	std::vector<u8> vertex_index_array;
 	vertex_draw_count = 0;
 	u32 min_index, max_index;
-
-	//LOG_ERROR(RSX, "Draw command: %d, vertex_type=%d, size=%d, tc0_type=%d, size=%d", draw_command, vertex_arrays_info[0].type, vertex_arrays_info[0].size, vertex_arrays_info[8].type, vertex_arrays_info[8].size);
 
 	if (draw_command == rsx::draw_command::indexed)
 	{
@@ -283,11 +280,14 @@ VKGSRender::upload_vertex_data()
 		{
 			auto &vertex_info = vertex_arrays_info[index];
 
-			if (!vertex_info.size) // disabled
-				continue;
-
 			if (!m_program->has_uniform(vk::glsl::glsl_vertex_program, reg_table[index]))
 				continue;
+
+			if (!vertex_info.size) // disabled
+			{
+				m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index]);
+				continue;
+			}
 
 			const u32 host_element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
 			const u32 element_size = vk::get_suitable_vk_size(vertex_info.type, vertex_info.size);
@@ -351,12 +351,16 @@ VKGSRender::upload_vertex_data()
 	{
 		for (int index = 0; index < rsx::limits::vertex_count; ++index)
 		{
-			bool enabled = !!(input_mask & (1 << index));
-			if (!enabled)
-				continue;
-
 			if (!m_program->has_uniform(vk::glsl::glsl_vertex_program, reg_table[index]))
 				continue;
+		
+			bool enabled = !!(input_mask & (1 << index));
+
+			if (!enabled)
+			{
+				m_program->bind_uniform(vk::glsl::glsl_vertex_program, reg_table[index]);
+				continue;
+			}
 
 			if (vertex_arrays_info[index].size > 0)
 			{
@@ -365,7 +369,7 @@ VKGSRender::upload_vertex_data()
 				std::vector<gsl::byte> vertex_array;
 
 				// Fill vertex_array
-				u32 element_size = vk::get_suitable_vk_size(vertex_info.type, vertex_info.size);
+				u32 element_size = rsx::get_vertex_type_size_on_host(vertex_info.type, vertex_info.size);
 				vertex_array.resize(vertex_draw_count * element_size);
 
 				// Get source pointer
@@ -414,7 +418,7 @@ VKGSRender::upload_vertex_data()
 				}
 
 				const VkFormat format = vk::get_suitable_vk_format(vertex_info.type, vertex_info.size);
-				const u32 data_size = element_size * num_stored_verts;
+				const u32 data_size = vk::get_suitable_vk_size(vertex_info.type, vertex_info.size) * num_stored_verts;
 
 				auto &buffer = m_attrib_buffers[index];
 
@@ -554,7 +558,7 @@ VKGSRender::upload_vertex_data()
 		if (index_sz != vertex_draw_count)
 			LOG_ERROR(RSX, "Vertex draw count mismatch!");
 
-		m_index_buffer.sub_data(0, index_sz, vertex_index_array.data());
+		m_index_buffer.sub_data(0, vertex_index_array.size(), vertex_index_array.data());
 		m_index_buffer.set_format(fmt);											//Unnecessary unless viewing contents in sampler...
 	}
 

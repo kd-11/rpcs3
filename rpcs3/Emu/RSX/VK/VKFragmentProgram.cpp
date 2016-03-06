@@ -31,6 +31,21 @@ void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
 {
 	OS << "#version 420" << std::endl;
 	OS << "#extension GL_ARB_separate_shader_objects: enable" << std::endl << std::endl;
+
+	OS << "layout(std140, set=1, binding = 0) uniform ScaleOffsetBuffer" << std::endl;
+	OS << "{" << std::endl;
+	OS << "	mat4 scaleOffsetMat;" << std::endl;
+	OS << "	float fog_param0;" << std::endl;
+	OS << "	float fog_param1;" << std::endl;
+	OS << "};" << std::endl << std::endl;
+
+	vk::glsl::program_input in;
+	in.location = 0;
+	in.domain = vk::glsl::glsl_fragment_program;
+	in.name = "ScaleOffsetBuffer";
+	in.type = vk::glsl::input_type_uniform_buffer;
+
+	inputs.push_back(in);
 }
 
 void VKFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
@@ -40,7 +55,12 @@ void VKFragmentDecompilerThread::insertIntputs(std::stringstream & OS)
 		for (const ParamItem& PI : PT.items)
 		{
 			const vk::varying_register_t &reg = vk::get_varying_register(PI.name);
-			OS << "layout(location=" << reg.reg_location << ") in " << PT.type << " " << PI.name << ";" << std::endl;
+			
+			std::string var_name = PI.name;
+			if (var_name == "fogc")
+				var_name = "fog_c";
+
+			OS << "layout(location=" << reg.reg_location << ") in " << PT.type << " " << var_name << ";" << std::endl;
 		}
 	}
 }
@@ -64,7 +84,7 @@ void VKFragmentDecompilerThread::insertOutputs(std::stringstream & OS)
 
 void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 {
-	int location = 1;
+	int location = 2;
 
 	for (const ParamType& PT : m_parr.params[PF_PARAM_UNIFORM])
 	{
@@ -94,7 +114,7 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 		}
 	}
 
-	OS << "layout(std140, set=1, binding = 0) uniform FragmentConstantsBuffer" << std::endl;
+	OS << "layout(std140, set=1, binding = 1) uniform FragmentConstantsBuffer" << std::endl;
 	OS << "{" << std::endl;
 
 	for (const ParamType& PT : m_parr.params[PF_PARAM_UNIFORM])
@@ -114,12 +134,42 @@ void VKFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 	OS << "};" << std::endl;
 
 	vk::glsl::program_input in;
-	in.location = 0;
+	in.location = 1;
 	in.domain = vk::glsl::glsl_fragment_program;
 	in.name = "FragmentConstantsBuffer";
 	in.type = vk::glsl::input_type_uniform_buffer;
 
 	inputs.push_back(in);
+}
+
+namespace vk
+{
+	// Note: It's not clear whether fog is computed per pixel or per vertex.
+	// But it makes more sense to compute exp of interpoled value than to interpolate exp values.
+	void insert_fog_declaration(std::stringstream & OS, rsx::fog_mode mode)
+	{
+		switch (mode)
+		{
+		case rsx::fog_mode::linear:
+			OS << "	vec4 fogc = vec4(fog_param1 * fog_c.x + (fog_param0 - 1.), fog_param1 * fog_c.x + (fog_param0 - 1.), 0., 0.);\n";
+			return;
+		case rsx::fog_mode::exponential:
+			OS << "	vec4 fogc = vec4(11.084 * (fog_param1 * fog_c.x + fog_param0 - 1.5), exp(11.084 * (fog_param1 * fog_c.x + fog_param0 - 1.5)), 0., 0.);\n";
+			return;
+		case rsx::fog_mode::exponential2:
+			OS << "	vec4 fogc = vec4(4.709 * (fog_param1 * fog_c.x + fog_param0 - 1.5), exp(-pow(4.709 * (fog_param1 * fog_c.x + fog_param0 - 1.5)), 2.), 0., 0.);\n";
+			return;
+		case rsx::fog_mode::linear_abs:
+			OS << "	vec4 fogc = vec4(fog_param1 * abs(fog_c.x) + (fog_param0 - 1.), fog_param1 * abs(fog_c.x) + (fog_param0 - 1.), 0., 0.);\n";
+			return;
+		case rsx::fog_mode::exponential_abs:
+			OS << "	vec4 fogc = vec4(11.084 * (fog_param1 * abs(fog_c.x) + fog_param0 - 1.5), exp(11.084 * (fog_param1 * abs(fog_c.x) + fog_param0 - 1.5)), 0., 0.);\n";
+			return;
+		case rsx::fog_mode::exponential2_abs:
+			OS << "	vec4 fogc = vec4(4.709 * (fog_param1 * abs(fog_c.x) + fog_param0 - 1.5), exp(-pow(4.709 * (fog_param1 * abs(fog_c.x) + fog_param0 - 1.5)), 2.), 0., 0.);\n";
+			return;
+		}
+	}
 }
 
 void VKFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
@@ -137,6 +187,21 @@ void VKFragmentDecompilerThread::insertMainStart(std::stringstream & OS)
 			if (!PI.value.empty())
 				OS << " = " << PI.value;
 			OS << ";" << std::endl;
+		}
+	}
+
+	OS << "	vec4 ssa = gl_FrontFacing ? vec4(1.) : vec4(-1.);\n";
+
+	// search if there is fogc in inputs
+	for (const ParamType& PT : m_parr.params[PF_PARAM_IN])
+	{
+		for (const ParamItem& PI : PT.items)
+		{
+			if (PI.name == "fogc")
+			{
+				vk::insert_fog_declaration(OS, m_prog.fog_equation);
+				return;
+			}
 		}
 	}
 }

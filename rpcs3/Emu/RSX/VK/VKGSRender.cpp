@@ -209,7 +209,7 @@ VKGSRender::VKGSRender() : GSRender(frame_type::Vulkan)
 	CHECK_RESULT(vkEndCommandBuffer(m_command_buffer));
 	execute_command_buffer(false);
 
-	m_scale_offset_buffer.create((*m_device), 64);
+	m_scale_offset_buffer.create((*m_device), 128);
 	m_vertex_constants_buffer.create((*m_device), 512 * 16);
 	m_fragment_constants_buffer.create((*m_device), 512 * 16);
 	m_index_buffer.create((*m_device), 65536, VK_FORMAT_R16_UINT, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
@@ -342,6 +342,7 @@ void VKGSRender::begin()
 			LOG_ERROR(RSX, "Custom primitive restart index 0x%X. Should rewrite index buffer with proper value!", rsx::method_registers[NV4097_SET_RESTART_INDEX]);
 		}
 
+		LOG_ERROR(RSX, "Primitive restart enabled!");
 		m_program->set_primitive_restart(VK_TRUE);
 	}
 	else
@@ -418,7 +419,6 @@ void VKGSRender::end()
 		vkCmdDraw(m_command_buffer, vertex_draw_count, 1, 0, 0);
 	else
 	{
-
 		VkIndexType &index_type = std::get<3>(upload_info);
 		u32 &index_count = std::get<2>(upload_info);
 
@@ -430,9 +430,11 @@ void VKGSRender::end()
 
 	m_texture_cache.flush(m_command_buffer);
 
-	recording = false;
 	end_command_buffer_recording();
 	execute_command_buffer(false);
+
+	//Finish()
+	vkDeviceWaitIdle((*m_device));
 
 	rsx::thread::end();
 }
@@ -482,7 +484,11 @@ void VKGSRender::on_init_thread()
 
 	for (auto &attrib_buffer : m_attrib_buffers)
 	{
-		attrib_buffer.create((*m_device), 65536, VK_FORMAT_R32G32B32A32_SFLOAT, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT);
+		attrib_buffer.create((*m_device), 65536, VK_FORMAT_R8_UNORM, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT);
+		
+		u8 *data = static_cast<u8*>(attrib_buffer.map(0, 65536));
+		memset(data, 0, 65536);
+		attrib_buffer.unmap();
 	}
 }
 
@@ -715,6 +721,9 @@ bool VKGSRender::load_program()
 		stream_vector((char*)buf + 48, 0, 0, 0, (u32&)one);
 	}
 
+	memset((char*)buf+64, 0, 8);
+//	memcpy((char*)buf + 64, &rsx::method_registers[NV4097_SET_FOG_PARAMS], sizeof(float));
+//	memcpy((char*)buf + 68, &rsx::method_registers[NV4097_SET_FOG_PARAMS + 1], sizeof(float));
 	m_scale_offset_buffer.unmap();
 
 	buf = (u8*)m_vertex_constants_buffer.map(0, VK_WHOLE_SIZE);
@@ -728,6 +737,7 @@ bool VKGSRender::load_program()
 
 	m_program->bind_uniform(vk::glsl::glsl_vertex_program, "ScaleOffsetBuffer", m_scale_offset_buffer);
 	m_program->bind_uniform(vk::glsl::glsl_vertex_program, "VertexConstantsBuffer", m_vertex_constants_buffer);
+	m_program->bind_uniform(vk::glsl::glsl_fragment_program, "ScaleOffsetBuffer", m_scale_offset_buffer);
 	m_program->bind_uniform(vk::glsl::glsl_fragment_program, "FragmentConstantsBuffer", m_fragment_constants_buffer);
 
 	return true;

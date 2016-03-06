@@ -33,6 +33,8 @@ void VKVertexDecompilerThread::insertHeader(std::stringstream &OS)
 	OS << "layout(std140, set=0, binding = 0) uniform ScaleOffsetBuffer" << std::endl;
 	OS << "{" << std::endl;
 	OS << "	mat4 scaleOffsetMat;" << std::endl;
+	OS << "	float fog_param0;\n";
+	OS << "	float fog_param1;\n";
 	OS << "};" << std::endl;
 
 	vk::glsl::program_input in;
@@ -118,7 +120,7 @@ static const reg_info reg_table[] =
 	{ "spec_color", true, "dst_reg2", "", false },
 	{ "front_diff_color", true, "dst_reg3", "", false },
 	{ "front_spec_color", true, "dst_reg4", "", false },
-	{ "fogc", true, "dst_reg5", ".x", true },
+	{ "fog_c", true, "dst_reg5", ".xxxx", true },
 	{ "gl_ClipDistance[0]", false, "dst_reg5", ".y", false },
 	{ "gl_ClipDistance[1]", false, "dst_reg5", ".z", false },
 	{ "gl_ClipDistance[2]", false, "dst_reg5", ".w", false },
@@ -146,9 +148,9 @@ void VKVertexDecompilerThread::insertOutputs(std::stringstream & OS, const std::
 		{
 			const vk::varying_register_t &reg = vk::get_varying_register(i.name);
 			
-			if (i.name == "fogc")
-				OS << "layout(location=" << reg.reg_location << ") out float " << i.name << ";" << std::endl;
-			else
+	//		if (i.name == "fogc")
+	//			OS << "layout(location=" << reg.reg_location << ") out vec4 fog_c;" << std::endl;
+	//		else
 				OS << "layout(location=" << reg.reg_location << ") out vec4 " << i.name << ";" << std::endl;
 		}
 	}
@@ -181,7 +183,7 @@ namespace vk
 				return;
 			}
 
-			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex);" << std::endl;
+			OS << "	vec4 " << PI.name << "= texelFetch(" << PI.name << "_buffer, gl_VertexIndex).rgba;" << std::endl;
 			return;
 		}
 
@@ -223,8 +225,6 @@ void VKVertexDecompilerThread::insertMainEnd(std::stringstream & OS)
 			OS << "	" << i.name << " = " << i.src_reg << i.src_reg_mask << ";" << std::endl;
 	}
 
-	//Transpose maybe?
-	OS << "	//tc0 = vec4(0);" << std::endl;
 	OS << "	gl_Position = gl_Position * scaleOffsetMat;" << std::endl;
 	OS << "}" << std::endl;
 }

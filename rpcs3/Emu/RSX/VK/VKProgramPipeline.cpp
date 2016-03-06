@@ -742,6 +742,7 @@ namespace vk
 				}
 			}
 
+			throw EXCEPTION("Failed to bind program uniform %s", uniform_name);
 			return false;
 		}
 

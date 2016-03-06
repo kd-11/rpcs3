@@ -241,7 +241,7 @@ namespace vm
 			pred = [exception = std::current_exception()]() -> bool
 			{
 				// new predicate will throw the captured exception from the original thread
-				std::rethrow_exception(exception); return 0;
+				std::rethrow_exception(exception);
 			};
 		}
 

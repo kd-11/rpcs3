@@ -9,8 +9,6 @@
 #include "VKProgramBuffer.h"
 #include "../GCM.h"
 
-#pragma comment(lib, "vulkan-1.lib")
-
 class VKGSRender : public GSRender
 {
 private:

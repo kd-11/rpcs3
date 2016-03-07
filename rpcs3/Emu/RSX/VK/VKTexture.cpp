@@ -250,7 +250,8 @@ namespace vk
 
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only)
 	{
-		create(device, format, usage, width, height, mipmaps, gpu_only, vk::default_component_map());
+		VkComponentMapping default_map = vk::default_component_map();
+		create(device, format, usage, width, height, mipmaps, gpu_only, default_map);
 	}
 
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height)

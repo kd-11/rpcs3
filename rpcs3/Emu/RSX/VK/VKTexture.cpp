@@ -224,7 +224,7 @@ namespace vk
 		ready = true;
 	}
 
-	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, VkImageTiling tiling, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle)
+	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, VkImageTiling tiling, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping swizzle)
 	{
 		create(device, format, VK_IMAGE_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, 0, usage, tiling, width, height, mipmaps, gpu_only, swizzle);
 	}
@@ -250,8 +250,7 @@ namespace vk
 
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only)
 	{
-		VkComponentMapping default_map = vk::default_component_map();
-		create(device, format, usage, width, height, mipmaps, gpu_only, default_map);
+		create(device, format, usage, width, height, mipmaps, gpu_only, default_component_map());
 	}
 
 	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height)

@@ -959,7 +959,7 @@ namespace vk
 			app.applicationVersion = 0;
 			app.pEngineName = app_name;
 			app.engineVersion = 0;
-			app.apiVersion = (1, 0, 0);
+			app.apiVersion = VK_MAKE_VERSION(1, 0, 0);
 
 			//Set up instance information
 			const char *requested_extensions[] =

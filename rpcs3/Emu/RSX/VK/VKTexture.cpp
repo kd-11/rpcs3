@@ -66,7 +66,7 @@ namespace vk
 		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
 			change_image_layout(cmd, dst, dstLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, aspect);
 
-		for (int mip_level = 0; mip_level < mipmaps; ++mip_level)
+		for (u32 mip_level = 0; mip_level < mipmaps; ++mip_level)
 		{
 			vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn);
 
@@ -105,7 +105,7 @@ namespace vk
 		if (dstLayout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
 			change_image_layout(cmd, dst, dstLayout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, aspect);
 
-		for (int mip_level = 0; mip_level < mipmaps; ++mip_level)
+		for (u32 mip_level = 0; mip_level < mipmaps; ++mip_level)
 		{
 			vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &rgn, VK_FILTER_LINEAR);
 
@@ -391,7 +391,7 @@ namespace vk
 
 			if (tex.mipmap() == 1)
 			{
-				u32 buffer_size = get_placed_texture_storage_size(tex, layout_alignment[0].first, layout_alignment[0].first);
+				u64 buffer_size = get_placed_texture_storage_size(tex, layout_alignment[0].first, layout_alignment[0].first);
 				if (buffer_size != layout_alignment[0].second.size)
 				{
 					if (buffer_size > layout_alignment[0].second.size)
@@ -422,7 +422,7 @@ namespace vk
 			else
 			{
 				auto &layer_props = layout_alignment[layout_alignment.size() - 1].second;
-				u32 max_size = layer_props.offset + layer_props.size;
+				u64 max_size = layer_props.offset + layer_props.size;
 
 				if (m_memory_layout.size < max_size)
 				{
@@ -430,14 +430,14 @@ namespace vk
 				}
 
 				int index= 0;
-				std::vector<std::pair<u32, u32>> layout_offset_info(tex.mipmap());
+				std::vector<std::pair<u64, u32>> layout_offset_info(tex.mipmap());
 				
 				for (auto &mip_info : layout_offset_info)
 				{
 					auto &alignment = layout_alignment[index].first;
 					auto &layout = layout_alignment[index++].second;
 					
-					mip_info = std::make_pair(layout.offset, layout.rowPitch);
+					mip_info = std::make_pair(layout.offset, (u32)layout.rowPitch);
 				}
 
 				CHECK_RESULT(vkMapMemory((*owner), vram_allocation, 0, m_memory_layout.size, 0, (void**)&data));

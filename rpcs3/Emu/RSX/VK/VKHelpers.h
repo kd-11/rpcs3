@@ -240,6 +240,7 @@ namespace vk
 		VkDeviceMemory vram = nullptr;
 		vk::render_device *owner = nullptr;
 		u64 vram_block_sz = 0;
+		bool mappable = false;
 
 	public:
 		memory_block() {}
@@ -271,6 +272,7 @@ namespace vk
 
 			CHECK_RESULT(vkAllocateMemory(dev, &infos, nullptr, &vram));
 			vram_block_sz = block_sz;
+			mappable = host_visible;
 		}
 
 		void allocate_from_pool(vk::render_device &device, u64 block_sz, u32 typeBits)
@@ -286,6 +288,11 @@ namespace vk
 			owner = nullptr;
 			vram = nullptr;
 			vram_block_sz = 0;
+		}
+
+		bool is_mappable()
+		{
+			return mappable;
 		}
 
 		vk::render_device& get_owner()
@@ -429,7 +436,10 @@ namespace vk
 
 		void *map(u32 offset, u64 size)
 		{
+			if (!vram.is_mappable()) return nullptr;
+
 			void *data = nullptr;
+			
 			if (size == VK_WHOLE_SIZE)
 				size = m_memory_layout.size;
 			

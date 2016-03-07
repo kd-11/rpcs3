@@ -138,7 +138,7 @@ namespace vk
 		owner = nullptr;
 	}
 
-	void texture::create(vk::render_device &device, VkFormat format, VkImageType image_type, VkImageViewType view_type, VkImageCreateFlags image_flags, VkImageUsageFlags usage, VkImageTiling tiling, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle)
+	void texture::create(vk::render_device &device, VkFormat format, VkImageType image_type, VkImageViewType view_type, VkImageCreateFlags image_flags, VkImageUsageFlags usage, VkImageTiling tiling, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping swizzle)
 	{
 		owner = &device;
 
@@ -229,7 +229,7 @@ namespace vk
 		create(device, format, VK_IMAGE_TYPE_2D, VK_IMAGE_VIEW_TYPE_2D, 0, usage, tiling, width, height, mipmaps, gpu_only, swizzle);
 	}
 
-	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping& swizzle)
+	void texture::create(vk::render_device &device, VkFormat format, VkImageUsageFlags usage, u32 width, u32 height, u32 mipmaps, bool gpu_only, VkComponentMapping swizzle)
 	{
 		VkImageTiling tiling = VK_IMAGE_TILING_OPTIMAL;
 

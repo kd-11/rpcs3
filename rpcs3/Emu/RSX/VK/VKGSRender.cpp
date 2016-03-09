@@ -357,19 +357,6 @@ void VKGSRender::begin()
 
 	//TODO: Set up other render-state parameters into the program pipeline
 
-	VkRenderPassBeginInfo rp_begin;
-	rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-	rp_begin.pNext = NULL;
-	rp_begin.renderPass = m_render_pass;
-	rp_begin.framebuffer = m_framebuffer;
-	rp_begin.renderArea.offset.x = 0;
-	rp_begin.renderArea.offset.y = 0;
-	rp_begin.renderArea.extent.width = m_frame->client_size().width;
-	rp_begin.renderArea.extent.height = m_frame->client_size().height;
-	rp_begin.clearValueCount = 0;
-	rp_begin.pClearValues = nullptr;
-
-	vkCmdBeginRenderPass(m_command_buffer, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
 	m_draw_calls++;
 }
 
@@ -394,7 +381,21 @@ namespace
 }
 
 void VKGSRender::end()
-{	
+{
+	VkRenderPassBeginInfo rp_begin;
+	rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	rp_begin.pNext = NULL;
+	rp_begin.renderPass = m_render_pass;
+	rp_begin.framebuffer = m_framebuffer;
+	rp_begin.renderArea.offset.x = 0;
+	rp_begin.renderArea.offset.y = 0;
+	rp_begin.renderArea.extent.width = m_frame->client_size().width;
+	rp_begin.renderArea.extent.height = m_frame->client_size().height;
+	rp_begin.clearValueCount = 0;
+	rp_begin.pClearValues = nullptr;
+
+	vkCmdBeginRenderPass(m_command_buffer, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+
 	vk::texture *texture0 = nullptr;
 	for (int i = 0; i < rsx::limits::textures_count; ++i)
 	{
@@ -572,9 +573,9 @@ void VKGSRender::clear_surface(u32 mask)
 
 			VkImage color_image = (*std::get<1>(m_rtts.m_bound_render_targets[i]));
 			VkImageLayout old_layout = std::get<1>(m_rtts.m_bound_render_targets[i])->get_layout();
-			std::get<1>(m_rtts.m_bound_render_targets[i])->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+			std::get<1>(m_rtts.m_bound_render_targets[i])->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_GENERAL);
 			
-			vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color_clear_values.color, 1, &range);
+			vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_GENERAL, &color_clear_values.color, 1, &range);
 			std::get<1>(m_rtts.m_bound_render_targets[i])->change_layout(m_command_buffer, old_layout);
 		}
 	}
@@ -582,9 +583,9 @@ void VKGSRender::clear_surface(u32 mask)
 	if (mask & 0x3)
 	{
 		VkImageLayout old_layout = std::get<1>(m_rtts.m_bound_depth_stencil)->get_layout();
-		std::get<1>(m_rtts.m_bound_depth_stencil)->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		std::get<1>(m_rtts.m_bound_depth_stencil)->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_GENERAL);
 
-		vkCmdClearDepthStencilImage(m_command_buffer, (*std::get<1>(m_rtts.m_bound_depth_stencil)), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &depth_stencil_clear_values.depthStencil, 1, &depth_range);
+		vkCmdClearDepthStencilImage(m_command_buffer, (*std::get<1>(m_rtts.m_bound_depth_stencil)), VK_IMAGE_LAYOUT_GENERAL, &depth_stencil_clear_values.depthStencil, 1, &depth_range);
 		std::get<1>(m_rtts.m_bound_depth_stencil)->change_layout(m_command_buffer, old_layout);
 	}
 

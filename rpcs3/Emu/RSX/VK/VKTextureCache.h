@@ -30,6 +30,7 @@ namespace vk
 	{
 	private:
 		std::vector<cached_texture_object> m_cache;
+		int num_dirty_textures = 0;
 
 		bool lock_memory_region(u32 start, u32 size)
 		{
@@ -126,6 +127,23 @@ namespace vk
 			unlock_memory_region(obj.protected_rgn_start, obj.native_rsx_size);
 		}
 
+		void purge_dirty_textures()
+		{
+			for (cached_texture_object &tex : m_cache)
+			{
+				if (tex.dirty)
+				{
+					if (tex.exists)
+					{
+						tex.uploaded_texture.destroy();
+						tex.exists = false;
+					}
+				}
+			}
+
+			num_dirty_textures = 0;
+		}
+
 	public:
 
 		texture_cache() {}
@@ -147,6 +165,13 @@ namespace vk
 
 		vk::texture& upload_texture(command_buffer cmd, rsx::texture &tex, rsx::vk_render_targets &m_rtts)
 		{
+			if (num_dirty_textures > 16)
+			{
+				//TODO: Set a dirty cache size that is calculated from available VRAM
+				//Actually re-use old dirty textures if a new texture is requested that matches storage requirements
+				purge_dirty_textures();
+			}
+
 			const u32 texaddr = rsx::get_address(tex.offset(), tex.location());
 			const u32 range = (u32)get_texture_size(tex);
 
@@ -201,6 +226,7 @@ namespace vk
 					rsx_address < tex.protected_rgn_end)
 				{
 					unlock_object(tex);
+					num_dirty_textures++;
 
 					tex.native_rsx_address = 0;
 					tex.dirty = true;
@@ -233,6 +259,7 @@ namespace vk
 				cto.dirty = true;
 				cto.native_rsx_address = 0;
 
+				num_dirty_textures++;
 				m_cache.push_back(cto);
 			}
 		}

@@ -1040,12 +1040,17 @@ void VKGSRender::flip(int buffer)
 			//TODO: Properly clear the background to rsx value
 			m_swap_chain->acquireNextImageKHR((*m_device), (*m_swap_chain), ~0ULL, VK_NULL_HANDLE, VK_NULL_HANDLE, &next_image_temp);
 
+			vk::change_image_layout(m_command_buffer, m_swap_chain->get_swap_chain_image(next_image_temp), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_ASPECT_COLOR_BIT);
+
 			VkImageSubresourceRange range = vk::default_image_subresource_range();
 			VkClearColorValue clear_black = { 0 };
-			vkCmdClearColorImage(m_command_buffer, m_swap_chain->get_swap_chain_image(next_image_temp), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, &clear_black, 1, &range);
+			vkCmdClearColorImage(m_command_buffer, m_swap_chain->get_swap_chain_image(next_image_temp), VK_IMAGE_LAYOUT_GENERAL, &clear_black, 1, &range);
+
+			vk::change_image_layout(m_command_buffer, m_swap_chain->get_swap_chain_image(next_image_temp), VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_ASPECT_COLOR_BIT);
 			
 			present.pImageIndices = &next_image_temp;
 			present.waitSemaphoreCount = 0;
+			present.pWaitSemaphores = nullptr;
 		}
 
 		end_command_buffer_recording();

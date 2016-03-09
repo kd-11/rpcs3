@@ -571,12 +571,22 @@ void VKGSRender::clear_surface(u32 mask)
 			if (std::get<1>(m_rtts.m_bound_render_targets[i]) == nullptr) continue;
 
 			VkImage color_image = (*std::get<1>(m_rtts.m_bound_render_targets[i]));
-			vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, &color_clear_values.color, 1, &range);
+			VkImageLayout old_layout = std::get<1>(m_rtts.m_bound_render_targets[i])->get_layout();
+			std::get<1>(m_rtts.m_bound_render_targets[i])->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+			
+			vkCmdClearColorImage(m_command_buffer, color_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &color_clear_values.color, 1, &range);
+			std::get<1>(m_rtts.m_bound_render_targets[i])->change_layout(m_command_buffer, old_layout);
 		}
 	}
 
 	if (mask & 0x3)
-		vkCmdClearDepthStencilImage(m_command_buffer, (*std::get<1>(m_rtts.m_bound_depth_stencil)), VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, &depth_stencil_clear_values.depthStencil, 1, &depth_range);
+	{
+		VkImageLayout old_layout = std::get<1>(m_rtts.m_bound_depth_stencil)->get_layout();
+		std::get<1>(m_rtts.m_bound_depth_stencil)->change_layout(m_command_buffer, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+		vkCmdClearDepthStencilImage(m_command_buffer, (*std::get<1>(m_rtts.m_bound_depth_stencil)), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &depth_stencil_clear_values.depthStencil, 1, &depth_range);
+		std::get<1>(m_rtts.m_bound_depth_stencil)->change_layout(m_command_buffer, old_layout);
+	}
 
 	if (!was_recording)
 	{

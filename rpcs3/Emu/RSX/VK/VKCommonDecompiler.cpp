@@ -238,7 +238,8 @@ namespace vk
 		{ "front_spec_color", 12 },
 		{ "spec_color", 13 },
 		{ "fog_c", 14 },
-		{ "fogc", 14 }
+		{ "fogc", 14 },
+		{ "ssa", 15 }
 	};
 
 	const varying_register_t & get_varying_register(const std::string & name)

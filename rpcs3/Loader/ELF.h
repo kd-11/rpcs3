@@ -32,6 +32,12 @@ enum class elf_machine : u16
 	mips = 0x08,
 };
 
+template<typename T>
+using elf_be = be_t<T>;
+
+template<typename T>
+using elf_le = le_t<T>;
+
 template<template<typename T> class en_t, typename sz_t>
 struct elf_ehdr
 {
@@ -351,9 +357,9 @@ public:
 	typename elf_load_result<elf_loader>::type load() const;
 };
 
-using ppu_exec_loader = elf_loader<be_t, u64, elf_machine::ppc64, elf_os::none, elf_type::exec>;
-using ppu_prx_loader = elf_loader<be_t, u64, elf_machine::ppc64, elf_os::lv2, elf_type::prx>;
-using spu_exec_loader = elf_loader<be_t, u32, elf_machine::spu, elf_os::none, elf_type::exec>;
-using arm_exec_loader = elf_loader<le_t, u32, elf_machine::arm, elf_os::none, elf_type::none>;
+using ppu_exec_loader = elf_loader<elf_be, u64, elf_machine::ppc64, elf_os::none, elf_type::exec>;
+using ppu_prx_loader = elf_loader<elf_be, u64, elf_machine::ppc64, elf_os::lv2, elf_type::prx>;
+using spu_exec_loader = elf_loader<elf_be, u32, elf_machine::spu, elf_os::none, elf_type::exec>;
+using arm_exec_loader = elf_loader<elf_le, u32, elf_machine::arm, elf_os::none, elf_type::none>;
 
 template<> struct elf_load_result<ppu_prx_loader> { using type = std::shared_ptr<struct lv2_prx_t>; };

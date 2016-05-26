@@ -108,10 +108,10 @@ namespace vm
 		template<typename T, typename A = stack_allocator> using var = varb<T, A>;
 
 		// Make BE variable initialized from value
-		template<typename T> inline auto make_var(const T& value)
+		template<typename T>
+		inline auto make_var(const T& value)
 		{
-			varb<T, stack_allocator> var(value);
-			return var;
+			return varb<T>(value);
 		}
 
 		// Global HLE variable
@@ -127,10 +127,10 @@ namespace vm
 		template<typename T, typename A = stack_allocator> using var = varl<T, A>;
 
 		// Make LE variable initialized from value
-		template<typename T> inline auto make_var(const T& value)
+		template<typename T>
+		inline auto make_var(const T& value)
 		{
-			varl<T, stack_allocator> var(value);
-			return var;
+			return varl<T>(value);
 		}
 
 		// Global HLE variable

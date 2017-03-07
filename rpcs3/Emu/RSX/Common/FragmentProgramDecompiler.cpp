@@ -428,10 +428,10 @@ bool FragmentProgramDecompiler::handle_scb(u32 opcode)
 	case RSX_FP_OPCODE_MIN: SetDst("min($0, $1)"); return true;
 	case RSX_FP_OPCODE_MOV: SetDst("$0"); return true;
 	case RSX_FP_OPCODE_MUL: SetDst(NoOverflow("($0 * $1)")); return true;
-	case RSX_FP_OPCODE_PK2: SetDst("float(packSnorm2x16($0.xy))"); return true;
-	case RSX_FP_OPCODE_PK4: SetDst("float(packSnorm4x8($0))"); return true;
-	case RSX_FP_OPCODE_PK16: SetDst("float(packHalf2x16($0.xy))"); return true;
-	case RSX_FP_OPCODE_PKB: SetDst("packUnorm4x8($0 / 255.)"); return true;
+	case RSX_FP_OPCODE_PK2: SetDst(getFloatTypeName(4) + "(packSnorm2x16($0.xy))"); return true;
+	case RSX_FP_OPCODE_PK4: SetDst(getFloatTypeName(4) + "(packSnorm4x8($0))"); return true;
+	case RSX_FP_OPCODE_PK16: SetDst(getFloatTypeName(4) + "(packHalf2x16($0.xy))"); return true;
+	case RSX_FP_OPCODE_PKB: SetDst(getFloatTypeName(4) + "(packUnorm4x8($0 / 255.))"); return true;
 	case RSX_FP_OPCODE_PKG: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKG"); return true;
 	case RSX_FP_OPCODE_SEQ: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1") + ")"); return true;
 	case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); return true;
@@ -452,8 +452,11 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 	{
 	case RSX_FP_OPCODE_DDX: SetDst(getFunction(FUNCTION::FUNCTION_DFDX)); return true;
 	case RSX_FP_OPCODE_DDY: SetDst(getFunction(FUNCTION::FUNCTION_DFDY)); return true;
-	case RSX_FP_OPCODE_NRM: SetDst("normalize($0$m)"); return true;
+	case RSX_FP_OPCODE_NRM: SetDst("normalize($0.xyz)"); return true;
 	case RSX_FP_OPCODE_BEM: LOG_ERROR(RSX, "Unimplemented TEX_SRB instruction: BEM"); return true;
+	case RSX_FP_OPCODE_TEXBEM:
+		//treat as TEX for now
+		LOG_ERROR(RSX, "Unimplemented TEX_SRB instruction: TEXBEM");
 	case RSX_FP_OPCODE_TEX:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{
@@ -474,7 +477,9 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 			return true;
 		}
 		return false;
-	case RSX_FP_OPCODE_TEXBEM: SetDst("texture($t, $0.xy, $1.x)"); return true;
+	case RSX_FP_OPCODE_TXPBEM:
+		//Treat as TXP for now
+		LOG_ERROR(RSX, "Unimplemented TEX_SRB instruction: TXPBEM");
 	case RSX_FP_OPCODE_TXP:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{
@@ -492,7 +497,6 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 			return true;
 		}
 		return false;
-	case RSX_FP_OPCODE_TXPBEM: SetDst("textureProj($t, $0.xyz, $1.x)"); return true;
 	case RSX_FP_OPCODE_TXD:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{
@@ -510,7 +514,7 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 			return true;
 		}
 		return false;
-	case RSX_FP_OPCODE_TXB: SetDst("texture($t, $0.xy, $1.x)"); return true;
+	case RSX_FP_OPCODE_TXB:
 	case RSX_FP_OPCODE_TXL:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{

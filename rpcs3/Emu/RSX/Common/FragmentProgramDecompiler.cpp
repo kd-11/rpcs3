@@ -148,6 +148,18 @@ std::string FragmentProgramDecompiler::AddTex()
 	return m_parr.AddParam(PF_PARAM_UNIFORM, sampler, std::string("tex") + std::to_string(dst.tex_num));
 }
 
+std::string FragmentProgramDecompiler::NoOverflow(const std::string& code)
+{
+	//FP16 is expected to overflow alot easier at 0+-65504
+	//FP32 can still work upto 0+-3.4E38
+	//See http://http.download.nvidia.com/developer/Papers/2005/FP_Specials/FP_Specials.pdf
+
+	if (dst.fp16)
+		return "clamp(" + code + ", -65503., 65503.)";
+	else
+		return "clamp(" + code + ", -1E+10, 1E+10)";
+}
+
 std::string FragmentProgramDecompiler::Format(const std::string& code)
 {
 	const std::pair<std::string, std::function<std::string()>> repl_list[] =
@@ -358,7 +370,7 @@ bool FragmentProgramDecompiler::handle_sct(u32 opcode)
 	switch (opcode)
 	{
 	case RSX_FP_OPCODE_ADD: SetDst("($0 + $1)"); return true;
-	case RSX_FP_OPCODE_DIV: SetDst("($0 / $1.xxxx)"); return true;
+	case RSX_FP_OPCODE_DIV: SetDst(NoOverflow("($0 / $1.xxxx)")); return true;
 	// Note: DIVSQ is not IEEE compliant. divsq(0, 0) is 0 (Super Puzzle Fighter II Turbo HD Remix).
 	// sqrt(x, 0) might be equal to some big value (in absolute) whose sign is sign(x) but it has to be proven.
 	case RSX_FP_OPCODE_DIVSQ: SetDst("divsq_legacy($0, $1)"); return true;
@@ -366,11 +378,11 @@ bool FragmentProgramDecompiler::handle_sct(u32 opcode)
 	case RSX_FP_OPCODE_DP3: SetDst(getFunction(FUNCTION::FUNCTION_DP3)); return true;
 	case RSX_FP_OPCODE_DP4: SetDst(getFunction(FUNCTION::FUNCTION_DP4)); return true;
 	case RSX_FP_OPCODE_DP2A: SetDst(getFunction(FUNCTION::FUNCTION_DP2A)); return true;
-	case RSX_FP_OPCODE_MAD: SetDst("($0 * $1 + $2)"); return true;
+	case RSX_FP_OPCODE_MAD: SetDst(NoOverflow("($0 * $1 + $2)")); return true;
 	case RSX_FP_OPCODE_MAX: SetDst("max($0, $1)"); return true;
 	case RSX_FP_OPCODE_MIN: SetDst("min($0, $1)"); return true;
 	case RSX_FP_OPCODE_MOV: SetDst("$0"); return true;
-	case RSX_FP_OPCODE_MUL: SetDst("($0 * $1)"); return true;
+	case RSX_FP_OPCODE_MUL: SetDst(NoOverflow("($0 * $1)")); return true;
 	// Note: It's higly likely that RCP is not IEEE compliant but a game that uses rcp(0) has to be found
 	case RSX_FP_OPCODE_RCP: SetDst("rcp_legacy($0)"); return true;
 	// Note: RSQ is not IEEE compliant. rsq(0) is some big number (Silent Hill 3 HD)
@@ -394,7 +406,7 @@ bool FragmentProgramDecompiler::handle_scb(u32 opcode)
 	{
 	case RSX_FP_OPCODE_ADD: SetDst("($0 + $1)"); return true;
 	case RSX_FP_OPCODE_COS: SetDst("cos($0.xxxx)"); return true;
-	case RSX_FP_OPCODE_DIV: SetDst("($0 / $1.xxxx)"); return true;
+	case RSX_FP_OPCODE_DIV: SetDst(NoOverflow("($0 / $1.x)")); return true;
 	// Note: DIVSQ is not IEEE compliant. sqrt(0, 0) is 0 (Super Puzzle Fighter II Turbo HD Remix).
 	// sqrt(x, 0) might be equal to some big value (in absolute) whose sign is sign(x) but it has to be proven.
 	case RSX_FP_OPCODE_DIVSQ: SetDst("divsq_legacy($0, sqrt($1).xxxx)"); return true;
@@ -411,15 +423,15 @@ bool FragmentProgramDecompiler::handle_scb(u32 opcode)
 	case RSX_FP_OPCODE_LIF: SetDst(getFloatTypeName(4) + "(1.0, $0.y, ($0.y > 0 ? pow(2.0, $0.w) : 0.0), 1.0)"); return true;
 	case RSX_FP_OPCODE_LRP: SetDst(getFloatTypeName(4) + "($2 * (1 - $0) + $1 * $0)"); return true;
 	case RSX_FP_OPCODE_LG2: SetDst("log2($0.xxxx)"); return true;
-	case RSX_FP_OPCODE_MAD: SetDst("($0 * $1 + $2)"); return true;
+	case RSX_FP_OPCODE_MAD: SetDst(NoOverflow("($0 * $1 + $2)")); return true;
 	case RSX_FP_OPCODE_MAX: SetDst("max($0, $1)"); return true;
 	case RSX_FP_OPCODE_MIN: SetDst("min($0, $1)"); return true;
 	case RSX_FP_OPCODE_MOV: SetDst("$0"); return true;
-	case RSX_FP_OPCODE_MUL: SetDst("($0 * $1)"); return true;
-	case RSX_FP_OPCODE_PK2: SetDst("float(packSnorm2x16($0.xy))"); return true;
-	case RSX_FP_OPCODE_PK4: SetDst("float(packSnorm4x8($0))"); return true;
-	case RSX_FP_OPCODE_PK16: SetDst("float(packHalf2x16($0.xy))"); return true;
-	case RSX_FP_OPCODE_PKB: SetDst("packUnorm4x8($0 / 255.)"); return true;
+	case RSX_FP_OPCODE_MUL: SetDst(NoOverflow("($0 * $1)")); return true;
+	case RSX_FP_OPCODE_PK2: SetDst(getFloatTypeName(4) + "(packSnorm2x16($0.xy))"); return true;
+	case RSX_FP_OPCODE_PK4: SetDst(getFloatTypeName(4) + "(packSnorm4x8($0))"); return true;
+	case RSX_FP_OPCODE_PK16: SetDst(getFloatTypeName(4) + "(packHalf2x16($0.xy))"); return true;
+	case RSX_FP_OPCODE_PKB: SetDst(getFloatTypeName(4) + "(packUnorm4x8($0 / 255.))"); return true;
 	case RSX_FP_OPCODE_PKG: LOG_ERROR(RSX, "Unimplemented SCB instruction: PKG"); return true;
 	case RSX_FP_OPCODE_SEQ: SetDst(getFloatTypeName(4) + "(" + compareFunction(COMPARE::FUNCTION_SEQ, "$0", "$1") + ")"); return true;
 	case RSX_FP_OPCODE_SFL: SetDst(getFunction(FUNCTION::FUNCTION_SFL)); return true;
@@ -440,8 +452,11 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 	{
 	case RSX_FP_OPCODE_DDX: SetDst(getFunction(FUNCTION::FUNCTION_DFDX)); return true;
 	case RSX_FP_OPCODE_DDY: SetDst(getFunction(FUNCTION::FUNCTION_DFDY)); return true;
-	case RSX_FP_OPCODE_NRM: SetDst("normalize($0)"); return true;
+	case RSX_FP_OPCODE_NRM: SetDst("normalize($0.xyz)"); return true;
 	case RSX_FP_OPCODE_BEM: LOG_ERROR(RSX, "Unimplemented TEX_SRB instruction: BEM"); return true;
+	case RSX_FP_OPCODE_TEXBEM:
+		//treat as TEX for now
+		LOG_ERROR(RSX, "Unimplemented TEX_SRB instruction: TEXBEM");
 	case RSX_FP_OPCODE_TEX:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{
@@ -462,7 +477,9 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 			return true;
 		}
 		return false;
-	case RSX_FP_OPCODE_TEXBEM: SetDst("texture($t, $0.xy, $1.x)"); return true;
+	case RSX_FP_OPCODE_TXPBEM:
+		//Treat as TXP for now
+		LOG_ERROR(RSX, "Unimplemented TEX_SRB instruction: TXPBEM");
 	case RSX_FP_OPCODE_TXP:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{
@@ -480,7 +497,6 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 			return true;
 		}
 		return false;
-	case RSX_FP_OPCODE_TXPBEM: SetDst("textureProj($t, $0.xyz, $1.x)"); return true;
 	case RSX_FP_OPCODE_TXD:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{
@@ -498,7 +514,7 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 			return true;
 		}
 		return false;
-	case RSX_FP_OPCODE_TXB: SetDst("texture($t, $0.xy, $1.x)"); return true;
+	case RSX_FP_OPCODE_TXB:
 	case RSX_FP_OPCODE_TXL:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{

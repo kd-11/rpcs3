@@ -401,6 +401,7 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 
 	if (m_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT)
 	{
+		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", "r1"))
 		{
 			/** Note: Naruto Shippuden : Ultimate Ninja Storm 2 sets CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS in a shader
 			* but it writes depth in r1.z and not h2.z.
@@ -408,6 +409,11 @@ void VKFragmentDecompilerThread::insertMainEnd(std::stringstream & OS)
 			*/
 			//OS << ((m_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) ? "\tgl_FragDepth = r1.z;\n" : "\tgl_FragDepth = h0.z;\n") << std::endl;
 			OS << "	gl_FragDepth = r1.z;\n";
+		}
+		else
+		{
+			//Input not declared. Leave commented to assist in debugging the shader
+			OS << "	//gl_FragDepth = r1.z;\n";
 		}
 	}
 

@@ -46,6 +46,11 @@ class FragmentProgramDecompiler
 	std::string AddTex();
 	std::string Format(const std::string& code);
 
+	//TODO: MakeNotZero to catch zero denominators on div/rsq
+	
+	//Prevents operations from overflowing the max range (tested with fp_dynamic3 autotest sample)
+	std::string NoOverflow(const std::string& code);
+
 	void AddCodeCond(const std::string& dst, const std::string& src);
 	std::string GetCond();
 	template<typename T> std::string GetSRC(T src);

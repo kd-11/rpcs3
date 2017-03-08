@@ -302,13 +302,21 @@ void D3D12FragmentDecompiler::insertMainEnd(std::stringstream & OS)
 	}
 	if (m_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT)
 	{
-		/**
-		 * Note: Naruto Shippuden : Ultimate Ninja Storm 2 sets CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS in a shader
-		 * but it writes depth in r1.z and not h2.z.
-		 * Maybe there's a different flag for depth ?
-		 */
-		//		OS << "	Out.depth = " << ((m_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) ? "r1.z;" : "h2.z;") << std::endl;
-		OS << "	Out.depth = r1.z;\n";
+		if (m_parr.HasParam(PF_PARAM_NONE, "vec4", "r1"))
+		{
+			/**
+			 * Note: Naruto Shippuden : Ultimate Ninja Storm 2 sets CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS in a shader
+			 * but it writes depth in r1.z and not h2.z.
+			 * Maybe there's a different flag for depth ?
+			 */
+			 //		OS << "	Out.depth = " << ((m_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) ? "r1.z;" : "h2.z;") << std::endl;
+			OS << "	Out.depth = r1.z;\n";
+		}
+		else
+		{
+			//Input not declared. Leave commented to assist in debugging the shader
+			OS << "	//Out.depth = r1.z;\n";
+		}
 	}
 	// Shaders don't always output colors (for instance if they write to depth only)
 	if (!first_output_name.empty())

@@ -1563,9 +1563,6 @@ namespace rsx
 			}
 		}
 
-		//Mask away unused slots, enabled or not
-		result.texture_dimensions &= program_info.referenced_textures_mask;
-
 		//Sanity checks
 		if (result.ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT)
 		{
@@ -1690,8 +1687,6 @@ namespace rsx
 				}
 			}
 		}
-
-		result.texture_dimensions &= program_info.referenced_textures_mask;
 	}
 
 	void thread::reset()

@@ -1139,7 +1139,7 @@ namespace vk
 				be_t<u32>* casted_src = (be_t<u32>*)src;
 				u32* casted_dst = (u32*)dst;
 
-				for (int col = 0; col < width; ++col)
+				for (u32 col = 0; col < width; ++col)
 					casted_dst[col] = casted_src[col];
 
 				src += row_pitch;

@@ -711,6 +711,7 @@ bool FragmentProgramDecompiler::handle_tex_srb(u32 opcode)
 		}
 		return false;
 	case RSX_FP_OPCODE_TXB:
+		AddCode("//TXB");
 	case RSX_FP_OPCODE_TXL:
 		switch (m_prog.get_texture_dimension(dst.tex_num))
 		{

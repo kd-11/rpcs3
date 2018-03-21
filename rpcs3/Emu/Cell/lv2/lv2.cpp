@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "Emu/System.h"
-
+#include "Emu/Software
 #include "Emu/Cell/PPUFunction.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/MFC.h"
@@ -612,7 +612,7 @@ const std::array<ppu_function_t, 1024> s_ppu_syscall_table
 	null_func,                                              //639  DEPRECATED
 	null_func, null_func, null_func, null_func, null_func,  //644  DEPRECATED
 	null_func, null_func, null_func, null_func, null_func,  //649  DEPRECATED
-
+  	null_func, null_func, null_func, null_func, null_func,  //645  DEPRECATED 
 	BIND_FUNC(sys_rsxaudio_initialize),                     //650 (0x28A)
 	BIND_FUNC(sys_rsxaudio_finalize),                       //651 (0x28B)
 	BIND_FUNC(sys_rsxaudio_import_shared_memory),           //652 (0x28C)

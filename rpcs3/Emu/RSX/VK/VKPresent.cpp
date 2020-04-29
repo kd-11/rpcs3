@@ -217,7 +217,7 @@ void VKGSRender::frame_context_cleanup(vk::frame_context_t *ctx, bool free_resou
 
 		ctx->buffer_views_to_clean.clear();
 
-		const auto shadermode = g_cfg.video.shader_mode.get();
+		const auto shadermode = g_cfg.video.shadermode.get();
 
 		if (shadermode == shader_mode::async_with_interpreter || shadermode == shader_mode::interpreter_only)
 		{

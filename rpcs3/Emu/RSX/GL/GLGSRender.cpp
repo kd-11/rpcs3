@@ -69,7 +69,7 @@ void GLGSRender::on_init_thread()
 	// This allows context sharing to work (both GLRCs passed to wglShareLists have to be idle or you get ERROR_BUSY)
 	m_context = m_frame->make_context();
 
-	const auto shadermode = g_cfg.video.shader_mode.get();
+	const auto shadermode = g_cfg.video.shadermode.get();
 
 	if (shadermode == shader_mode::async_recompiler || shadermode == shader_mode::async_with_interpreter)
 	{
@@ -612,7 +612,7 @@ void GLGSRender::clear_surface(u32 arg)
 
 bool GLGSRender::load_program()
 {
-	const auto shadermode = g_cfg.video.shader_mode.get();
+	const auto shadermode = g_cfg.video.shadermode.get();
 
 	if (m_interpreter_state = (m_graphics_state & rsx::pipeline_state::invalidate_pipeline_bits))
 	{

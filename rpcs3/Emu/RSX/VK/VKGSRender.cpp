@@ -465,7 +465,7 @@ VKGSRender::VKGSRender() : GSRender()
 	m_index_buffer_ring_info.create(VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_INDEX_RING_BUFFER_SIZE_M * 0x100000, "index buffer");
 	m_texture_upload_buffer_ring_info.create(VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_TEXTURE_UPLOAD_RING_BUFFER_SIZE_M * 0x100000, "texture upload buffer", 32 * 0x100000);
 
-	const auto shadermode = g_cfg.video.shader_mode.get();
+	const auto shadermode = g_cfg.video.shadermode.get();
 
 	if (shadermode == shader_mode::async_with_interpreter || shadermode == shader_mode::interpreter_only)
 	{
@@ -1585,7 +1585,7 @@ bool VKGSRender::load_program()
 		}
 	}
 
-	const auto shadermode = g_cfg.video.shader_mode.get();
+	const auto shadermode = g_cfg.video.shadermode.get();
 
 	if (shadermode != shader_mode::interpreter_only) [[likely]]
 	{

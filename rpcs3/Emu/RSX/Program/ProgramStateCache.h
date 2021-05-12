@@ -1,7 +1,7 @@
 #pragma once
 
-#include "Emu/RSX/RSXFragmentProgram.h"
-#include "Emu/RSX/RSXVertexProgram.h"
+#include "RSXFragmentProgram.h"
+#include "RSXVertexProgram.h"
 
 #include "Utilities/mutex.h"
 #include "util/logs.hpp"
@@ -54,6 +54,11 @@ namespace program_hash_util
 			bool has_pack_instructions;
 			bool has_branch_instructions;
 			bool is_nop_shader;           // Does this affect Z-pass testing???
+		};
+
+		struct fragment_program_texture_state
+		{
+
 		};
 
 		/**

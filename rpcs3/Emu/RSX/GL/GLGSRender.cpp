@@ -6,7 +6,7 @@
 #include "Emu/Memory/vm_locking.h"
 #include "Emu/RSX/rsx_methods.h"
 
-#include "../Common/program_state_cache2.hpp"
+#include "../Program/program_state_cache2.hpp"
 
 u64 GLGSRender::get_cycles()
 {
@@ -647,7 +647,7 @@ bool GLGSRender::load_program()
 		get_current_vertex_program(vs_sampler_state);
 
 		current_vertex_program.skip_vertex_input_check = true;	//not needed for us since decoding is done server side
-		current_fragment_program.unnormalized_coords = 0; //unused
+		current_fragment_program.texture_state.unnormalized_coords = 0; //unused
 	}
 	else if (m_program)
 	{
@@ -848,7 +848,7 @@ void GLGSRender::load_program_env()
 			// Control mask
 			const auto control_masks = reinterpret_cast<u32*>(fp_buf);
 			control_masks[0] = rsx::method_registers.shader_control();
-			control_masks[1] = current_fragment_program.texture_dimensions;
+			control_masks[1] = current_fragment_program.texture_state.texture_dimensions;
 
 			// Bind textures
 			m_shader_interpreter.update_fragment_textures(fs_sampler_state, current_fp_metadata.referenced_textures_mask, reinterpret_cast<u32*>(fp_buf + 16));

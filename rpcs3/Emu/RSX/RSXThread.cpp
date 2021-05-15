@@ -854,19 +854,6 @@ namespace rsx
 		stream_vector(dst + 4, 0u, fog_mode, std::bit_cast<u32>(wpos_scale), std::bit_cast<u32>(wpos_bias));
 	}
 
-	void thread::fill_fragment_texture_parameters(void* buffer, const RSXFragmentProgram& fragment_program)
-	{
-		// Copy only the relevant section
-		if (current_fp_metadata.referenced_textures_mask)
-		{
-			const auto start = std::countr_zero(current_fp_metadata.referenced_textures_mask);
-			const auto end = 16 - std::countl_zero(current_fp_metadata.referenced_textures_mask);
-			const auto mem_offset = (start * 16);
-			const auto mem_size = (end - start) * 16;
-			memcpy(static_cast<u8*>(buffer) + mem_offset, reinterpret_cast<const u8*>(fragment_program.texture_scale) + mem_offset, mem_size);
-		}
-	}
-
 	u64 thread::timestamp()
 	{
 		const u64 freq = sys_time_get_timebase_frequency();
@@ -1656,6 +1643,7 @@ namespace rsx
 			const auto &tex = rsx::method_registers.vertex_textures[i];
 			if (tex.enabled() && (current_vp_metadata.referenced_textures_mask & (1 << i)))
 			{
+				current_vp_texture_state.clear(i);
 				current_vp_texture_state.set_dimension(sampler_descriptors[i]->image_type, i);
 			}
 		}
@@ -1842,8 +1830,6 @@ namespace rsx
 		current_fragment_program.texcoord_control_mask = rsx::method_registers.texcoord_control_mask();
 		current_fragment_program.two_sided_lighting = rsx::method_registers.two_side_light_en();
 
-		memset(current_fragment_program.texture_scale, 0, sizeof(current_fragment_program.texture_scale));
-
 		if (method_registers.current_draw_clause.primitive == primitive_type::points &&
 			method_registers.point_sprite_enabled())
 		{
@@ -1858,13 +1844,14 @@ namespace rsx
 			auto &tex = rsx::method_registers.fragment_textures[i];
 			if (tex.enabled())
 			{
-				current_fragment_program.texture_scale[i][0] = sampler_descriptors[i]->scale_x;
-				current_fragment_program.texture_scale[i][1] = sampler_descriptors[i]->scale_y;
-				current_fragment_program.texture_scale[i][2] = std::bit_cast<f32>(tex.remap());
+				current_fragment_program.texture_params[i].scale_x = sampler_descriptors[i]->scale_x;
+				current_fragment_program.texture_params[i].scale_y = sampler_descriptors[i]->scale_y;
+				current_fragment_program.texture_params[i].remap = tex.remap();
 
 				m_graphics_state |= rsx::pipeline_state::fragment_texture_state_dirty;
 
 				u32 texture_control = 0;
+				current_fp_texture_state.clear(i);
 				current_fp_texture_state.set_dimension(sampler_descriptors[i]->image_type, i);
 
 				if (tex.alpha_kill_enabled())
@@ -1996,7 +1983,7 @@ namespace rsx
 #ifdef __APPLE__
 				texture_control |= (sampler_descriptors[i]->encoded_component_map() << 16);
 #endif
-				current_fragment_program.texture_scale[i][3] = std::bit_cast<f32>(texture_control);
+				current_fragment_program.texture_params[i].control = texture_control;
 			}
 		}
 

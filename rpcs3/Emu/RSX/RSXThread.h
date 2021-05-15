@@ -915,11 +915,6 @@ namespace rsx
 		void fill_fragment_state_buffer(void* buffer, const RSXFragmentProgram& fragment_program);
 
 		/**
-		 * Fill buffer with fragment texture parameter constants (texture matrix)
-		 */
-		void fill_fragment_texture_parameters(void* buffer, const RSXFragmentProgram& fragment_program);
-
-		/**
 		 * Notify that a section of memory has been mapped
 		 * If there is a notify_memory_unmapped request on this range yet to be handled,
 		 * handles it immediately.

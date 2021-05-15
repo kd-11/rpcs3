@@ -304,8 +304,7 @@ struct RSXFragmentProgram
 	u32 texcoord_control_mask = 0;
 
 	rsx::fragment_program_texture_state texture_state;
-
-	float texture_scale[16][4]{};
+	rsx::fragment_program_texture_config texture_params;
 
 	bool valid = false;
 

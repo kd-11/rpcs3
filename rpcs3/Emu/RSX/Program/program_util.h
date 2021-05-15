@@ -3,73 +3,53 @@
 #include "util/types.hpp"
 #include "../gcm_enums.h"
 
+#include <concepts>
+
 namespace rsx
 {
-	// Convert u16 to u32
-	static u32 duplicate_and_extend(u16 bits)
+#pragma pack(push, 1)
+	struct fragment_program_texture_config
 	{
-		u32 x = bits;
+		struct TIU_slot
+		{
+			float scale_x;
+			float scale_y;
+			u32 remap;
+			u32 control;
+		}
+		slots_[16]; // QT headers will collide with any variable named 'slots' because reasons
 
-		x = (x | (x << 8)) & 0x00FF00FF;
-		x = (x | (x << 4)) & 0x0F0F0F0F;
-		x = (x | (x << 2)) & 0x33333333;
-		x = (x | (x << 1)) & 0x55555555;
+		template <std::integral T>
+		TIU_slot& operator[](T index) { return slots_[index]; }
 
-		return x | (x << 1);
-	}
+		void write_to(void* dst, u16 mask);
+		void load_from(const void* src, u16 mask);
+
+		static void masked_transfer(void* dst, const void* src, u16 mask);
+	};
+#pragma pack(pop)
 
 	struct fragment_program_texture_state
 	{
+		u32 texture_dimensions = 0;
 		u16 unnormalized_coords = 0;
 		u16 redirected_textures = 0;
 		u16 shadow_textures = 0;
-		u32 texture_dimensions = 0;
+		u16 reserved = 0;
 
-		void import(const fragment_program_texture_state& other, u16 mask)
-		{
-			unnormalized_coords = other.unnormalized_coords & mask;
-			redirected_textures = other.redirected_textures & mask;
-			shadow_textures = other.shadow_textures & mask;
-			texture_dimensions = other.texture_dimensions & duplicate_and_extend(mask);
-		}
-
-		void set_dimension(texture_dimension_extended type, u32 index)
-		{
-			const auto offset = (index * 2);
-			const auto mask = 3 << offset;
-			texture_dimensions &= ~mask;
-			texture_dimensions |= static_cast<u32>(type) << offset;
-		}
-
-		bool operator == (const fragment_program_texture_state& other) const
-		{
-			return texture_dimensions == other.texture_dimensions &&
-				redirected_textures == other.redirected_textures &&
-				shadow_textures == other.shadow_textures &&
-				unnormalized_coords == other.unnormalized_coords;
-		}
+		void clear(u32 index);
+		void import(const fragment_program_texture_state& other, u16 mask);
+		void set_dimension(texture_dimension_extended type, u32 index);
+		bool operator == (const fragment_program_texture_state& other) const;
 	};
 
 	struct vertex_program_texture_state
 	{
 		u32 texture_dimensions = 0;
 
-		void import(const vertex_program_texture_state& other, u16 mask)
-		{
-			texture_dimensions = other.texture_dimensions & duplicate_and_extend(mask);
-		}
-
-		void set_dimension(texture_dimension_extended type, u32 index)
-		{
-			const auto offset = (index * 2);
-			const auto mask = 3 << offset;
-			texture_dimensions &= ~mask;
-			texture_dimensions |= static_cast<u32>(type) << offset;
-		}
-
-		bool operator == (const vertex_program_texture_state& other) const
-		{
-			return texture_dimensions == other.texture_dimensions;
-		}
+		void clear(u32 index);
+		void import(const vertex_program_texture_state& other, u16 mask);
+		void set_dimension(texture_dimension_extended type, u32 index);
+		bool operator == (const vertex_program_texture_state& other) const;
 	};
 }

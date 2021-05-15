@@ -1791,7 +1791,7 @@ void VKGSRender::load_program_env()
 		auto mem = m_fragment_texture_params_ring_info.alloc<256>(256);
 		auto buf = m_fragment_texture_params_ring_info.map(mem, 256);
 
-		fill_fragment_texture_parameters(buf, current_fragment_program);
+		current_fragment_program.texture_params.write_to(buf, current_fp_metadata.referenced_textures_mask);
 		m_fragment_texture_params_ring_info.unmap();
 		m_fragment_texture_params_buffer_info = { m_fragment_texture_params_ring_info.heap->value, mem, 256 };
 	}

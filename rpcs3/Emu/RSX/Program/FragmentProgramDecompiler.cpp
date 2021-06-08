@@ -549,6 +549,7 @@ template<typename T> std::string FragmentProgramDecompiler::GetSRC(T src)
 		// 3. If the texcoord control mask is enabled, the last 2 values are always 0 and hpos.w!
 		const std::string reg_var = (dst.src_attr_reg_num < std::size(reg_table))? reg_table[dst.src_attr_reg_num] : "unk";
 		bool insert = true;
+		u32 param_flag = 0;
 
 		switch (dst.src_attr_reg_num)
 		{
@@ -625,6 +626,9 @@ template<typename T> std::string FragmentProgramDecompiler::GetSRC(T src)
 			{
 				ret += reg_var;
 			}
+
+			// Check perspective correction flag
+			param_flag = (src2.noperspective) ? PIF_NOPERSPECTIVE : PIF_PERSPECTIVE_CORRECT;
 			break;
 		}
 		default:
@@ -644,7 +648,17 @@ template<typename T> std::string FragmentProgramDecompiler::GetSRC(T src)
 
 		if (insert)
 		{
-			m_parr.AddParam(PF_PARAM_IN, getFloatTypeName(4), reg_var);
+			m_parr.AddParamEx(PF_PARAM_IN, getFloatTypeName(4), reg_var, -1, [&param_flag](ParamItem& pi)
+			{
+				pi.flags |= param_flag;
+
+				const u32 double_usage_mask = (PIF_NOPERSPECTIVE | PIF_PERSPECTIVE_CORRECT);
+				if ((pi.flags & double_usage_mask) == double_usage_mask)
+				{
+					rsx_log.warning("Double usage pattern detected (PIF_NOPERSPECTIVE | PIF_PERSPECTIVE_CORRECT). Will ignore PIF_NOPERSPECTIVE");
+					pi.flags &= ~PIF_NOPERSPECTIVE;
+				}
+			});
 		}
 
 		properties.in_register_mask |= (1 << dst.src_attr_reg_num);

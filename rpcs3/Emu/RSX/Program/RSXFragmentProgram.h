@@ -203,7 +203,7 @@ union SRC2
 		u32 abs              : 1;
 		u32 addr_reg         : 11;
 		u32 use_index_reg    : 1;
-		u32 perspective_corr : 1;
+		u32 noperspective    : 1;  // Toggles affine interpolation
 	};
 };
 

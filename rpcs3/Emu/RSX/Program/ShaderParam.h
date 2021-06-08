@@ -72,16 +72,24 @@ enum ParamFlag
 	PF_PARAM_COUNT,
 };
 
+enum ParamItemFlag
+{
+	PIF_PERSPECTIVE_CORRECT = 1,
+	PIF_NOPERSPECTIVE = 2,
+};
+
 struct ParamItem
 {
 	const std::string name;
-	const std::string value;
+	std::string value;
 	int location;
+	u32 flags;
 
 	ParamItem(std::string _name, int _location, std::string _value = "")
 		: name(std::move(_name))
-		, value(std::move(_value)),
-		location(_location)
+		, value(std::move(_value))
+		, location(_location)
+		, flags(0)
 	{ }
 };
 
@@ -103,6 +111,23 @@ struct ParamType
 		{
 			return item.name == name;
 		});
+	}
+
+	const std::pair<bool, ParamItem*> Get(const std::string& name)
+	{
+		auto it = std::find_if(items.begin(), items.end(), [&name](const auto& item)
+		{
+			return item.name == name;
+		});
+
+		if (it == items.cend())
+		{
+			return { false, nullptr };
+		}
+		else
+		{
+			return { true, &(*it) };
+		}
 	}
 };
 
@@ -136,36 +161,45 @@ struct ParamArray
 		return t && t->SearchName(name);
 	}
 
-	std::string AddParam(const ParamFlag flag, const std::string& type, const std::string& name, const std::string& value)
+	void AddParamEx(const ParamFlag flag, const std::string& type, const std::string& name, int location = -1, std::function<void(ParamItem&)> func = {})
 	{
 		ParamType* t = SearchParam(flag, type);
+		ParamItem* pi = nullptr;
 
-		if (t)
+		if (!t)
 		{
-			if (!t->SearchName(name)) t->items.emplace_back(name, -1, value);
+			params[flag].emplace_back(flag, type);
+			t = &params[flag].back();
+		}
+
+		if (auto found = t->Get(name); !found.first)
+		{
+			t->items.emplace_back(name, location);
+			pi = &t->items.back();
 		}
 		else
 		{
-			params[flag].emplace_back(flag, type);
-			params[flag].back().items.emplace_back(name, -1, value);
+			pi = found.second;
 		}
 
-		return name;
+		if (func)
+		{
+			func(*pi);
+		}
 	}
 
 	std::string AddParam(const ParamFlag flag, const std::string& type, const std::string& name, int location = -1)
 	{
-		ParamType* t = SearchParam(flag, type);
+		AddParamEx(flag, type, name, location);
+		return name;
+	}
 
-		if (t)
+	std::string AddParam(const ParamFlag flag, const std::string& type, const std::string& name, const std::string& value)
+	{
+		AddParamEx(flag, type, name, -1, [&value](ParamItem& pi)
 		{
-			if (!t->SearchName(name)) t->items.emplace_back(name, location);
-		}
-		else
-		{
-			params[flag].emplace_back(flag, type);
-			params[flag].back().items.emplace_back(name, location);
-		}
+			pi.value = value;
+		});
 
 		return name;
 	}

@@ -57,6 +57,7 @@ void GLFragmentDecompilerThread::insertInputs(std::stringstream & OS)
 
 			const auto reg_location = gl::get_varying_register_location(PI.name);
 			std::string var_name = PI.name;
+			std::string modifiers = ""s;
 
 			if (var_name == "fogc")
 			{
@@ -74,7 +75,12 @@ void GLFragmentDecompilerThread::insertInputs(std::stringstream & OS)
 				}
 			}
 
-			OS << "layout(location=" << reg_location << ") in vec4 " << var_name << ";\n";
+			if (PI.flags & PIF_NOPERSPECTIVE)
+			{
+				modifiers = " noperspective"s;
+			}
+
+			OS << "layout(location=" << reg_location << ")" << modifiers << " in vec4 " << var_name << ";\n";
 		}
 	}
 

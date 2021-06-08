@@ -179,7 +179,7 @@ template<typename T> std::string CgBinaryDisasm::GetSrcDisAsm(T src)
 		default:
 			if (dst.src_attr_reg_num < std::size(reg_table))
 			{
-				const std::string perspective_correction = src2.perspective_corr ? "g" : "f";
+				const std::string perspective_correction = src2.noperspective ? "g" : "f";
 				const std::string input_attr_reg         = reg_table[dst.src_attr_reg_num];
 				ret += fmt::format("%s[%s]", perspective_correction.c_str(), input_attr_reg.c_str());
 			}

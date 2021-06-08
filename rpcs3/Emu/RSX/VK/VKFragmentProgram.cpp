@@ -55,6 +55,7 @@ void VKFragmentDecompilerThread::insertInputs(std::stringstream & OS)
 
 			const auto reg_location = vk::get_varying_register_location(PI.name);
 			std::string var_name = PI.name;
+			std::string modifiers = ""s;
 
 			if (var_name == "fogc")
 			{
@@ -72,7 +73,12 @@ void VKFragmentDecompilerThread::insertInputs(std::stringstream & OS)
 				}
 			}
 
-			OS << "layout(location=" << reg_location << ") in " << PT.type << " " << var_name << ";\n";
+			if (PI.flags & PIF_NOPERSPECTIVE)
+			{
+				modifiers = " noperspective"s;
+			}
+
+			OS << "layout(location=" << reg_location << ")" << modifiers << " in " << PT.type << " " << var_name << ";\n";
 		}
 	}
 

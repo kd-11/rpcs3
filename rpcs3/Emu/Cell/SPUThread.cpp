@@ -2734,7 +2734,7 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
 		{
 			// Full lock (heavyweight)
 			// TODO: vm::check_addr
-			vm::writer_lock lock(addr);
+			//vm::writer_lock lock(addr);
 
 			if (cmp_rdata(rdata, super_data))
 			{
@@ -2907,7 +2907,7 @@ void do_cell_atomic_128_store(u32 addr, const void* to_write)
 		{
 			// Full lock (heavyweight)
 			// TODO: vm::check_addr
-			vm::writer_lock lock(addr);
+			//vm::writer_lock lock(addr);
 			mov_rdata(super_data, *static_cast<const spu_rdata_t*>(to_write));
 			res += 64;
 		}

@@ -2734,7 +2734,7 @@ bool spu_thread::do_putllc(const spu_mfc_cmd& args)
 		{
 			// Full lock (heavyweight)
 			// TODO: vm::check_addr
-			//vm::writer_lock lock(addr);
+			vm::writer_lock lock(addr);
 
 			if (cmp_rdata(rdata, super_data))
 			{

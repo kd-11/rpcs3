@@ -29,6 +29,9 @@ namespace vk
 		u64 cyclic_reference_sync_tag = 0;
 		u64 write_barrier_sync_tag = 0;
 
+		// Cyclic barrier guard
+		atomic_t<bool> m_barrier_lock = false;
+
 		// Memory spilling support
 		std::unique_ptr<vk::buffer> m_spilled_mem;
 
@@ -343,12 +346,13 @@ namespace vk
 		}
 
 		static std::unique_ptr<vk::render_target> convert_pitch(
-			vk::command_buffer& /*cmd*/,
+			vk::command_buffer& cmd,
 			std::unique_ptr<vk::render_target>& src,
 			usz /*out_pitch*/)
 		{
 			if (read_buffers_enabled(src.get()))
 			{
+				src->read_barrier(cmd);
 				src->state_flags = rsx::surface_state_flags::reload_from_surface_cache;
 			}
 			return {};
@@ -483,11 +487,6 @@ namespace vk
 			u64 src_offset_in_buffer,
 			u64 max_copy_length)
 		{
-			if (surface->read_barrier(cmd); !surface->test())
-			{
-				return;
-			}
-
 			vk::image* source = surface->get_surface(rsx::surface_access::transfer_read);
 			const bool is_scaled = surface->width() != surface->surface_width;
 			if (is_scaled)
@@ -523,11 +522,15 @@ namespace vk
 				}
 			};
 
+			source->push_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
 			vk::copy_image_to_buffer(cmd, source, dest, region);
 			vk::insert_buffer_memory_barrier(cmd,
 				dest->value, src_offset_in_buffer, max_copy_length,
 				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+
+			source->pop_layout(cmd);
 
 			if (dest != bo)
 			{

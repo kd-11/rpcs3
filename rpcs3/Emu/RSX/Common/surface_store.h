@@ -1201,11 +1201,23 @@ namespace rsx
 				});
 			}
 
+			rsx_log.error("Flushing %u images to DMA", ::size32(all_data));
+			int actual = 0;
+
 			for (const auto& surface : all_data)
 			{
 				if (surface->last_use_tag <= bo_timestamp)
 				{
 					continue;
+				}
+
+				if (!(surface->state_flags & rsx::surface_state_flags::pitch_convert))
+				{
+					// Not triggering from a pitch conversion.
+					if (surface->write_through() || !surface->test())
+					{
+						continue;
+					}
 				}
 
 				const auto this_range = surface->get_memory_range();
@@ -1223,8 +1235,10 @@ namespace rsx
 
 				write_length = std::min<u64>(max_length, block_length - dst_offset);
 				Traits::write_render_target_to_memory(command_list, bo, surface, dst_offset, src_offset, write_length);
+				++actual;
 			}
 
+			rsx_log.error("Flushed %d images in the end.", actual);
 			m_dma_block.touch(block_range);
 		}
 

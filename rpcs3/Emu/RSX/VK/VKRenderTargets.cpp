@@ -738,6 +738,8 @@ namespace vk
 					VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
 			}
 
+			// Ensure this surface will not be flushed
+			m_barrier_lock = true;
 			cache->flush_to_dma_buffers(cmd, this_range);
 
 			vk::insert_buffer_memory_barrier(cmd,
@@ -748,6 +750,7 @@ namespace vk
 			VkBufferImageCopy upload_rgn = { gpu_offset, 0, 0, { aspect(), 0, 0, 1 }, {}, { raw_content->width(), raw_content->height(), 1 } };
 			vk::copy_buffer_to_image(cmd, gpu_buf, raw_content, upload_rgn);
 
+			m_barrier_lock = false;
 			state_flags &= ~rsx::surface_state_flags::pitch_convert;
 		}
 		else
@@ -872,6 +875,11 @@ namespace vk
 			}
 
 			spill_request_tag = 0;
+			return;
+		}
+
+		if (m_barrier_lock.observe())
+		{
 			return;
 		}
 

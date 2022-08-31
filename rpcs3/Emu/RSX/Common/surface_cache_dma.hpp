@@ -30,11 +30,11 @@ namespace rsx
 			u64 memory_tag = 0;
 			u32 base_address = 0;
 
-			inline buffer_object_type get() { return Traits::get(bo); }
+			inline buffer_object_type get() const { return Traits::get(bo); }
 			inline operator bool () const { return base_address != 0; }
 
-			inline void release() { bo.release(); }
-			inline void acquire(buffer_object_type b) { bo = b; }
+			inline void release() { bo.release(); memory_tag = 0; }
+			inline void acquire(buffer_object_type b) { Traits::set(bo, b); }
 		};
 
 		using buffer_block_array = typename std::array<memory_buffer_entry_t, 0x100000000ull / BlockSize>;
@@ -57,7 +57,7 @@ namespace rsx
 			if (this_entry)
 			{
 				const auto bo = this_entry.get();
-				const auto buffer_range = utils::address_range::start_length(bo.base_address, ::size32(*bo));
+				const auto buffer_range = utils::address_range::start_length(this_entry.base_address, ::size32(*bo));
 
 				if (range.inside(buffer_range))
 				{
@@ -87,7 +87,7 @@ namespace rsx
 				address += BlockSize;
 			}
 
-			auto unified = Traits::merge_bo_list<BlockSize>(cmd, bo_list);
+			auto unified = Traits::template merge_bo_list<BlockSize>(cmd, bo_list);
 			ensure(unified);
 
 			m_buffer_list[block_for(start_address)].acquire(unified);
@@ -104,7 +104,7 @@ namespace rsx
 		std::tuple<buffer_object_type, u32, u64> get(u32 address)
 		{
 			const auto& block = m_buffer_list[block_for(address)];
-			return { block.get(), block.base_address - address };
+			return { block.get(), block.base_address - address, block.memory_tag };
 		}
 
 		void touch(const utils::address_range& range)

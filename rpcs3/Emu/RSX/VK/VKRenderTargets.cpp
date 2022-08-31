@@ -1,8 +1,11 @@
 #include "VKRenderTargets.h"
 #include "VKResourceManager.h"
+#include "VKDMA.h"
 
 namespace vk
 {
+	surface_cache* surface_cache::instance = nullptr;
+
 	namespace surface_cache_utils
 	{
 		void dispose(vk::buffer* buf)
@@ -10,6 +13,11 @@ namespace vk
 			auto obj = vk::disposable_t::make(buf);
 			vk::get_resource_manager()->dispose(obj);
 		}
+	}
+
+	surface_cache::surface_cache()
+	{
+		surface_cache::instance = this;
 	}
 
 	void surface_cache::destroy()
@@ -706,9 +714,46 @@ namespace vk
 			raw_content = vk::get_typeless_helper(format(), format_class(), subres.width_in_block, subres.height_in_block);
 		}
 
-		// Load data from CELL
 		raw_content->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-		vk::upload_image(cmd, raw_content, { subres }, get_gcm_format(), is_swizzled, 1, aspect(), upload_heap, rsx_pitch, upload_contents_inline);
+
+		if (state_flags & rsx::surface_state_flags::pitch_convert)
+		{
+			// A bit more complex as we need to merge 2 data sources
+			auto cache = vk::surface_cache::get();
+			auto this_range = get_memory_range();
+			auto [gpu_buf, gpu_offset, gpu_timestamp, block_range] = cache->map_dma(cmd, this_range);
+
+			if (!gpu_timestamp)
+			{
+				// TODO: Better heurestics
+				auto [cpu_offset, cpu_buf] = vk::map_dma(block_range.start, block_range.length());
+				vk::load_dma(base_addr, this_range.length());
+
+				VkBufferCopy copy { cpu_offset, gpu_offset, block_range.length() };
+				vkCmdCopyBuffer(cmd, cpu_buf->value, gpu_buf->value, 1, &copy);
+
+				vk::insert_buffer_memory_barrier(cmd,
+					gpu_buf->value, gpu_offset, block_range.length(),
+					VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 
+					VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+			}
+
+			cache->flush_to_dma_buffers(cmd, this_range);
+
+			vk::insert_buffer_memory_barrier(cmd,
+				gpu_buf->value, gpu_offset, this_range.length(),
+				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 
+				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+
+			VkBufferImageCopy upload_rgn = { gpu_offset, 0, 0, { aspect(), 0, 0, 1 }, {}, { raw_content->width(), raw_content->height(), 1 } };
+			vk::copy_buffer_to_image(cmd, gpu_buf, raw_content, upload_rgn);
+
+			state_flags &= ~rsx::surface_state_flags::pitch_convert;
+		}
+		else
+		{
+			vk::upload_image(cmd, raw_content, { subres }, get_gcm_format(), is_swizzled, 1, aspect(), upload_heap, rsx_pitch, upload_contents_inline);
+		}
 
 		if (raw_content != dst)
 		{
@@ -738,10 +783,7 @@ namespace vk
 
 	void render_target::initialize_memory(vk::command_buffer& cmd, rsx::surface_access access)
 	{
-		const bool is_depth = is_depth_surface();
-		const bool should_read_buffers = is_depth ? !!g_cfg.video.read_depth_buffer : !!g_cfg.video.read_color_buffers;
-
-		if (!should_read_buffers)
+		if (!read_buffers_enabled(this))
 		{
 			clear_memory(cmd, this);
 

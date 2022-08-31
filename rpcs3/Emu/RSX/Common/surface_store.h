@@ -48,6 +48,7 @@ namespace rsx
 		using surface_overlap_info = surface_overlap_info_t<surface_type>;
 		using surface_ranged_map = ranged_map<surface_storage_type, 0x400000>;
 		using surface_cache_dma_map = surface_cache_dma<Traits, 0x400000>;
+		using buffer_object_type = typename Traits::buffer_object_type;
 
 	protected:
 		surface_ranged_map m_render_targets_storage = {};
@@ -434,16 +435,13 @@ namespace rsx
 
 				if (!pitch_compatible)
 				{
+					// Preserve content age. This is hacky, but matches previous behavior
+					new_content_tag = Traits::get(surface)->last_use_tag;
+
 					// This object should be pitch-converted and re-intersected with
 					if (old_surface_storage = Traits::convert_pitch(command_list, surface, pitch))
 					{
 						old_surface = Traits::get(old_surface_storage);
-					}
-					else
-					{
-						// Preserve content age. This is hacky, but matches previous behavior
-						// TODO: Remove when pitch convert is implemented
-						new_content_tag = Traits::get(surface)->last_use_tag;
 					}
 				}
 
@@ -861,7 +859,7 @@ namespace rsx
 		}
 
 		std::tuple<std::vector<surface_type>, std::vector<surface_type>>
-		find_overlapping_set(const utils::address_range& range) const
+		find_overlapping_set(const utils::address_range& range)
 		{
 			std::vector<surface_type> color_result, depth_result;
 			utils::address_range result_range;
@@ -894,58 +892,7 @@ namespace rsx
 				}
 			}
 
-			return { color_result, depth_result, result_range };
-		}
-
-		void write_to_dma_buffers(
-			command_list_type command_list,
-			const utils::address_range& range)
-		{
-			auto block_range = m_dma_block.to_block_range(range);
-			auto [color_data, depth_stencil_data] = find_overlapping_set(block_range);
-			auto [bo, offset, bo_timestamp] = m_dma_block
-				.with_range(command_list, block_range)
-				.get(block_range.start);
-
-			u64 src_offset, dst_offset, write_length;
-			auto block_length = block_range.length();
-
-			auto all_data = std::move(color_data);
-			all_data.insert(all_data.end(), depth_stencil_data.begin(), depth_stencil_data.end());
-
-			if (all_data.size() > 1)
-			{
-				std::sort(all_data.begin(), all_data.end(), [](const auto& a, const auto& b)
-				{
-					return a->last_use_tag < b->last_use_tag;
-				});
-			}
-
-			for (const auto& surface : all_data)
-			{
-				if (surface->last_use_tag <= bo_timestamp)
-				{
-					continue;
-				}
-
-				const auto this_range = surface->get_memory_range();
-				const auto max_length = this_range.length();
-				if (this_range.start < block_range.start)
-				{
-					src_offset = block_range.start - this_range.start;
-					dst_offset = 0;
-				}
-				else
-				{
-					src_offset = 0;
-					dst_offset = this_range.start - block_range.start;
-				}
-
-				write_length = std::min(max_length, block_length - dst_offset);
-				Traits::write_render_target_to_memory(command_list, bo, surface, dst_offset, src_offset, write_length);
-			}
-
-			m_dma_block.touch(block_range);
+			return { color_result, depth_result };
 		}
 
 	public:
@@ -1228,6 +1175,67 @@ namespace rsx
 			}
 
 			return result;
+		}
+
+		void flush_to_dma_buffers(
+			command_list_type command_list,
+			const utils::address_range& range)
+		{
+			auto block_range = m_dma_block.to_block_range(range);
+			auto [color_data, depth_stencil_data] = find_overlapping_set(block_range);
+			auto [bo, offset, bo_timestamp] = m_dma_block
+				.with_range(command_list, block_range)
+				.get(block_range.start);
+
+			u64 src_offset, dst_offset, write_length;
+			auto block_length = block_range.length();
+
+			auto all_data = std::move(color_data);
+			all_data.insert(all_data.end(), depth_stencil_data.begin(), depth_stencil_data.end());
+
+			if (all_data.size() > 1)
+			{
+				std::sort(all_data.begin(), all_data.end(), [](const auto& a, const auto& b)
+				{
+					return a->last_use_tag < b->last_use_tag;
+				});
+			}
+
+			for (const auto& surface : all_data)
+			{
+				if (surface->last_use_tag <= bo_timestamp)
+				{
+					continue;
+				}
+
+				const auto this_range = surface->get_memory_range();
+				const auto max_length = this_range.length();
+				if (this_range.start < block_range.start)
+				{
+					src_offset = block_range.start - this_range.start;
+					dst_offset = 0;
+				}
+				else
+				{
+					src_offset = 0;
+					dst_offset = this_range.start - block_range.start;
+				}
+
+				write_length = std::min<u64>(max_length, block_length - dst_offset);
+				Traits::write_render_target_to_memory(command_list, bo, surface, dst_offset, src_offset, write_length);
+			}
+
+			m_dma_block.touch(block_range);
+		}
+
+		std::tuple<buffer_object_type, u32, u64, utils::address_range> map_dma(command_list_type cmd, const utils::address_range& range)
+		{
+			auto block_range = m_dma_block.to_block_range(range);
+			auto [bo, offset, timestamp] = m_dma_block
+				.with_range(cmd, block_range)
+				.get(block_range.start);
+
+			return { bo, offset, timestamp, block_range };
 		}
 
 		void check_for_duplicates(std::vector<surface_overlap_info>& sections)

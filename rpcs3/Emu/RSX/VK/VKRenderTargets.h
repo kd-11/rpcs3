@@ -86,6 +86,11 @@ namespace vk
 		return ensure(dynamic_cast<vk::render_target*>(t));
 	}
 
+	static inline bool read_buffers_enabled(vk::render_target* rtt)
+	{
+		return rtt->is_depth_surface() ? !!g_cfg.video.read_depth_buffer : !!g_cfg.video.read_color_buffers;
+	}
+
 	struct surface_cache_traits
 	{
 		using surface_storage_type = std::unique_ptr<vk::render_target>;
@@ -342,8 +347,10 @@ namespace vk
 			std::unique_ptr<vk::render_target>& src,
 			usz /*out_pitch*/)
 		{
-			// TODO
-			src->state_flags = rsx::surface_state_flags::erase_bkgnd;
+			if (read_buffers_enabled(src.get()))
+			{
+				src->state_flags = rsx::surface_state_flags::reload_from_surface_cache;
+			}
 			return {};
 		}
 
@@ -476,7 +483,11 @@ namespace vk
 			u64 src_offset_in_buffer,
 			u64 max_copy_length)
 		{
-			surface->read_barrier(cmd);
+			if (surface->read_barrier(cmd); !surface->test())
+			{
+				return;
+			}
+
 			vk::image* source = surface->get_surface(rsx::surface_access::transfer_read);
 			const bool is_scaled = surface->width() != surface->surface_width;
 			if (is_scaled)
@@ -575,14 +586,25 @@ namespace vk
 		{
 			return obj.get();
 		}
+
+		template <typename T>
+		static void set(std::unique_ptr<T>& obj, T* raw)
+		{
+			ensure(!obj);
+			obj.reset(raw);
+		}
 	};
 
 	class surface_cache : public rsx::surface_store<vk::surface_cache_traits>
 	{
 	private:
 		u64 get_surface_cache_memory_quota(u64 total_device_memory);
+		static surface_cache* instance;
 
 	public:
+		surface_cache();
+		static surface_cache* get() { return surface_cache::instance; }
+
 		void destroy();
 		bool spill_unused_memory();
 		bool is_overallocated();

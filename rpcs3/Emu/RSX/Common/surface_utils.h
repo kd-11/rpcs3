@@ -16,7 +16,11 @@ namespace rsx
 		ready = 0,
 		erase_bkgnd = 1,
 		require_resolve = 2,
-		require_unresolve = 4
+		require_unresolve = 4,
+		pitch_convert = 8,
+
+		// Meta
+		reload_from_surface_cache = erase_bkgnd | pitch_convert
 	};
 
 	enum class surface_sample_layout : u32

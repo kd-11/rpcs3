@@ -81,7 +81,7 @@ class GLGSRender : public GSRender, public ::rsx::reports::ZCULL_control
 	u32 m_interpreter_state = 0;
 	gl::shader_interpreter m_shader_interpreter;
 
-	gl_render_targets m_rtts;
+	gl::surface_cache m_rtts;
 
 	gl::texture_cache m_gl_texture_cache;
 

@@ -879,7 +879,7 @@ namespace gl
 			baseclass::on_frame_end();
 		}
 
-		bool blit(gl::command_context& cmd, rsx::blit_src_info& src, rsx::blit_dst_info& dst, bool linear_interpolate, gl_render_targets& m_rtts)
+		bool blit(gl::command_context& cmd, rsx::blit_src_info& src, rsx::blit_dst_info& dst, bool linear_interpolate, gl::surface_cache& m_rtts)
 		{
 			auto result = upload_scaled_image(src, dst, linear_interpolate, cmd, m_rtts, m_hw_blitter);
 

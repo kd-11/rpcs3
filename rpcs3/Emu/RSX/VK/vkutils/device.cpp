@@ -414,6 +414,9 @@ namespace vk
 		// 2. DXT support
 		// 3. Indexable storage buffers
 		VkPhysicalDeviceFeatures enabled_features{};
+		VkPhysicalDeviceConditionalRenderingFeaturesEXT conditional_rendering_features{};
+		const void* extra_features = nullptr;
+
 		if (pgpu->shader_types_support.allow_float16)
 		{
 			requested_extensions.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
@@ -422,6 +425,9 @@ namespace vk
 		if (pgpu->conditional_render_support)
 		{
 			requested_extensions.push_back(VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
+			conditional_rendering_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT;
+			conditional_rendering_features.conditionalRendering = VK_TRUE;
+			extra_features = &conditional_rendering_features;
 		}
 
 		if (pgpu->unrestricted_depth_range_support)
@@ -573,7 +579,7 @@ namespace vk
 
 		VkDeviceCreateInfo device = {};
 		device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-		device.pNext = nullptr;
+		device.pNext = extra_features;
 		device.queueCreateInfoCount = ::size32(device_queues);
 		device.pQueueCreateInfos = device_queues.data();
 		device.enabledLayerCount = 0;

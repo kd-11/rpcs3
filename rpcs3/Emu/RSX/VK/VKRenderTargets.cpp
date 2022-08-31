@@ -693,6 +693,7 @@ namespace vk
 
 		vk::viewable_image* dst = (samples() > 1)? get_resolve_target_safe(cmd): this;
 		vk::image* raw_content = nullptr;
+		auto old_layout = current_layout;
 
 		if (dst->width() == subres.width_in_block && dst->height() == subres.height_in_block)
 		{
@@ -719,6 +720,11 @@ namespace vk
 				{ 0, 0, subres.width_in_block, subres.height_in_block },
 				{ 0, 0, static_cast<s32>(dst->width()), static_cast<s32>(dst->height()) },
 				1, true, aspect() == VK_IMAGE_ASPECT_COLOR_BIT ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+		}
+
+		if (current_layout != old_layout && old_layout != VK_IMAGE_LAYOUT_UNDEFINED)
+		{
+			change_layout(cmd, old_layout);
 		}
 
 		if (samples() > 1)

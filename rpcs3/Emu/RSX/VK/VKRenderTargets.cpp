@@ -691,55 +691,40 @@ namespace vk
 		subres.depth = 1;
 		subres.data = { vm::get_super_ptr<const std::byte>(base_addr), static_cast<std::span<const std::byte>::size_type>(rsx_pitch * surface_height * samples_y) };
 
-		if (g_cfg.video.resolution_scale_percent == 100 && spp == 1) [[likely]]
+		vk::viewable_image* dst = (samples() > 1)? get_resolve_target_safe(cmd): this;
+		vk::image* raw_content = nullptr;
+
+		if (dst->width() == subres.width_in_block && dst->height() == subres.height_in_block)
 		{
-			push_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-			vk::upload_image(cmd, this, { subres }, get_gcm_format(), is_swizzled, 1, aspect(), upload_heap, rsx_pitch, upload_contents_inline);
-			pop_layout(cmd);
+			// Perfect fit. Writethrough.
+			raw_content = dst;
 		}
 		else
 		{
-			vk::image* content = nullptr;
-			vk::image* final_dst = (samples() > 1) ? get_resolve_target_safe(cmd) : this;
+			// Scaling required.
+			raw_content = vk::get_typeless_helper(format(), format_class(), subres.width_in_block, subres.height_in_block);
+		}
 
-			// Prepare dst image
-			final_dst->push_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		// Load data from CELL
+		raw_content->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		vk::upload_image(cmd, raw_content, { subres }, get_gcm_format(), is_swizzled, 1, aspect(), upload_heap, rsx_pitch, upload_contents_inline);
 
-			if (final_dst->width() == subres.width_in_block && final_dst->height() == subres.height_in_block)
-			{
-				// Possible if MSAA is enabled with 100% resolution scale or
-				// surface dimensions are less than resolution scale threshold and no MSAA.
-				// Writethrough.
-				content = final_dst;
-			}
-			else
-			{
-				content = vk::get_typeless_helper(format(), format_class(), subres.width_in_block, subres.height_in_block);
-				content->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-			}
+		if (raw_content != dst)
+		{
+			// Avoid layout push/pop on scratch memory by setting explicit layout here
+			raw_content->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+			dst->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
 
-			// Load Cell data into temp buffer
-			vk::upload_image(cmd, content, { subres }, get_gcm_format(), is_swizzled, 1, aspect(), upload_heap, rsx_pitch, upload_contents_inline);
+			vk::copy_scaled_image(cmd, raw_content, dst,
+				{ 0, 0, subres.width_in_block, subres.height_in_block },
+				{ 0, 0, static_cast<s32>(dst->width()), static_cast<s32>(dst->height()) },
+				1, true, aspect() == VK_IMAGE_ASPECT_COLOR_BIT ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
+		}
 
-			// Write into final image
-			if (content != final_dst)
-			{
-				// Avoid layout push/pop on scratch memory by setting explicit layout here
-				content->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-
-				vk::copy_scaled_image(cmd, content, final_dst,
-					{ 0, 0, subres.width_in_block, subres.height_in_block },
-					{ 0, 0, static_cast<s32>(final_dst->width()), static_cast<s32>(final_dst->height()) },
-					1, true, aspect() == VK_IMAGE_ASPECT_COLOR_BIT ? VK_FILTER_LINEAR : VK_FILTER_NEAREST);
-			}
-
-			final_dst->pop_layout(cmd);
-
-			if (samples() > 1)
-			{
-				// Trigger unresolve
-				msaa_flags = rsx::surface_state_flags::require_unresolve;
-			}
+		if (samples() > 1)
+		{
+			// Trigger unresolve
+			msaa_flags = rsx::surface_state_flags::require_unresolve;
 		}
 
 		state_flags &= ~rsx::surface_state_flags::erase_bkgnd;

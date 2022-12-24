@@ -37,6 +37,7 @@ namespace vk
 			VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_info{};
 			VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loops_info{};
 			VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
+			VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
 
 			if (device_extensions.is_supported(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
 			{
@@ -73,6 +74,13 @@ namespace vk
 				features2.pNext               = &shader_barycentric_info;
 			}
 
+			if (device_extensions.is_supported(VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
+			{
+				device_fault_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+				device_fault_info.pNext = features2.pNext;
+				features2.pNext         = &device_fault_info;
+			}
+
 			auto _vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceFeatures2KHR"));
 			ensure(_vkGetPhysicalDeviceFeatures2KHR); // "vkGetInstanceProcAddress failed to find entry point!"
 			_vkGetPhysicalDeviceFeatures2KHR(dev, &features2);
@@ -80,6 +88,7 @@ namespace vk
 			shader_types_support.allow_float64 = !!features2.features.shaderFloat64;
 			shader_types_support.allow_float16 = !!shader_support_info.shaderFloat16;
 			shader_types_support.allow_int8    = !!shader_support_info.shaderInt8;
+			extended_device_fault_support      = !!device_fault_info.deviceFault;
 			framebuffer_loops_support          = !!fbo_loops_info.attachmentFeedbackLoopLayout;
 			barycoords_support                 = !!shader_barycentric_info.fragmentShaderBarycentric;
 			features                           = features2.features;
@@ -666,6 +675,11 @@ namespace vk
 			_vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetDeviceProcAddr(dev, "vkSetDebugUtilsObjectNameEXT"));
 			_vkQueueInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkQueueInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(dev, "vkQueueInsertDebugUtilsLabelEXT"));
 			_vkCmdInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkCmdInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(dev, "vkCmdInsertDebugUtilsLabelEXT"));
+		}
+
+		if (pgpu->extended_device_fault_support)
+		{
+			_vkGetDeviceFaultInfoEXT = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(vkGetDeviceProcAddr(dev, "vkGetDeviceFaultInfoEXT"));
 		}
 
 		memory_map = vk::get_memory_mapping(pdev);

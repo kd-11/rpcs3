@@ -5,6 +5,7 @@
 #include "VKPipelineCompiler.h"
 
 #include "vkutils/framebuffer_object.hpp"
+#include "vkutils/renderpass.h"
 
 #include "../Common/TextGlyphs.h"
 #include <unordered_map>
@@ -27,7 +28,7 @@ namespace vk
 		VkPipelineLayout m_pipeline_layout = nullptr;
 		u32 m_used_descriptors = 0;
 
-		VkRenderPass m_render_pass;
+		vk::renderpass_t* m_render_pass;
 		VkDevice device = nullptr;
 
 		u32 m_uniform_buffer_offset = 0;
@@ -195,7 +196,7 @@ namespace vk
 			info.layout = m_pipeline_layout;
 			info.basePipelineIndex = -1;
 			info.basePipelineHandle = VK_NULL_HANDLE;
-			info.renderPass = m_render_pass;
+			info.renderPass = m_render_pass->get();
 
 			auto compiler = vk::get_pipe_compiler();
 			m_program = compiler->compile(info, m_pipeline_layout, vk::pipe_compiler::COMPILE_INLINE);
@@ -256,9 +257,9 @@ namespace vk
 			}
 		}
 
-		void init(vk::render_device &dev, VkRenderPass render_pass)
+		void init(vk::render_device &dev, vk::renderpass_t* render_pass)
 		{
-			ensure(render_pass != VK_NULL_HANDLE);
+			ensure(render_pass);
 
 			//At worst case, 1 char = 16*16*8 bytes (average about 24*8), so ~256K for 128 chars. Allocating 512k for verts
 			//uniform params are 8k in size, allocating for 120 lines (max lines at 4k, one column per row. Can be expanded
@@ -352,7 +353,7 @@ namespace vk
 			load_program(cmd, scale_x, scale_y, shader_offsets.data(), counts.size(), color);
 
 			const coordu viewport = { positionu{0u, 0u}, sizeu{target.width(), target.height() } };
-			vk::begin_renderpass(cmd, m_render_pass, target.value, viewport);
+			vk::begin_renderpass(cmd, m_render_pass, &target, viewport);
 
 			for (uint i = 0; i < counts.size(); ++i)
 			{

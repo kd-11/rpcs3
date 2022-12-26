@@ -1458,7 +1458,7 @@ void VKGSRender::clear_surface(u32 mask)
 			// Partial stencil clear. Disables fast stencil clear
 			auto ds = std::get<1>(m_rtts.m_bound_depth_stencil);
 			auto key = vk::get_renderpass_key({ ds });
-			auto renderpass = vk::get_renderpass(*m_device, key);
+			auto renderpass = vk::get_renderpass(m_device, key);
 
 			vk::get_overlay_pass<vk::stencil_clear_pass>()->run(
 				*m_current_command_buffer, ds, region.rect,
@@ -2526,7 +2526,7 @@ void VKGSRender::prepare_rtts(rsx::framebuffer_creation_context context)
 	}
 
 	m_current_renderpass_key = vk::get_renderpass_key(m_fbo_images);
-	m_cached_renderpass = vk::get_renderpass(*m_device, m_current_renderpass_key);
+	m_cached_renderpass = vk::get_renderpass(m_device, m_current_renderpass_key);
 
 	// Search old framebuffers for this same configuration
 	const auto [fbo_width, fbo_height] = rsx::apply_resolution_scale<true>(m_framebuffer_layout.width, m_framebuffer_layout.height);

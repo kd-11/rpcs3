@@ -7,6 +7,7 @@
 
 #include "vkutils/image.h"
 #include "vkutils/image_helpers.h"
+#include "vkutils/renderpass.h"
 #include "vkutils/sampler.h"
 #include "vkutils/scratch.h"
 
@@ -297,7 +298,7 @@ namespace vk
 		m_ubo.reset_allocation_stats();
 	}
 
-	vk::framebuffer* overlay_pass::get_framebuffer(vk::image* target, VkRenderPass render_pass)
+	vk::framebuffer* overlay_pass::get_framebuffer(vk::image* target, vk::renderpass_t* render_pass)
 	{
 		VkDevice dev = (*vk::get_current_renderer());
 		return vk::get_framebuffer(dev, target->width(), target->height(), m_num_input_attachments > 0, render_pass, { target });
@@ -323,19 +324,19 @@ namespace vk
 		vkCmdSetScissor(cmd, 0, 1, &vs);
 	}
 
-	void overlay_pass::run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* fbo, const std::vector<vk::image_view*>& src, VkRenderPass render_pass)
+	void overlay_pass::run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* fbo, const std::vector<vk::image_view*>& src, vk::renderpass_t* render_pass)
 	{
 		// This call clobbers dynamic state
 		cmd.flags |= vk::command_buffer::cb_reload_dynamic_state;
 
-		load_program(cmd, render_pass, src);
+		load_program(cmd, render_pass->get(), src);
 		set_up_viewport(cmd, viewport.x1, viewport.y1, viewport.width(), viewport.height());
 
-		vk::begin_renderpass(cmd, render_pass, fbo->value, { positionu{0u, 0u}, sizeu{fbo->width(), fbo->height()} });
+		vk::begin_renderpass(cmd, render_pass, fbo, { positionu{0u, 0u}, sizeu{fbo->width(), fbo->height()} });
 		emit_geometry(cmd);
 	}
 
-	void overlay_pass::run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, const std::vector<vk::image_view*>& src, VkRenderPass render_pass)
+	void overlay_pass::run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, const std::vector<vk::image_view*>& src, vk::renderpass_t* render_pass)
 	{
 		auto fbo = static_cast<vk::framebuffer_holder*>(get_framebuffer(target, render_pass));
 		fbo->add_ref();
@@ -344,7 +345,7 @@ namespace vk
 		fbo->release();
 	}
 
-	void overlay_pass::run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, vk::image_view* src, VkRenderPass render_pass)
+	void overlay_pass::run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, vk::image_view* src, vk::renderpass_t* render_pass)
 	{
 		std::vector<vk::image_view*> views = { src };
 		run(cmd, viewport, target, views, render_pass);
@@ -728,7 +729,7 @@ namespace vk
 		}
 	}
 
-	void ui_overlay_renderer::run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* target, VkRenderPass render_pass,
+	void ui_overlay_renderer::run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* target, vk::renderpass_t* render_pass,
 			vk::data_heap& upload_heap, rsx::overlays::overlay& ui)
 	{
 		m_scale_offset = color4f(ui.virtual_width, ui.virtual_height, 1.f, 1.f);
@@ -868,7 +869,7 @@ namespace vk
 		vkCmdSetScissor(cmd, 0, 1, &region);
 	}
 
-	void attachment_clear_pass::run(vk::command_buffer& cmd, vk::framebuffer* target, VkRect2D rect, u32 clearmask, color4f color, VkRenderPass render_pass)
+	void attachment_clear_pass::run(vk::command_buffer& cmd, vk::framebuffer* target, VkRect2D rect, u32 clearmask, color4f color, vk::renderpass_t* render_pass)
 	{
 		region = rect;
 
@@ -931,7 +932,7 @@ namespace vk
 		vkCmdSetScissor(cmd, 0, 1, &region);
 	}
 
-	void stencil_clear_pass::run(vk::command_buffer& cmd, vk::render_target* target, VkRect2D rect, u32 stencil_clear, u32 stencil_write_mask, VkRenderPass render_pass)
+	void stencil_clear_pass::run(vk::command_buffer& cmd, vk::render_target* target, VkRect2D rect, u32 stencil_clear, u32 stencil_write_mask, vk::renderpass_t* render_pass)
 	{
 		region = rect;
 
@@ -1035,7 +1036,7 @@ namespace vk
 	}
 
 	void video_out_calibration_pass::run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* target,
-		const rsx::simple_array<vk::viewable_image*>& src, f32 gamma, bool limited_rgb, bool _3d, VkRenderPass render_pass)
+		const rsx::simple_array<vk::viewable_image*>& src, f32 gamma, bool limited_rgb, bool _3d, vk::renderpass_t* render_pass)
 	{
 		config.gamma = gamma;
 		config.limit_range = limited_rgb? 1 : 0;

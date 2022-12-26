@@ -83,7 +83,7 @@ namespace vk
 			auto& dev = cmd.get_command_pool().get_owner();
 
 			const auto key = vk::get_renderpass_key(surface);
-			auto renderpass = vk::get_renderpass(dev, key);
+			auto renderpass = vk::get_renderpass(&dev, key);
 
 			if (src->aspect() & VK_IMAGE_ASPECT_STENCIL_BIT)
 			{
@@ -152,7 +152,7 @@ namespace vk
 			auto& dev = cmd.get_command_pool().get_owner();
 
 			const auto key = vk::get_renderpass_key(surface);
-			auto renderpass = vk::get_renderpass(dev, key);
+			auto renderpass = vk::get_renderpass(&dev, key);
 
 			if (src->aspect() & VK_IMAGE_ASPECT_STENCIL_BIT)
 			{

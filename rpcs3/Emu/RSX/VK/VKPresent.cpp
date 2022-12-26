@@ -576,7 +576,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 	const VkImageSubresourceRange subresource_range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 	VkImageLayout target_layout = present_layout;
 
-	VkRenderPass single_target_pass = VK_NULL_HANDLE;
+	vk::renderpass_t* single_target_pass = VK_NULL_HANDLE;
 	vk::framebuffer_holder* direct_fbo = nullptr;
 	rsx::simple_array<vk::viewable_image*> calibration_src;
 
@@ -638,8 +638,8 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			target_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
 			const auto key = vk::get_renderpass_key(m_swapchain->get_surface_format());
-			single_target_pass = vk::get_renderpass(*m_device, key);
-			ensure(single_target_pass != VK_NULL_HANDLE);
+			single_target_pass = vk::get_renderpass(m_device, key);
+			ensure(single_target_pass);
 
 			direct_fbo = vk::get_framebuffer(*m_device, m_swapchain_dims.width, m_swapchain_dims.height, VK_FALSE, single_target_pass, m_swapchain->get_surface_format(), target_image);
 			direct_fbo->add_ref();
@@ -740,8 +740,8 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 		if (!direct_fbo)
 		{
 			const auto key = vk::get_renderpass_key(m_swapchain->get_surface_format());
-			single_target_pass = vk::get_renderpass(*m_device, key);
-			ensure(single_target_pass != VK_NULL_HANDLE);
+			single_target_pass = vk::get_renderpass(m_device, key);
+			ensure(single_target_pass);
 
 			direct_fbo = vk::get_framebuffer(*m_device, m_swapchain_dims.width, m_swapchain_dims.height, VK_FALSE, single_target_pass, m_swapchain->get_surface_format(), target_image);
 		}
@@ -767,7 +767,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			{
 				auto key = vk::get_renderpass_key(m_swapchain->get_surface_format());
 				m_text_writer = std::make_unique<vk::text_writer>();
-				m_text_writer->init(*m_device, vk::get_renderpass(*m_device, key));
+				m_text_writer->init(*m_device, vk::get_renderpass(m_device, key));
 			}
 
 			m_text_writer->set_scale(m_frame->client_device_pixel_ratio());

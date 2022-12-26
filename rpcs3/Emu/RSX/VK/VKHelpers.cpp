@@ -62,8 +62,7 @@ namespace vk
 
 	void destroy_global_resources()
 	{
-		VkDevice dev = *g_render_device;
-		vk::clear_renderpass_cache(dev);
+		vk::clear_renderpass_cache(g_render_device);
 		vk::clear_framebuffer_cache();
 		vk::clear_resolve_helpers();
 		vk::clear_dma_resources();

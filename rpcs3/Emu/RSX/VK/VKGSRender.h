@@ -7,6 +7,7 @@
 #include "vkutils/descriptors.h"
 #include "vkutils/data_heap.h"
 #include "vkutils/instance.hpp"
+#include "vkutils/renderpass.h"
 #include "vkutils/sync.h"
 #include "vkutils/swapchain.hpp"
 
@@ -182,7 +183,7 @@ private:
 
 	vk::draw_call_t m_current_draw = {};
 	u64 m_current_renderpass_key = 0;
-	VkRenderPass m_cached_renderpass = VK_NULL_HANDLE;
+	vk::renderpass_t* m_cached_renderpass = nullptr;
 	std::vector<vk::image*> m_fbo_images;
 
 	//Vertex layout
@@ -222,7 +223,7 @@ private:
 
 	void begin_render_pass();
 	void close_render_pass();
-	VkRenderPass get_render_pass();
+	vk::renderpass_t* get_render_pass();
 
 	void update_draw_state();
 

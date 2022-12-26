@@ -3,6 +3,7 @@
 #include "VKFramebuffer.h"
 #include "vkutils/image.h"
 #include "vkutils/image_helpers.h"
+#include "vkutils/renderpass.h"
 
 #include <unordered_map>
 
@@ -26,7 +27,7 @@ namespace vk
 		{}
 	};
 
-	vk::framebuffer_holder* get_framebuffer(VkDevice dev, u16 width, u16 height, VkBool32 has_input_attachments, VkRenderPass renderpass, const std::vector<vk::image*>& image_list)
+	vk::framebuffer_holder* get_framebuffer(VkDevice dev, u16 width, u16 height, VkBool32 has_input_attachments, vk::renderpass_t* renderpass, const std::vector<vk::image*>& image_list)
 	{
 		framebuffer_storage_key key(width, height, has_input_attachments);
 		auto &queue = g_framebuffers_cache[key.encoded];
@@ -48,14 +49,14 @@ namespace vk
 			image_views.push_back(std::make_unique<vk::image_view>(dev, e, VK_IMAGE_VIEW_TYPE_2D, vk::default_component_map, subres));
 		}
 
-		auto value = std::make_unique<vk::framebuffer_holder>(dev, renderpass, width, height, std::move(image_views));
+		auto value = std::make_unique<vk::framebuffer_holder>(dev, renderpass->get(), width, height, std::move(image_views));
 		auto ret = value.get();
 
 		queue.push_back(std::move(value));
 		return ret;
 	}
 
-	vk::framebuffer_holder* get_framebuffer(VkDevice dev, u16 width, u16 height, VkBool32 has_input_attachments, VkRenderPass renderpass, VkFormat format, VkImage attachment)
+	vk::framebuffer_holder* get_framebuffer(VkDevice dev, u16 width, u16 height, VkBool32 has_input_attachments, vk::renderpass_t* renderpass, VkFormat format, VkImage attachment)
 	{
 		framebuffer_storage_key key(width, height, has_input_attachments);
 		auto &queue = g_framebuffers_cache[key.encoded];
@@ -72,7 +73,7 @@ namespace vk
 		std::vector<std::unique_ptr<vk::image_view>> views;
 
 		views.push_back(std::make_unique<vk::image_view>(dev, attachment, VK_IMAGE_VIEW_TYPE_2D, format, vk::default_component_map, range));
-		auto value = std::make_unique<vk::framebuffer_holder>(dev, renderpass, width, height, std::move(views));
+		auto value = std::make_unique<vk::framebuffer_holder>(dev, renderpass->get(), width, height, std::move(views));
 		auto ret = value.get();
 
 		queue.push_back(std::move(value));

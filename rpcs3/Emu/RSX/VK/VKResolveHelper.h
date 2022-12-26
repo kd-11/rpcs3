@@ -274,7 +274,7 @@ namespace vk
 				{ "sampler2DMS fs0" });
 		}
 
-		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, VkRenderPass render_pass)
+		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, vk::renderpass_t* render_pass)
 		{
 			update_sample_configuration(msaa_image);
 			auto src_view = msaa_image->get_view(VK_REMAP_VIEW_MULTISAMPLED, rsx::default_remap_vector);
@@ -302,7 +302,7 @@ namespace vk
 				{ "sampler2D fs0" });
 		}
 
-		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, VkRenderPass render_pass)
+		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, vk::renderpass_t* render_pass)
 		{
 			renderpass_config.set_multisample_state(msaa_image->samples(), 0xFFFF, true, false, false);
 			renderpass_config.set_multisample_shading_rate(1.f);
@@ -369,7 +369,7 @@ namespace vk
 			}
 		}
 
-		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, VkRenderPass render_pass)
+		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, vk::renderpass_t* render_pass)
 		{
 			update_sample_configuration(msaa_image);
 			auto stencil_view = msaa_image->get_view(VK_REMAP_VIEW_MULTISAMPLED, rsx::default_remap_vector, VK_IMAGE_ASPECT_STENCIL_BIT);
@@ -436,7 +436,7 @@ namespace vk
 			}
 		}
 
-		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, VkRenderPass render_pass)
+		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, vk::renderpass_t* render_pass)
 		{
 			renderpass_config.set_multisample_state(msaa_image->samples(), 0xFFFF, true, false, false);
 			renderpass_config.set_multisample_shading_rate(1.f);
@@ -483,7 +483,7 @@ namespace vk
 				{ "sampler2DMS fs0", "usampler2DMS fs1" });
 		}
 
-		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, VkRenderPass render_pass)
+		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, vk::renderpass_t* render_pass)
 		{
 			update_sample_configuration(msaa_image);
 			auto depth_view = msaa_image->get_view(VK_REMAP_VIEW_MULTISAMPLED, rsx::default_remap_vector, VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -525,7 +525,7 @@ namespace vk
 				{ "sampler2D fs0", "usampler2D fs1" });
 		}
 
-		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, VkRenderPass render_pass)
+		void run(vk::command_buffer& cmd, vk::viewable_image* msaa_image, vk::viewable_image* resolve_image, vk::renderpass_t* render_pass)
 		{
 			renderpass_config.set_multisample_state(msaa_image->samples(), 0xFFFF, true, false, false);
 			renderpass_config.set_multisample_shading_rate(1.f);

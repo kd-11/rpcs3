@@ -15,7 +15,7 @@ namespace vk
 		std::vector<glsl::program_input> m_vs_inputs;
 		std::vector<glsl::program_input> m_fs_inputs;
 
-		VkDevice m_device = VK_NULL_HANDLE;
+		const vk::render_device* m_device = nullptr;
 		VkDescriptorSetLayout m_shared_descriptor_layout = VK_NULL_HANDLE;
 		VkPipelineLayout m_shared_pipeline_layout = VK_NULL_HANDLE;
 		glsl::program* m_current_interpreter = nullptr;
@@ -50,7 +50,7 @@ namespace vk
 
 		pipeline_key m_current_key{};
 
-		std::pair<VkDescriptorSetLayout, VkPipelineLayout> create_layout(VkDevice dev);
+		std::pair<VkDescriptorSetLayout, VkPipelineLayout> create_layout(const vk::render_device& dev);
 		void create_descriptor_pools(const vk::render_device& dev);
 
 		void build_vs();

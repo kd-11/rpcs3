@@ -46,6 +46,7 @@
     <ClInclude Include="Emu\RSX\VK\vkutils\framebuffer_object.hpp" />
     <ClInclude Include="Emu\RSX\VK\vkutils\image.h" />
     <ClInclude Include="Emu\RSX\VK\vkutils\image_helpers.h" />
+    <ClInclude Include="Emu\RSX\VK\vkutils\renderpass.h" />
     <ClInclude Include="Emu\RSX\VK\vkutils\scratch.h" />
     <ClInclude Include="Emu\RSX\VK\vkutils\swapchain.hpp" />
     <ClInclude Include="Emu\RSX\VK\vkutils\sync.h" />
@@ -91,6 +92,7 @@
     <ClCompile Include="Emu\RSX\VK\vkutils\data_heap.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\image.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\image_helpers.cpp" />
+    <ClCompile Include="Emu\RSX\VK\vkutils\renderpass.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\scratch.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\sync.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\memory.cpp" />

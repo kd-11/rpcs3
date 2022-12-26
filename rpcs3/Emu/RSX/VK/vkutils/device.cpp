@@ -37,6 +37,7 @@ namespace vk
 			VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_info{};
 			VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loops_info{};
 			VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
+			VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering_info{};
 
 			if (device_extensions.is_supported(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
 			{
@@ -73,6 +74,13 @@ namespace vk
 				features2.pNext               = &shader_barycentric_info;
 			}
 
+			if (device_extensions.is_supported(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME))
+			{
+				dynamic_rendering_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
+				dynamic_rendering_info.pNext = features2.pNext;
+				features2.pNext              = &dynamic_rendering_info;
+			}
+
 			auto _vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceFeatures2KHR"));
 			ensure(_vkGetPhysicalDeviceFeatures2KHR); // "vkGetInstanceProcAddress failed to find entry point!"
 			_vkGetPhysicalDeviceFeatures2KHR(dev, &features2);
@@ -82,6 +90,7 @@ namespace vk
 			shader_types_support.allow_int8    = !!shader_support_info.shaderInt8;
 			framebuffer_loops_support          = !!fbo_loops_info.attachmentFeedbackLoopLayout;
 			barycoords_support                 = !!shader_barycentric_info.fragmentShaderBarycentric;
+			dynamic_rendering_support          = !!dynamic_rendering_info.dynamicRendering;
 			features                           = features2.features;
 
 			if (descriptor_indexing_support)
@@ -469,6 +478,11 @@ namespace vk
 			requested_extensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
 		}
 
+		if (pgpu->dynamic_rendering_support)
+		{
+			requested_extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
+		}
+
 		enabled_features.robustBufferAccess = VK_TRUE;
 		enabled_features.fullDrawIndexUint32 = VK_TRUE;
 		enabled_features.independentBlend = VK_TRUE;
@@ -641,6 +655,24 @@ namespace vk
 			fbo_loop_features.attachmentFeedbackLoopLayout = VK_TRUE;
 			fbo_loop_features.pNext = const_cast<void*>(device.pNext);
 			device.pNext = &fbo_loop_features;
+		}
+
+		VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR barycoord_features{};
+		if (pgpu->barycoords_support)
+		{
+			barycoord_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+			barycoord_features.fragmentShaderBarycentric = VK_TRUE;
+			barycoord_features.pNext = const_cast<void*>(device.pNext);
+			device.pNext = &barycoord_features;
+		}
+
+		VkPhysicalDeviceDynamicRenderingFeaturesKHR dynamic_rendering_features{};
+		if (pgpu->dynamic_rendering_support)
+		{
+			dynamic_rendering_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR;
+			dynamic_rendering_features.dynamicRendering = VK_TRUE;
+			dynamic_rendering_features.pNext = const_cast<void*>(device.pNext);
+			device.pNext = &dynamic_rendering_features;
 		}
 
 		CHECK_RESULT_EX(vkCreateDevice(*pgpu, &device, nullptr, &dev), message_on_error);

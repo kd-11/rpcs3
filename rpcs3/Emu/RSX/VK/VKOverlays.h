@@ -27,6 +27,7 @@ namespace vk
 	struct framebuffer;
 	struct sampler;
 	struct image_view;
+	struct renderpass_t;
 	class image;
 	class viewable_image;
 	class command_buffer;
@@ -117,15 +118,15 @@ namespace vk
 
 		void free_resources();
 
-		vk::framebuffer* get_framebuffer(vk::image* target, VkRenderPass render_pass);
+		vk::framebuffer* get_framebuffer(vk::image* target, vk::renderpass_t* render_pass);
 
 		virtual void emit_geometry(vk::command_buffer& cmd);
 
 		virtual void set_up_viewport(vk::command_buffer& cmd, u32 x, u32 y, u32 w, u32 h);
 
-		void run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* fbo, const std::vector<vk::image_view*>& src, VkRenderPass render_pass);
-		void run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, const std::vector<vk::image_view*>& src, VkRenderPass render_pass);
-		void run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, vk::image_view* src, VkRenderPass render_pass);
+		void run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* fbo, const std::vector<vk::image_view*>& src, vk::renderpass_t* render_pass);
+		void run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, const std::vector<vk::image_view*>& src, vk::renderpass_t* render_pass);
+		void run(vk::command_buffer& cmd, const areau& viewport, vk::image* target, vk::image_view* src, vk::renderpass_t* render_pass);
 	};
 
 	struct ui_overlay_renderer : public overlay_pass
@@ -168,7 +169,7 @@ namespace vk
 
 		void emit_geometry(vk::command_buffer& cmd) override;
 
-		void run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* target, VkRenderPass render_pass,
+		void run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* target, vk::renderpass_t* render_pass,
 				vk::data_heap& upload_heap, rsx::overlays::overlay& ui);
 	};
 
@@ -186,7 +187,7 @@ namespace vk
 
 		void set_up_viewport(vk::command_buffer& cmd, u32 x, u32 y, u32 w, u32 h) override;
 
-		void run(vk::command_buffer& cmd, vk::framebuffer* target, VkRect2D rect, u32 clearmask, color4f color, VkRenderPass render_pass);
+		void run(vk::command_buffer& cmd, vk::framebuffer* target, VkRect2D rect, u32 clearmask, color4f color, vk::renderpass_t* render_pass);
 	};
 
 	struct stencil_clear_pass : public overlay_pass
@@ -197,7 +198,7 @@ namespace vk
 
 		void set_up_viewport(vk::command_buffer& cmd, u32 x, u32 y, u32 w, u32 h) override;
 
-		void run(vk::command_buffer& cmd, vk::render_target* target, VkRect2D rect, u32 stencil_clear, u32 stencil_write_mask, VkRenderPass render_pass);
+		void run(vk::command_buffer& cmd, vk::render_target* target, VkRect2D rect, u32 stencil_clear, u32 stencil_write_mask, vk::renderpass_t* render_pass);
 	};
 
 	struct video_out_calibration_pass : public overlay_pass
@@ -223,7 +224,7 @@ namespace vk
 		void update_uniforms(vk::command_buffer& cmd, vk::glsl::program* /*program*/) override;
 
 		void run(vk::command_buffer& cmd, const areau& viewport, vk::framebuffer* target,
-			const rsx::simple_array<vk::viewable_image*>& src, f32 gamma, bool limited_rgb, bool _3d, VkRenderPass render_pass);
+			const rsx::simple_array<vk::viewable_image*>& src, f32 gamma, bool limited_rgb, bool _3d, vk::renderpass_t* render_pass);
 	};
 
 	// TODO: Replace with a proper manager

@@ -8,16 +8,16 @@ namespace vk
 {
 	struct active_renderpass_info_t
 	{
-		VkRenderPass pass = VK_NULL_HANDLE;
-		VkFramebuffer fbo = VK_NULL_HANDLE;
+		renderpass_t* pass = nullptr;
+		const framebuffer* fbo = nullptr;
 	};
 
 	atomic_t<u64> g_cached_renderpass_key = 0;
-	VkRenderPass  g_cached_renderpass = VK_NULL_HANDLE;
-	std::unordered_map<VkCommandBuffer, active_renderpass_info_t>  g_current_renderpass;
+	renderpass_t*  g_cached_renderpass = VK_NULL_HANDLE;
+	std::unordered_map<VkCommandBuffer, active_renderpass_info_t> g_current_renderpass;
 
 	shared_mutex g_renderpass_cache_mutex;
-	std::unordered_map<u64, VkRenderPass> g_renderpass_cache;
+	std::unordered_map<u64, std::unique_ptr<renderpass_t>> g_renderpass_cache;
 
 	// Key structure
 	// 0-7 color_format
@@ -167,6 +167,23 @@ namespace vk
 		}
 	};
 
+	VkRect2D coordu_to_rect(const coordu& coords)
+	{
+		return
+		{
+			.offset
+			{
+				.x = static_cast<s32>(coords.x),
+				.y = static_cast<s32>(coords.y)
+			},
+			.extent
+			{
+				.width = coords.width,
+				.height = coords.height
+			}
+		};
+	}
+
 	u64 get_renderpass_key(const std::vector<vk::image*>& images, const std::vector<u8>& input_attachment_ids)
 	{
 		renderpass_key_blob key(0);
@@ -224,28 +241,8 @@ namespace vk
 		return key.encoded;
 	}
 
-	VkRenderPass get_renderpass(VkDevice dev, u64 renderpass_key)
+	std::unique_ptr<renderpass_static> build_classic_renderpass(const render_device* pdev, u64 renderpass_key)
 	{
-		// 99.999% of checks will go through this block once on-disk shader cache has loaded
-		{
-			reader_lock lock(g_renderpass_cache_mutex);
-
-			auto found = g_renderpass_cache.find(renderpass_key);
-			if (found != g_renderpass_cache.end())
-			{
-				return found->second;
-			}
-		}
-
-		std::lock_guard lock(g_renderpass_cache_mutex);
-
-		// Check again
-		auto found = g_renderpass_cache.find(renderpass_key);
-		if (found != g_renderpass_cache.end())
-		{
-			return found->second;
-		}
-
 		// Decode
 		renderpass_key_blob key(renderpass_key);
 		VkSampleCountFlagBits samples = static_cast<VkSampleCountFlagBits>(key.sample_count);
@@ -318,14 +315,48 @@ namespace vk
 		rp_info.subpassCount = 1;
 		rp_info.pSubpasses = &subpass;
 
-		VkRenderPass result;
-		CHECK_RESULT(vkCreateRenderPass(dev, &rp_info, NULL, &result));
+		return std::make_unique<renderpass_static>(pdev, rp_info);
+	}
 
-		g_renderpass_cache[renderpass_key] = result;
+	renderpass_t* get_renderpass(const render_device* pdev, u64 renderpass_key)
+	{
+		// 99.999% of checks will go through this block once on-disk shader cache has loaded
+		{
+			reader_lock lock(g_renderpass_cache_mutex);
+
+			auto found = g_renderpass_cache.find(renderpass_key);
+			if (found != g_renderpass_cache.end())
+			{
+				return found->second.get();
+			}
+		}
+
+		std::lock_guard lock(g_renderpass_cache_mutex);
+
+		// Check again
+		auto found = g_renderpass_cache.find(renderpass_key);
+		if (found != g_renderpass_cache.end())
+		{
+			return found->second.get();
+		}
+
+		std::unique_ptr<renderpass_t> rp;
+		
+		if (pdev->get_dynamic_rendering_support())
+		{
+			rp = std::make_unique<renderpass_dynamic>();
+		}
+		else
+		{
+			rp = build_classic_renderpass(pdev, renderpass_key);
+		}
+
+		auto result = rp.get();
+		g_renderpass_cache[renderpass_key] = std::move(rp);
 		return result;
 	}
 
-	void clear_renderpass_cache(VkDevice dev)
+	void clear_renderpass_cache(const render_device* /*pdev*/)
 	{
 		// Wipe current status
 		g_cached_renderpass_key = 0;
@@ -333,15 +364,10 @@ namespace vk
 		g_current_renderpass.clear();
 
 		// Destroy cache
-		for (const auto &renderpass : g_renderpass_cache)
-		{
-			vkDestroyRenderPass(dev, renderpass.second, nullptr);
-		}
-
 		g_renderpass_cache.clear();
 	}
 
-	void begin_renderpass(VkCommandBuffer cmd, VkRenderPass pass, VkFramebuffer target, const coordu& framebuffer_region)
+	void begin_renderpass(VkCommandBuffer cmd, renderpass_t* pass, const framebuffer* target, const coordu& framebuffer_region)
 	{
 		auto& renderpass_info = g_current_renderpass[cmd];
 		if (renderpass_info.pass == pass && renderpass_info.fbo == target)
@@ -353,24 +379,15 @@ namespace vk
 			end_renderpass(cmd);
 		}
 
-		VkRenderPassBeginInfo rp_begin = {};
-		rp_begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		rp_begin.renderPass = pass;
-		rp_begin.framebuffer = target;
-		rp_begin.renderArea.offset.x = static_cast<s32>(framebuffer_region.x);
-		rp_begin.renderArea.offset.y = static_cast<s32>(framebuffer_region.y);
-		rp_begin.renderArea.extent.width = framebuffer_region.width;
-		rp_begin.renderArea.extent.height = framebuffer_region.height;
-
-		vkCmdBeginRenderPass(cmd, &rp_begin, VK_SUBPASS_CONTENTS_INLINE);
+		pass->begin(cmd, *target, coordu_to_rect(framebuffer_region));
 		renderpass_info = { pass, target };
 	}
 
-	void begin_renderpass(VkDevice dev, VkCommandBuffer cmd, u64 renderpass_key, VkFramebuffer target, const coordu& framebuffer_region)
+	void begin_renderpass(const render_device* pdev, VkCommandBuffer cmd, u64 renderpass_key, const framebuffer* target, const coordu& framebuffer_region)
 	{
 		if (renderpass_key != g_cached_renderpass_key)
 		{
-			g_cached_renderpass = get_renderpass(dev, renderpass_key);
+			g_cached_renderpass = get_renderpass(pdev, renderpass_key);
 			g_cached_renderpass_key = renderpass_key;
 		}
 
@@ -379,13 +396,14 @@ namespace vk
 
 	void end_renderpass(VkCommandBuffer cmd)
 	{
-		vkCmdEndRenderPass(cmd);
-		g_current_renderpass[cmd] = {};
+		auto& renderpass_info = g_current_renderpass[cmd];
+		renderpass_info.pass->end(cmd);
+		renderpass_info = {};
 	}
 
 	bool is_renderpass_open(VkCommandBuffer cmd)
 	{
-		return g_current_renderpass[cmd].pass != VK_NULL_HANDLE;
+		return g_current_renderpass[cmd].pass != nullptr;
 	}
 
 	void renderpass_op(VkCommandBuffer cmd, const renderpass_op_callback_t& op)

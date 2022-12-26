@@ -230,9 +230,9 @@ namespace vk
 		return fs;
 	}
 
-	std::pair<VkDescriptorSetLayout, VkPipelineLayout> shader_interpreter::create_layout(VkDevice dev)
+	std::pair<VkDescriptorSetLayout, VkPipelineLayout> shader_interpreter::create_layout(const vk::render_device& dev)
 	{
-		const auto& binding_table = vk::get_current_renderer()->get_pipeline_binding_table();
+		const auto& binding_table = dev.get_pipeline_binding_table();
 		std::vector<VkDescriptorSetLayoutBinding> bindings(binding_table.total_descriptor_bindings);
 
 		u32 idx = 0;
@@ -389,7 +389,7 @@ namespace vk
 
 	void shader_interpreter::init(const vk::render_device& dev)
 	{
-		m_device = dev;
+		m_device = &dev;
 		std::tie(m_shared_descriptor_layout, m_shared_pipeline_layout) = create_layout(dev);
 		create_descriptor_pools(dev);
 
@@ -412,13 +412,13 @@ namespace vk
 
 		if (m_shared_pipeline_layout)
 		{
-			vkDestroyPipelineLayout(m_device, m_shared_pipeline_layout, nullptr);
+			vkDestroyPipelineLayout(*m_device, m_shared_pipeline_layout, nullptr);
 			m_shared_pipeline_layout = VK_NULL_HANDLE;
 		}
 
 		if (m_shared_descriptor_layout)
 		{
-			vkDestroyDescriptorSetLayout(m_device, m_shared_descriptor_layout, nullptr);
+			vkDestroyDescriptorSetLayout(*m_device, m_shared_descriptor_layout, nullptr);
 			m_shared_descriptor_layout = VK_NULL_HANDLE;
 		}
 	}
@@ -500,7 +500,7 @@ namespace vk
 		info.layout = m_shared_pipeline_layout;
 		info.basePipelineIndex = -1;
 		info.basePipelineHandle = VK_NULL_HANDLE;
-		info.renderPass = vk::get_renderpass(m_device, properties.renderpass_key);
+		info.renderPass = vk::get_renderpass(m_device, properties.renderpass_key)->get();
 
 		auto compiler = vk::get_pipe_compiler();
 		auto program = compiler->compile(info, m_shared_pipeline_layout, vk::pipe_compiler::COMPILE_INLINE, {}, m_vs_inputs, m_fs_inputs);
@@ -531,7 +531,7 @@ namespace vk
 		alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
 
 		VkDescriptorSet new_descriptor_set;
-		CHECK_RESULT(vkAllocateDescriptorSets(m_device, &alloc_info, &new_descriptor_set));
+		CHECK_RESULT(vkAllocateDescriptorSets(*m_device, &alloc_info, &new_descriptor_set));
 
 		m_used_descriptors++;
 		return new_descriptor_set;

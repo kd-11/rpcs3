@@ -72,6 +72,9 @@
     <ClCompile Include="Emu\RSX\VK\upscalers\fsr1\fsr_pass.cpp">
       <Filter>upscalers\fsr1</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\VK\vkutils\renderpass.cpp">
+      <Filter>vkutils</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Emu\RSX\VK\VKCommonDecompiler.h" />
@@ -168,6 +171,9 @@
       <Filter>upscalers</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\VK\VKGSRenderTypes.hpp" />
+    <ClInclude Include="Emu\RSX\VK\vkutils\renderpass.h">
+      <Filter>vkutils</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="vkutils">

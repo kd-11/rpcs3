@@ -162,7 +162,7 @@ namespace vk
 		info.layout = pipe_layout;
 		info.basePipelineIndex = -1;
 		info.basePipelineHandle = VK_NULL_HANDLE;
-		info.renderPass = vk::get_renderpass(*m_device, create_info.renderpass_key);
+		info.renderPass = vk::get_renderpass(m_device, create_info.renderpass_key)->get();
 
 		return int_compile_graphics_pipe(info, pipe_layout, vs_inputs, fs_inputs);
 	}

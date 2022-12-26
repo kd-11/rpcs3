@@ -106,7 +106,7 @@ void VKGSRender::begin_render_pass()
 	vk::begin_renderpass(
 		*m_current_command_buffer,
 		get_render_pass(),
-		m_draw_fbo->value,
+		m_draw_fbo,
 		{ positionu{0u, 0u}, sizeu{m_draw_fbo->width(), m_draw_fbo->height()} });
 }
 
@@ -115,11 +115,11 @@ void VKGSRender::close_render_pass()
 	vk::end_renderpass(*m_current_command_buffer);
 }
 
-VkRenderPass VKGSRender::get_render_pass()
+vk::renderpass_t* VKGSRender::get_render_pass()
 {
 	if (!m_cached_renderpass)
 	{
-		m_cached_renderpass = vk::get_renderpass(*m_device, m_current_renderpass_key);
+		m_cached_renderpass = vk::get_renderpass(m_device, m_current_renderpass_key);
 	}
 
 	return m_cached_renderpass;
@@ -831,9 +831,9 @@ void VKGSRender::emit_geometry(u32 sub_index)
 	}
 
 	bool reload_state = (!m_current_draw.subdraw_id++);
-	vk::renderpass_op(*m_current_command_buffer, [&](VkCommandBuffer cmd, VkRenderPass pass, VkFramebuffer fbo)
+	vk::renderpass_op(*m_current_command_buffer, [&](VkCommandBuffer cmd, vk::renderpass_t* pass, const vk::framebuffer* fbo)
 	{
-		if (get_render_pass() == pass && m_draw_fbo->value == fbo)
+		if (get_render_pass() == pass && m_draw_fbo->value == fbo->value)
 		{
 			// Nothing to do
 			return;

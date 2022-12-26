@@ -15,6 +15,7 @@ namespace vk
 		std::vector<std::unique_ptr<vk::image_view>> attachments;
 		u32 m_width = 0;
 		u32 m_height = 0;
+		VkImageAspectFlags aspect_flags = 0;
 
 	public:
 		framebuffer(VkDevice dev, VkRenderPass pass, u32 width, u32 height, std::vector<std::unique_ptr<vk::image_view>>&& atts)
@@ -26,6 +27,7 @@ namespace vk
 			for (const auto& att : attachments)
 			{
 				image_view_array[i++] = att->value;
+				aspect_flags |= att->image()->aspect();
 			}
 
 			info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;

@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "renderpass.h"
+#include "image_helpers.h"
 
 namespace vk
 {
@@ -31,11 +32,11 @@ namespace vk
 		vkCmdEndRenderPass(cmd);
 	}
 
-	renderpass_dynamic::renderpass_dynamic()
+	renderpass_dynamic::renderpass_dynamic(const vk::render_device* pdev)
+		: m_device(pdev)
 	{
 		m_render_info.sType = VK_STRUCTURE_TYPE_RENDERING_INFO_KHR;
 		m_render_info.layerCount = 1;
-		m_render_info.viewMask = 0;
 
 		auto prep_attachment = [](VkRenderingAttachmentInfoKHR& att)
 		{
@@ -87,24 +88,27 @@ namespace vk
 		for (const auto& att : fbo.attachments)
 		{
 			const auto rsc = att->image();
-			if (rsc->aspect() == VK_IMAGE_ASPECT_COLOR_BIT)
+			const auto aspect = rsc ? rsc->aspect() : vk::get_aspect_flags(att->info.format);
+			const auto layout = rsc ? rsc->current_layout : (aspect == VK_IMAGE_ASPECT_COLOR_BIT ? VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+			if (aspect == VK_IMAGE_ASPECT_COLOR_BIT)
 			{
 				auto& info = m_color_attachment_info[color_index++];
 				info.imageView = att->value;
-				info.imageLayout = att->image()->current_layout;
+				info.imageLayout = layout;
 			}
 			else
 			{
 				m_depth_stencil_attachment_info.imageView = att->value;
-				m_depth_stencil_attachment_info.imageLayout = rsc->current_layout;
+				m_depth_stencil_attachment_info.imageLayout = layout;
 			}
 		}
 
-		vkCmdBeginRendering(cmd, &m_render_info);
+		m_device->vk1_3._vkCmdBeginRenderingKHR(cmd, &m_render_info);
 	}
 
 	void renderpass_dynamic::end(VkCommandBuffer cmd)
 	{
-		vkCmdEndRendering(cmd);
+		m_device->vk1_3._vkCmdEndRenderingKHR(cmd);
 	}
 }

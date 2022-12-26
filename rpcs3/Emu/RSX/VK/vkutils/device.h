@@ -38,7 +38,7 @@ namespace vk
 		u64 host_visible_total_bytes;
 		u64 device_bar_total_bytes;
 
-		PFN_vkGetMemoryHostPointerPropertiesEXT _vkGetMemoryHostPointerPropertiesEXT;
+		DECLARE_VKAPI_FUNC(vkGetMemoryHostPointerPropertiesEXT);
 	};
 
 	class physical_device
@@ -117,11 +117,22 @@ namespace vk
 
 	public:
 		// Exported device endpoints
-		PFN_vkCmdBeginConditionalRenderingEXT _vkCmdBeginConditionalRenderingEXT = nullptr;
-		PFN_vkCmdEndConditionalRenderingEXT _vkCmdEndConditionalRenderingEXT = nullptr;
-		PFN_vkSetDebugUtilsObjectNameEXT _vkSetDebugUtilsObjectNameEXT = nullptr;
-		PFN_vkQueueInsertDebugUtilsLabelEXT _vkQueueInsertDebugUtilsLabelEXT = nullptr;
-		PFN_vkCmdInsertDebugUtilsLabelEXT _vkCmdInsertDebugUtilsLabelEXT = nullptr;
+		struct
+		{
+			DECLARE_VKAPI_FUNC(vkCmdBeginConditionalRenderingEXT);
+			DECLARE_VKAPI_FUNC(vkCmdEndConditionalRenderingEXT);
+			DECLARE_VKAPI_FUNC(vkSetDebugUtilsObjectNameEXT);
+			DECLARE_VKAPI_FUNC(vkQueueInsertDebugUtilsLabelEXT);
+			DECLARE_VKAPI_FUNC(vkCmdInsertDebugUtilsLabelEXT);
+		}
+		ext;
+
+		struct
+		{
+			DECLARE_VKAPI_FUNC(vkCmdBeginRenderingKHR);
+			DECLARE_VKAPI_FUNC(vkCmdEndRenderingKHR);
+		}
+		vk1_3;
 
 	public:
 		render_device() = default;

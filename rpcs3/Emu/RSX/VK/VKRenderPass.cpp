@@ -344,7 +344,7 @@ namespace vk
 		
 		if (pdev->get_dynamic_rendering_support())
 		{
-			rp = std::make_unique<renderpass_dynamic>();
+			rp = std::make_unique<renderpass_dynamic>(pdev);
 		}
 		else
 		{

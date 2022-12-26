@@ -59,8 +59,8 @@ namespace vk
 		VkInstance m_instance = VK_NULL_HANDLE;
 		VkSurfaceKHR m_surface = VK_NULL_HANDLE;
 
-		PFN_vkDestroyDebugReportCallbackEXT _vkDestroyDebugReportCallback = nullptr;
-		PFN_vkCreateDebugReportCallbackEXT _vkCreateDebugReportCallback = nullptr;
+		DECLARE_VKAPI_FUNC(vkDestroyDebugReportCallbackEXT);
+		DECLARE_VKAPI_FUNC(vkCreateDebugReportCallbackEXT);
 		VkDebugReportCallbackEXT m_debugger = nullptr;
 
 		bool extensions_loaded = false;
@@ -83,7 +83,7 @@ namespace vk
 
 			if (m_debugger)
 			{
-				_vkDestroyDebugReportCallback(m_instance, m_debugger, nullptr);
+				_vkDestroyDebugReportCallbackEXT(m_instance, m_debugger, nullptr);
 				m_debugger = nullptr;
 			}
 
@@ -102,16 +102,15 @@ namespace vk
 			if (!g_cfg.video.debug_output) return;
 
 			PFN_vkDebugReportCallbackEXT callback = vk::dbgFunc;
-
-			_vkCreateDebugReportCallback = reinterpret_cast<PFN_vkCreateDebugReportCallbackEXT>(vkGetInstanceProcAddr(m_instance, "vkCreateDebugReportCallbackEXT"));
-			_vkDestroyDebugReportCallback = reinterpret_cast<PFN_vkDestroyDebugReportCallbackEXT>(vkGetInstanceProcAddr(m_instance, "vkDestroyDebugReportCallbackEXT"));
+			VKAPI_INSTANCE_PROC_ADDR(m_instance, vkCreateDebugReportCallbackEXT);
+			VKAPI_INSTANCE_PROC_ADDR(m_instance, vkDestroyDebugReportCallbackEXT);
 
 			VkDebugReportCallbackCreateInfoEXT dbgCreateInfo = {};
 			dbgCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CREATE_INFO_EXT;
 			dbgCreateInfo.pfnCallback = callback;
 			dbgCreateInfo.flags = VK_DEBUG_REPORT_ERROR_BIT_EXT | VK_DEBUG_REPORT_WARNING_BIT_EXT;
 
-			CHECK_RESULT(_vkCreateDebugReportCallback(m_instance, &dbgCreateInfo, NULL, &m_debugger));
+			CHECK_RESULT(_vkCreateDebugReportCallbackEXT(m_instance, &dbgCreateInfo, NULL, &m_debugger));
 		}
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -231,7 +230,7 @@ namespace vk
 			// Register some global states
 			if (m_debugger)
 			{
-				_vkDestroyDebugReportCallback(m_instance, m_debugger, nullptr);
+				_vkDestroyDebugReportCallbackEXT(m_instance, m_debugger, nullptr);
 				m_debugger = nullptr;
 			}
 

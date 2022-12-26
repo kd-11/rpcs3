@@ -81,8 +81,10 @@ namespace vk
 				features2.pNext              = &dynamic_rendering_info;
 			}
 
-			auto _vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceFeatures2KHR"));
-			ensure(_vkGetPhysicalDeviceFeatures2KHR); // "vkGetInstanceProcAddress failed to find entry point!"
+			DECLARE_VKAPI_FUNC(vkGetPhysicalDeviceFeatures2KHR);
+			VKAPI_INSTANCE_PROC_ADDR(parent, vkGetPhysicalDeviceFeatures2KHR);
+
+			ensure(_vkGetPhysicalDeviceFeatures2KHR);
 			_vkGetPhysicalDeviceFeatures2KHR(dev, &features2);
 
 			shader_types_support.allow_float64 = !!features2.features.shaderFloat64;
@@ -480,6 +482,10 @@ namespace vk
 
 		if (pgpu->dynamic_rendering_support)
 		{
+			requested_extensions.push_back(VK_KHR_MAINTENANCE2_EXTENSION_NAME);
+			requested_extensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+			requested_extensions.push_back(VK_KHR_CREATE_RENDERPASS_2_EXTENSION_NAME);
+			requested_extensions.push_back(VK_KHR_DEPTH_STENCIL_RESOLVE_EXTENSION_NAME);
 			requested_extensions.push_back(VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME);
 		}
 
@@ -689,15 +695,21 @@ namespace vk
 		// Import optional function endpoints
 		if (pgpu->conditional_render_support)
 		{
-			_vkCmdBeginConditionalRenderingEXT = reinterpret_cast<PFN_vkCmdBeginConditionalRenderingEXT>(vkGetDeviceProcAddr(dev, "vkCmdBeginConditionalRenderingEXT"));
-			_vkCmdEndConditionalRenderingEXT = reinterpret_cast<PFN_vkCmdEndConditionalRenderingEXT>(vkGetDeviceProcAddr(dev, "vkCmdEndConditionalRenderingEXT"));
+			VKAPI_PROC_ADDR(ext, dev, vkCmdBeginConditionalRenderingEXT);
+			VKAPI_PROC_ADDR(ext, dev, vkCmdEndConditionalRenderingEXT);
 		}
 
 		if (pgpu->debug_utils_support)
 		{
-			_vkSetDebugUtilsObjectNameEXT = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(vkGetDeviceProcAddr(dev, "vkSetDebugUtilsObjectNameEXT"));
-			_vkQueueInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkQueueInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(dev, "vkQueueInsertDebugUtilsLabelEXT"));
-			_vkCmdInsertDebugUtilsLabelEXT = reinterpret_cast<PFN_vkCmdInsertDebugUtilsLabelEXT>(vkGetDeviceProcAddr(dev, "vkCmdInsertDebugUtilsLabelEXT"));
+			VKAPI_PROC_ADDR(ext, dev, vkSetDebugUtilsObjectNameEXT);
+			VKAPI_PROC_ADDR(ext, dev, vkQueueInsertDebugUtilsLabelEXT);
+			VKAPI_PROC_ADDR(ext, dev, vkCmdInsertDebugUtilsLabelEXT);
+		}
+
+		if (pgpu->dynamic_rendering_support)
+		{
+			VKAPI_PROC_ADDR(vk1_3, dev, vkCmdBeginRenderingKHR);
+			VKAPI_PROC_ADDR(vk1_3, dev, vkCmdEndRenderingKHR);
 		}
 
 		memory_map = vk::get_memory_mapping(pdev);
@@ -706,7 +718,7 @@ namespace vk
 
 		if (pgpu->external_memory_host_support)
 		{
-			memory_map._vkGetMemoryHostPointerPropertiesEXT = reinterpret_cast<PFN_vkGetMemoryHostPointerPropertiesEXT>(vkGetDeviceProcAddr(dev, "vkGetMemoryHostPointerPropertiesEXT"));
+			VKAPI_PROC_ADDR(memory_map, dev, vkGetMemoryHostPointerPropertiesEXT);
 		}
 
 		if (g_cfg.video.disable_vulkan_mem_allocator)

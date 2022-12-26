@@ -20,6 +20,10 @@
 #pragma warning(pop)
 #endif
 
+#define DECLARE_VKAPI_FUNC(func) PFN_##func _##func = nullptr
+#define VKAPI_PROC_ADDR(object, dev, func) object._##func = reinterpret_cast<PFN_##func>(vkGetDeviceProcAddr(dev, #func))
+#define VKAPI_INSTANCE_PROC_ADDR(instance, func) _##func = reinterpret_cast<PFN_##func>(vkGetInstanceProcAddr(instance, #func))
+
 #include <util/types.hpp>
 
 #ifndef VK_EXT_attachment_feedback_loop_layout

@@ -474,26 +474,29 @@ namespace vk
 		VkSurfaceKHR m_surface = VK_NULL_HANDLE;
 		VkColorSpaceKHR m_color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
 		VkSwapchainKHR m_vk_swapchain = nullptr;
-
-		PFN_vkCreateSwapchainKHR _vkCreateSwapchainKHR = nullptr;
-		PFN_vkDestroySwapchainKHR _vkDestroySwapchainKHR = nullptr;
-		PFN_vkGetSwapchainImagesKHR _vkGetSwapchainImagesKHR = nullptr;
-		PFN_vkAcquireNextImageKHR _vkAcquireNextImageKHR = nullptr;
-		PFN_vkQueuePresentKHR _vkQueuePresentKHR = nullptr;
-
 		bool m_wm_reports_flag = false;
+
+		struct
+		{
+			DECLARE_VKAPI_FUNC(vkCreateSwapchainKHR);
+			DECLARE_VKAPI_FUNC(vkDestroySwapchainKHR);
+			DECLARE_VKAPI_FUNC(vkGetSwapchainImagesKHR);
+			DECLARE_VKAPI_FUNC(vkAcquireNextImageKHR);
+			DECLARE_VKAPI_FUNC(vkQueuePresentKHR);
+		}
+		wsi;
 
 	protected:
 		void init_swapchain_images(render_device& dev, u32 /*preferred_count*/ = 0) override
 		{
 			u32 nb_swap_images = 0;
-			_vkGetSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, nullptr);
+			wsi._vkGetSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, nullptr);
 
 			if (!nb_swap_images) fmt::throw_exception("Driver returned 0 images for swapchain");
 
 			std::vector<VkImage> vk_images;
 			vk_images.resize(nb_swap_images);
-			_vkGetSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, vk_images.data());
+			wsi._vkGetSwapchainImagesKHR(dev, m_vk_swapchain, &nb_swap_images, vk_images.data());
 
 			swapchain_images.resize(nb_swap_images);
 			for (u32 i = 0; i < nb_swap_images; ++i)
@@ -506,11 +509,11 @@ namespace vk
 		swapchain_WSI(vk::physical_device& gpu, u32 present_queue, u32 graphics_queue, u32 transfer_queue, VkFormat format, VkSurfaceKHR surface, VkColorSpaceKHR color_space, bool force_wm_reporting_off)
 			: WSI_swapchain_base(gpu, present_queue, graphics_queue, transfer_queue, format)
 		{
-			_vkCreateSwapchainKHR = reinterpret_cast<PFN_vkCreateSwapchainKHR>(vkGetDeviceProcAddr(dev, "vkCreateSwapchainKHR"));
-			_vkDestroySwapchainKHR = reinterpret_cast<PFN_vkDestroySwapchainKHR>(vkGetDeviceProcAddr(dev, "vkDestroySwapchainKHR"));
-			_vkGetSwapchainImagesKHR = reinterpret_cast<PFN_vkGetSwapchainImagesKHR>(vkGetDeviceProcAddr(dev, "vkGetSwapchainImagesKHR"));
-			_vkAcquireNextImageKHR = reinterpret_cast<PFN_vkAcquireNextImageKHR>(vkGetDeviceProcAddr(dev, "vkAcquireNextImageKHR"));
-			_vkQueuePresentKHR = reinterpret_cast<PFN_vkQueuePresentKHR>(vkGetDeviceProcAddr(dev, "vkQueuePresentKHR"));
+			VKAPI_PROC_ADDR(wsi, dev, vkCreateSwapchainKHR);
+			VKAPI_PROC_ADDR(wsi, dev, vkDestroySwapchainKHR);
+			VKAPI_PROC_ADDR(wsi, dev, vkGetSwapchainImagesKHR);
+			VKAPI_PROC_ADDR(wsi, dev, vkAcquireNextImageKHR);
+			VKAPI_PROC_ADDR(wsi, dev, vkQueuePresentKHR);
 
 			m_surface = surface;
 			m_color_space = color_space;
@@ -545,7 +548,7 @@ namespace vk
 			{
 				if (m_vk_swapchain)
 				{
-					_vkDestroySwapchainKHR(pdev, m_vk_swapchain, nullptr);
+					wsi._vkDestroySwapchainKHR(pdev, m_vk_swapchain, nullptr);
 				}
 
 				dev.destroy();
@@ -725,7 +728,7 @@ namespace vk
 			rsx_log.notice("Swapchain: requesting full screen exclusive mode %d.", static_cast<int>(full_screen_exclusive_info.fullScreenExclusive));
 	#endif
 
-			_vkCreateSwapchainKHR(dev, &swap_info, nullptr, &m_vk_swapchain);
+			wsi._vkCreateSwapchainKHR(dev, &swap_info, nullptr, &m_vk_swapchain);
 
 			if (old_swapchain)
 			{
@@ -734,7 +737,7 @@ namespace vk
 					swapchain_images.clear();
 				}
 
-				_vkDestroySwapchainKHR(dev, old_swapchain, nullptr);
+				wsi._vkDestroySwapchainKHR(dev, old_swapchain, nullptr);
 			}
 
 			init_swapchain_images(dev);
@@ -770,7 +773,7 @@ namespace vk
 				present.pWaitSemaphores = &semaphore;
 			}
 
-			return _vkQueuePresentKHR(dev.get_present_queue(), &present);
+			return wsi._vkQueuePresentKHR(dev.get_present_queue(), &present);
 		}
 
 		VkImage get_image(u32 index) override

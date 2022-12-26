@@ -34,12 +34,13 @@ namespace vk
 
 	class renderpass_dynamic : public renderpass_t
 	{
+		const vk::render_device* m_device = nullptr;
 		VkRenderingInfoKHR m_render_info{};
 		std::array<VkRenderingAttachmentInfoKHR, 4> m_color_attachment_info{{}};
 		VkRenderingAttachmentInfoKHR m_depth_stencil_attachment_info{};
 
 	public:
-		renderpass_dynamic();
+		renderpass_dynamic(const vk::render_device* pdev);
 		~renderpass_dynamic();
 
 		void begin(VkCommandBuffer cmd, const framebuffer& fbo, const VkRect2D& viewport) override;

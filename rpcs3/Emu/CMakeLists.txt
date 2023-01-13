@@ -180,6 +180,7 @@ target_sources(rpcs3_emu PRIVATE
     Cell/SPUDisAsm.cpp
     Cell/SPUInterpreter.cpp
     Cell/SPURecompiler.cpp
+    Cell/SPUSPVRecompiler.cpp
     Cell/SPUThread.cpp
     Cell/lv2/lv2.cpp
     Cell/lv2/sys_bdemu.cpp

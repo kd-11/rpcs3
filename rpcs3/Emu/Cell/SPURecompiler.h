@@ -339,4 +339,6 @@ public:
 
 	// Create recompiler instance (interpreter-based LLVM)
 	static std::unique_ptr<spu_recompiler_base> make_fast_llvm_recompiler();
+
+	static std::unique_ptr<spu_recompiler_base> make_spv_recompiler();
 };

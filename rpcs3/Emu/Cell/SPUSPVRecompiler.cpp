@@ -20,6 +20,7 @@ void spv_recompiler::init()
 
 spu_function_t spv_recompiler::compile(spu_program&&)
 {
+	return nullptr;
 }
 
 void spv_recompiler::UNK(spu_opcode_t op)

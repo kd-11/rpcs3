@@ -10,6 +10,18 @@ const auto println = [](const char* s) {
 	printf("<<%s>>\n", s);
 };
 
+spv_recompiler::spv_recompiler()
+{
+}
+
+void spv_recompiler::init()
+{
+}
+
+spu_function_t spv_recompiler::compile(spu_program&&)
+{
+}
+
 void spv_recompiler::UNK(spu_opcode_t op)
 {
 	println("UNK");

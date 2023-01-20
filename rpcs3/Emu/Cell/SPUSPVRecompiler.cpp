@@ -1,14 +1,29 @@
 #include "stdafx.h"
 #include "SPUSPVRecompiler.h"
 
+#include "Emu/IdManager.h"
+#include "Emu/system_config.h"
+#include "Crypto/sha1.h"
+
+namespace
+{
+	const spu_decoder<spv_recompiler> s_spu_decoder;
+
+	const auto println = [](const char* s)
+	{
+		printf("<<%s>>\n", s);
+	};
+
+	void spu_spv_entry(spu_thread& /*thread*/, void* /*compiled function*/, u8*)
+	{
+		println("SPV function executed");
+	}
+}
+
 std::unique_ptr<spu_recompiler_base> spu_recompiler_base::make_spv_recompiler()
 {
 	return std::make_unique<spv_recompiler>();
 }
-
-const auto println = [](const char* s) {
-	printf("<<%s>>\n", s);
-};
 
 spv_recompiler::spv_recompiler()
 {
@@ -18,9 +33,169 @@ void spv_recompiler::init()
 {
 }
 
-spu_function_t spv_recompiler::compile(spu_program&&)
+spu_function_t spv_recompiler::compile(spu_program&& _func)
 {
-	return nullptr;
+	const u32 start0 = _func.entry_point;
+
+	const auto add_loc = m_spurt->add_empty(std::move(_func));
+
+	if (!add_loc)
+	{
+		return nullptr;
+	}
+
+	if (add_loc->compiled)
+	{
+		return add_loc->compiled;
+	}
+
+	const spu_program& func = add_loc->data;
+
+	if (func.entry_point != start0)
+	{
+		// Wait for the duplicate
+		while (!add_loc->compiled)
+		{
+			add_loc->compiled.wait(nullptr);
+		}
+
+		return add_loc->compiled;
+	}
+
+	if (auto& cache = g_fxo->get<spu_cache>(); cache && g_cfg.core.spu_cache && !add_loc->cached.exchange(1))
+	{
+		cache.add(func);
+	}
+
+	{
+		sha1_context ctx;
+		u8 output[20];
+
+		sha1_starts(&ctx);
+		sha1_update(&ctx, reinterpret_cast<const u8*>(func.data.data()), func.data.size() * 4);
+		sha1_finish(&ctx, output);
+
+		be_t<u64> hash_start;
+		std::memcpy(&hash_start, output, sizeof(hash_start));
+		m_hash_start = hash_start;
+	}
+
+	m_pos = func.lower_bound;
+	u32 m_base = func.entry_point;
+	m_size = ::size32(func.data) * 4;
+	const u32 start = m_pos;
+	const u32 end = start + m_size;
+
+	// Create block labels
+
+	// Get bit mask of valid code words for a given range (up to 128 bytes)
+	auto get_code_mask = [&](u32 starta, u32 enda) -> u32
+	{
+		u32 result = 0;
+
+		for (u32 addr = starta, m = 1; addr < enda && m; addr += 4, m <<= 1)
+		{
+			// Filter out if out of range, or is a hole
+			if (addr >= start && addr < end && func.data[(addr - start) / 4])
+			{
+				result |= m;
+			}
+		}
+
+		return result;
+	};
+
+	// Check code
+	u32 starta = start;
+
+	// Skip holes at the beginning (giga only)
+	for (u32 j = start; j < end; j += 4)
+	{
+		if (!func.data[(j - start) / 4])
+		{
+			starta += 4;
+		}
+		else
+		{
+			break;
+		}
+	}
+
+	// TODO - Init compiler state
+	// Clear registers, etc
+
+	if (m_pos != start)
+	{
+		// Jump to the entry point if necessary
+	}
+
+	for (u32 i = 0; i < func.data.size(); i++)
+	{
+		const u32 pos = start + i * 4;
+		const u32 op = std::bit_cast<be_t<u32>>(func.data[i]);
+
+		if (!op)
+		{
+			// Ignore hole
+			if (m_pos + 1)
+			{
+				spu_log.error("Unexpected fallthrough to 0x%x", pos);
+				// TODO
+				// branch_fixed(spu_branch_target(pos));
+				m_pos = -1;
+			}
+
+			continue;
+		}
+
+		// Update position
+		m_pos = pos;
+
+		// Bind instruction label if necessary
+		// const auto found = instr_labels.find(pos);
+
+		// Tracing
+		//c->lea(x86::r14, get_pc(m_pos));
+
+		// Execute recompiler function
+		(this->*s_spu_decoder.decode(op))({ op });
+	}
+
+	// Make fallthrough if necessary
+	if (m_pos + 1)
+	{
+		// TODO
+		// branch_fixed(spu_branch_target(end));
+	}
+
+	// Epilogue
+
+	// Build instruction dispatch table
+
+
+	// Compile and get function address
+	spu_function_t fn = reinterpret_cast<spu_function_t>(spu_spv_entry);
+	/*
+	spu_function_t fn = reinterpret_cast<spu_function_t>(m_asmrt._add(&code));
+
+	if (!fn)
+	{
+		spu_log.fatal("Failed to build a function");
+	}
+	else
+	{
+		jit_announce(fn, code.codeSize(), fmt::format("spu-b-%s", fmt::base57(be_t<u64>(m_hash_start))));
+	}*/
+
+	// Install compiled function pointer
+	const bool added = !add_loc->compiled && add_loc->compiled.compare_and_swap_test(nullptr, fn);
+
+	if (added)
+	{
+		add_loc->compiled.notify_all();
+	}
+
+	return fn;
 }
 
 void spv_recompiler::UNK(spu_opcode_t op)

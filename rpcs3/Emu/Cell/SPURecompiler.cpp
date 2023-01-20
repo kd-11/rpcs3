@@ -1769,7 +1769,11 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 	asm("ISB");
 	asm("DSB ISH");
 #endif
-	spu_runtime::g_tail_escape(&spu, func, nullptr);
+
+	if (g_cfg.core.spu_decoder != spu_decoder_type::asmjit)
+	{
+		spu_runtime::g_tail_escape(&spu, func, nullptr);
+	}
 }
 
 void spu_recompiler_base::branch(spu_thread& spu, void*, u8* rip)

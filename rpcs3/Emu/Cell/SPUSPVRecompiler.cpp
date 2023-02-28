@@ -5,13 +5,18 @@
 #include "Emu/system_config.h"
 #include "Crypto/sha1.h"
 
+#include <windows.h>
+#pragma optimize("", off)
+
 namespace
 {
 	const spu_decoder<spv_recompiler> s_spu_decoder;
 
 	const auto println = [](const char* s)
 	{
-		printf("<<%s>>\n", s);
+		char buf[512];
+		snprintf(buf, 512, "<<%s>>\n", s);
+		OutputDebugStringA(buf);
 	};
 
 	void spu_spv_entry(spu_thread& /*thread*/, void* /*compiled function*/, u8*)
@@ -31,6 +36,11 @@ spv_recompiler::spv_recompiler()
 
 void spv_recompiler::init()
 {
+	// Initialize if necessary
+	if (!m_spurt)
+	{
+		m_spurt = &g_fxo->get<spu_runtime>();
+	}
 }
 
 spu_function_t spv_recompiler::compile(spu_program&& _func)
@@ -240,7 +250,7 @@ void spv_recompiler::RCHCNT(spu_opcode_t op)
 
 void spv_recompiler::SF(spu_opcode_t op)
 {
-	println("SF");
+	c.v_subs(op.rt, op.rb, op.ra);
 }
 
 void spv_recompiler::OR(spu_opcode_t op)
@@ -595,7 +605,10 @@ void spv_recompiler::SHLQBII(spu_opcode_t op)
 
 void spv_recompiler::ROTQBYI(spu_opcode_t op)
 {
-	println("ROTQBYI");
+	const auto shift_distance = (op.i7 & 0xf);
+	c.v_shlsi(op.rt, op.ra, spv_constant::spread(shift_distance));
+	c.v_bfxsi(c.v_tmp0, op.ra, spv_constant::spread(32 - shift_distance));
+	c.v_ors(op.rt, c.v_tmp0, op.rt);
 }
 
 void spv_recompiler::ROTQMBYI(spu_opcode_t op)
@@ -950,7 +963,8 @@ void spv_recompiler::BRHNZ(spu_opcode_t op)
 
 void spv_recompiler::STQR(spu_opcode_t op)
 {
-	println("STQR");
+	const auto lsa = spu_ls_target(m_pos, op.i16);
+	c.v_storq(spv_constant::make_su(lsa), op.rt);
 }
 
 void spv_recompiler::BRA(spu_opcode_t op)
@@ -975,12 +989,27 @@ void spv_recompiler::BR(spu_opcode_t op)
 
 void spv_recompiler::FSMBI(spu_opcode_t op)
 {
-	println("FSMBI");
+	// Compile-time complexity, no need to micro-optimize the twiddle
+	u8 result[16];
+	for (int bit = 0; bit < 16; ++bit)
+	{
+		result[bit] = (op.i16 & (1 << bit)) ? 0xFF : 0;
+	}
+
+	c.v_movsi(op.rt, result);
 }
 
 void spv_recompiler::BRSL(spu_opcode_t op)
 {
-	println("BRSL");
+	const auto target = spu_branch_target(m_pos, op.i16);
+	c.v_movsi(op.rt, spv_constant::make_vi(static_cast<s32>(target)));
+	c.s_jmp(spv_constant::make_su(target));
+
+	if (target != m_pos + 4)
+	{
+		// Fall out
+		m_pos = -1;
+	}
 }
 
 void spv_recompiler::LQR(spu_opcode_t op)
@@ -990,7 +1019,8 @@ void spv_recompiler::LQR(spu_opcode_t op)
 
 void spv_recompiler::IL(spu_opcode_t op)
 {
-	println("IL");
+	const auto var = spv_constant::spread(op.si16);
+	c.v_movsi(op.rt, var);
 }
 
 void spv_recompiler::ILHU(spu_opcode_t op)
@@ -1010,7 +1040,8 @@ void spv_recompiler::IOHL(spu_opcode_t op)
 
 void spv_recompiler::ORI(spu_opcode_t op)
 {
-	println("ORI");
+	const auto var = spv_constant::spread(op.si10);
+	c.v_orsi(op.rt, op.ra, var);
 }
 
 void spv_recompiler::ORHI(spu_opcode_t op)
@@ -1050,7 +1081,7 @@ void spv_recompiler::ANDBI(spu_opcode_t op)
 
 void spv_recompiler::AI(spu_opcode_t op)
 {
-	println("AI");
+	c.v_addsi(op.rt, op.ra, spv_constant::spread(op.si10));
 }
 
 void spv_recompiler::AHI(spu_opcode_t op)
@@ -1060,7 +1091,12 @@ void spv_recompiler::AHI(spu_opcode_t op)
 
 void spv_recompiler::STQD(spu_opcode_t op)
 {
-	println("STQD");
+	const auto si10 = spv_constant::make_si(op.si10 * 16);
+	const auto address_mask = spv_constant::make_si(0x3fff0);
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_addsi(c.s_tmp0, c.s_tmp0, si10);
+	c.s_andsi(c.s_tmp0, c.s_tmp0, address_mask);
+	c.v_storq(c.s_tmp0, op.rt);
 }
 
 void spv_recompiler::LQD(spu_opcode_t op)
@@ -1135,7 +1171,8 @@ void spv_recompiler::MPYUI(spu_opcode_t op)
 
 void spv_recompiler::CEQI(spu_opcode_t op)
 {
-	println("CEQI");
+	const auto imm = spv_constant::spread(op.si10);
+	c.v_cmpeqsi(op.rt, op.ra, imm);
 }
 
 void spv_recompiler::CEQHI(spu_opcode_t op)
@@ -1165,12 +1202,16 @@ void spv_recompiler::HBRR(spu_opcode_t op)
 
 void spv_recompiler::ILA(spu_opcode_t op)
 {
-	println("ILA");
+	const auto var = spv_constant::spread(op.i18);
+	c.v_movsi(op.rt, var);
 }
 
 void spv_recompiler::SELB(spu_opcode_t op)
 {
-	println("SELB");
+	c.v_xorsi(c.v_tmp0, op.rc, spv_constant::spread(0));
+	c.v_ands(c.v_tmp1, op.rc, op.rb);
+	c.v_ands(c.v_tmp0, c.v_tmp0, op.ra);
+	c.v_ors(op.rt, c.v_tmp0, c.v_tmp1);
 }
 
 void spv_recompiler::SHUFB(spu_opcode_t op)

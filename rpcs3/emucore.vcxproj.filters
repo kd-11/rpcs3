@@ -1150,6 +1150,9 @@
     <ClCompile Include="Emu\games_config.cpp">
       <Filter>Emu</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\Cell\SPUSPVRecompiler.cpp">
+      <Filter>Emu\Cell</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">
@@ -2319,6 +2322,9 @@
     </ClInclude>
     <ClInclude Include="Emu\config_mode.h">
       <Filter>Emu</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Cell\SPUSPVRecompiler.h">
+      <Filter>Emu\Cell</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

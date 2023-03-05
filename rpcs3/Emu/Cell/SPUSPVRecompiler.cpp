@@ -1208,7 +1208,7 @@ void spv_recompiler::HBRR(spu_opcode_t op)
 
 void spv_recompiler::ILA(spu_opcode_t op)
 {
-	const auto var = spv_constant::spread(op.i18);
+	const auto var = spv_constant::spread(op.i18).as_vi();
 	c.v_movsi(op.rt, var);
 }
 
@@ -1368,13 +1368,13 @@ void spv_emitter::compile()
 		"#version 460\n"
 		"layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;\n"
 		"\n"
-		"layout(set=0, binding=0, std430) buffer local_storage{ vec4 lsa[16384]; }\n"
-		"layout(set=0, binding=1, std430) buffer register_file{ vec4 vgpr[128]; }\n"
-		"layout(set=0, binding=2, std430) buffer control_block{ uint lr; }\n"
+		"layout(set=0, binding=0, std430) buffer local_storage { ivec4 lsa[16384]; }\n"
+		"layout(set=0, binding=1, std430) buffer register_file { ivec4 vgpr[144]; }\n"
+		"layout(set=0, binding=2, std430) buffer control_block { int pc; }\n"
 		"\n"
 		"// Temp registers\n"
-		"ivec4 vgpri[2];\n"
-		"float sgpr[4];\n"
+		"vec4 vgprf[2];\n"
+		"int sgpr[4];\n"
 		"\n";
 
 	// TODO: Cache/mirror registers
@@ -1543,82 +1543,74 @@ void spv_emitter::compile()
 void spv_emitter::v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] + %s);\n",
-		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+		"vgpr[%d] = vgpr[%d] + %s;\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_subs(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
-		"vgpri[1] = floatBitsToInt(vgpr[%d]);\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] - vgpri[1]);\n",
-		op0.vgpr_index, op1.vgpr_index, dst.vgpr_index);
+		"vgpr[%d] = vgpr[%d] - vgpr[%d];\n",
+		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::s_addsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpri[0].x = floatBitsToInt(sgpr[%d]);\n"
-		"sgpr[%d] = intBitsToFloat(vgpri[0].x + %s);\n",
-		op0.sgpr_index, dst.sgpr_index, get_const_name(op1));
+		"sgpr[%d] = sgpr[%d] + %s;\n",
+		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_adds(spv::scalar_register_t dst, spv::scalar_register_t op0, spv::scalar_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpri[0].xy = floatBitsToInt(vec2(sgpr[%d], sgpr[%d]));\n"
-		"sgpr[%d] = intBitsToFloat(vgpri[0].x + vgpri[0].y);\n",
-		op0.sgpr_index, op1.sgpr_index, dst.sgpr_index);
+		"sgpr[%d] = sgpr[%d] + sgpr[%d];\n",
+		dst.sgpr_index, op0.sgpr_index, op1.sgpr_index);
 }
 
 // Comparison
 void spv_emitter::v_cmpeqsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
-		"vgpr[%d] = vec4(equal(vgpri[0], %s));\n",
-		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+		"vgpr[%d] = ivec4(equal(vgpr[%d], %s));\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 // Movs
 void spv_emitter::v_movsi(spv::vector_register_t dst, const spv::vector_const_t& src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = intBitsToFloat(%s);\n",
+		"vgpr[%d] = %s;\n",
 		dst.vgpr_index, get_const_name(src));
 }
 
 void spv_emitter::v_movfi(spv::vector_register_t dst, const spv::vector_const_t& src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = %s;\n",
+		"vgpr[%d] = floatBitsToInt(%s);\n",
 		dst.vgpr_index, get_const_name(src));
 }
 
 void spv_emitter::v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"lsa[floatBitsToUint(sgpr[%d]) / 4] = vgpr[%d];\n",
+		"lsa[sgpr[%d] >> 2] = vgpr[%d];\n",
 		lsa.sgpr_index, src_reg.vgpr_index);
 }
 
 void spv_emitter::v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"lsa[%s / 4] = vgpr[%d];\n",
-		get_const_name(lsa.as_u()), src_reg.vgpr_index);
+		"lsa[%s >> 2] = vgpr[%d];\n",
+		get_const_name(lsa), src_reg.vgpr_index);
 }
 
 // Bitwise
 void spv_emitter::v_ands(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
-		"vpgri[1] = floatBitsToInt(vgpr[%d];\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] & vgpri[1]);\n",
-		op0.vgpr_index, op1.vgpr_index, dst.vgpr_index);
+		"vgpr[%d] = vgpr[%d] & vgpr[%d];\n",
+		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1, const spv::scalar_const_t& op2)
@@ -1631,48 +1623,42 @@ void spv_emitter::v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0
 void spv_emitter::v_shlsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] << %s);\n",
-		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+		"vgpr[%d] = vgpr[%d] << %s;\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_shrsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] >> %s);\n",
-		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+		"vgpr[%d] = vgpr[%d] >> %s;\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_xorsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] ^ %s);\n",
-		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+		"vgpr[%d] = vgpr[%d] ^ %s;\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_orsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] | %s);\n",
-		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+		"vgpr[%d] = vgpr[%d] | %s;\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_ors(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
-		"vgpri[1] = floatBitsToInt(vgpr[%d];\n"
-		"vgpr[%d] = intBitsToFloat(vgpri[0] | vpgri[1]);\n",
-		op0.vgpr_index, op1.vgpr_index, dst.vgpr_index);
+		"vgpr[%d] = vgpr[%d] | vgpr[%d];\n",
+		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::s_andsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = intBitsToFloat(floatBitsToInt(sgpr[%d]) & %s);\n",
+		"sgpr[%d] = sgpr[%d] & %s;\n",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
@@ -1694,14 +1680,14 @@ void spv_emitter::s_ins(spv::vector_register_t dst, spv::scalar_register_t src, 
 void spv_emitter::s_jmp(const spv::scalar_const_t& target)
 {
 	m_block += fmt::format(
-		"lr = %s;\n",
+		"pc = %s;\n",
 		get_const_name(target.as_u()));
 }
 
 void spv_emitter::s_jmp(spv::scalar_register_t target)
 {
 	m_block += fmt::format(
-		"lr = floatBitsToUint(sgpr[%d]);\n",
+		"pc = sgpr[%d];\n",
 		target.sgpr_index);
 }
 

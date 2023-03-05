@@ -9,7 +9,7 @@ namespace spv
 {
 	enum class constant_type
 	{
-		FLOAT,
+		FLOAT = 0,
 		INT,
 		UINT,
 		HALF,
@@ -21,33 +21,82 @@ namespace spv
 
 	struct vector_const_t
 	{
-		union value
+		union
 		{
 			f32 f[4];
 			s32 i[4];
 			u32 u[4];
 			u16 h[8];
 			u8  b[16];
-		};
+		} value;
 
 		int m_width = 1;
 		constant_type m_type = constant_type::FLOAT;
 
-		vector_const_t(u8 data[16]);
+		vector_const_t() = default; // TODO
+
+		vector_const_t(u8 data[16])
+		{
+			std::memcpy(value.b, data, 16);
+		}
+
+		vector_const_t as_vf() const
+		{
+			vector_const_t copy = (*this);
+			copy.m_type = constant_type::FLOAT;
+			return copy;
+		}
+
+		vector_const_t as_vi() const
+		{
+			vector_const_t copy = (*this);
+			copy.m_type = constant_type::INT;
+			return copy;
+		}
+
+		vector_const_t as_vu() const
+		{
+			vector_const_t copy = (*this);
+			copy.m_type = constant_type::UINT;
+			return copy;
+		}
 	};
 
 	struct scalar_const_t
 	{
-		union value
+		union
 		{
 			f32 f;
 			s32 i;
 			u32 u;
 			u16 h;
 			u8  b;
-		};
+		} value;
 
 		constant_type m_type = constant_type::FLOAT;
+
+		scalar_const_t() = default; // TODO
+
+		scalar_const_t as_f() const
+		{
+			scalar_const_t copy = (*this);
+			copy.m_type = constant_type::FLOAT;
+			return copy;
+		}
+
+		scalar_const_t as_i() const
+		{
+			scalar_const_t copy = (*this);
+			copy.m_type = constant_type::INT;
+			return copy;
+		}
+
+		scalar_const_t as_u() const
+		{
+			scalar_const_t copy = (*this);
+			copy.m_type = constant_type::UINT;
+			return copy;
+		}
 	};
 
 	struct vector_register_t
@@ -64,45 +113,54 @@ namespace spv
 		vector_register_t(const bf_t<T, A, B>& raw)
 		{
 			const T index = raw;
-			reg_id = static_cast<int>(index);
+			vgpr_index = static_cast<int>(index);
 		}
 	};
 
 	struct scalar_register_t
 	{
+		int sgpr_index;
+
+		scalar_register_t(s32 reg_id) : sgpr_index(reg_id)
+		{}
 	};
 }
 
 namespace spv_constant
 {
-	static spv::vector_const_t make_vu(u32 x, u32 y = 0, u32 z = 0, u32 w = 0);
-	static spv::vector_const_t make_vi(s32 x, s32 y = 0, s32 z = 0, s32 w = 0);
-	static spv::vector_const_t make_vf(f32 x, f32 y = 0, f32 z = 0, f32 w = 0);
-	static spv::vector_const_t make_vh(u16 xl, u16 yl = 0, u16 zl = 0, u16 wl = 0, u16 xh = 0, u16 yh = 0, u16 zh = 0, u16 wh = 0);
+	spv::vector_const_t make_vu(u32 x, u32 y = 0, u32 z = 0, u32 w = 0);
+	spv::vector_const_t make_vi(s32 x, s32 y = 0, s32 z = 0, s32 w = 0);
+	spv::vector_const_t make_vf(f32 x, f32 y = 0, f32 z = 0, f32 w = 0);
+	spv::vector_const_t make_vh(u16 xl, u16 yl = 0, u16 zl = 0, u16 wl = 0, u16 xh = 0, u16 yh = 0, u16 zh = 0, u16 wh = 0);
 
-	static spv::scalar_const_t make_su(u32 x);
-	static spv::scalar_const_t make_si(s32 x);
-	static spv::scalar_const_t make_sf(f32 x);
-	static spv::scalar_const_t make_sh(u16 x);
+	spv::scalar_const_t make_su(u32 x);
+	spv::scalar_const_t make_si(s32 x);
+	spv::scalar_const_t make_sf(f32 x);
+	spv::scalar_const_t make_sh(u16 x);
 
-	static spv::vector_const_t spread(u32 imm);
-	static spv::vector_const_t spread(s32 imm);
-	static spv::vector_const_t spread(f32 imm);
-	static spv::vector_const_t spread(u16 imm);
+	spv::vector_const_t spread(u32 imm);
+	spv::vector_const_t spread(s32 imm);
+	spv::vector_const_t spread(f32 imm);
+	spv::vector_const_t spread(u16 imm);
 };
 
-struct spv_emitter
+class spv_emitter
 {
+public:
 	// Static register allocation
 	spv::vector_register_t v_tmp0 = 128;
 	spv::vector_register_t v_tmp1 = 129;
 	spv::vector_register_t v_tmp2 = 130;
 	spv::vector_register_t v_tmp3 = 131;
 
-	spv::scalar_register_t s_tmp0 = {};
-	spv::scalar_register_t s_tmp1 = {};
-	spv::scalar_register_t s_tmp2 = {};
-	spv::scalar_register_t s_tmp3 = {};
+	spv::scalar_register_t s_tmp0 = 0;
+	spv::scalar_register_t s_tmp1 = 1;
+	spv::scalar_register_t s_tmp2 = 2;
+	spv::scalar_register_t s_tmp3 = 3;
+
+	// Management
+	void reset();
+	void compile();
 
 	// Arithmetic ops
 	void v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
@@ -115,12 +173,13 @@ struct spv_emitter
 
 	// Movs
 	void v_movsi(spv::vector_register_t dst, const spv::vector_const_t& src);
+	void v_movfi(spv::vector_register_t dst, const spv::vector_const_t& src);
 	void v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg);
 	void v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg);
 
 	// Bitwise
 	void v_ands(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
-	void v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1, const spv::scalar_const_t& op2);
 	void v_shlsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
 	void v_shrsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
 	void v_xorsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
@@ -135,6 +194,14 @@ struct spv_emitter
 	// Flow control
 	void s_jmp(const spv::scalar_const_t& target);
 	void s_jmp(spv::scalar_register_t target);
+
+private:
+	std::string m_block;
+	std::vector<spv::vector_const_t> m_v_const_array;
+	std::vector<spv::scalar_const_t> m_s_const_array;
+
+	std::string get_const_name(const spv::vector_const_t& const_);
+	std::string get_const_name(const spv::scalar_const_t& const_);
 };
 
 // SPU SPIR-V Recompiler

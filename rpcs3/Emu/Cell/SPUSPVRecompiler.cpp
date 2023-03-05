@@ -5,6 +5,8 @@
 #include "Emu/system_config.h"
 #include "Crypto/sha1.h"
 
+#include "Emu/RSX/rsx_utils.h"
+
 #include <windows.h>
 #pragma optimize("", off)
 
@@ -15,8 +17,8 @@ namespace
 	const auto println = [](const char* s)
 	{
 		char buf[512];
-		snprintf(buf, 512, "<<%s>>\n", s);
-		OutputDebugStringA(buf);
+		snprintf(buf, 512, "[spvc] %s\n", s);
+		rsx_log.error(buf);
 	};
 
 	void spu_spv_entry(spu_thread& /*thread*/, void* /*compiled function*/, u8*)
@@ -95,6 +97,9 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 	m_size = ::size32(func.data) * 4;
 	const u32 start = m_pos;
 	const u32 end = start + m_size;
+
+	// Clear
+	c.reset();
 
 	// Create block labels
 
@@ -185,6 +190,7 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 
 	// Compile and get function address
 	spu_function_t fn = reinterpret_cast<spu_function_t>(spu_spv_entry);
+	c.compile();
 	/*
 	spu_function_t fn = reinterpret_cast<spu_function_t>(m_asmrt._add(&code));
 
@@ -607,7 +613,7 @@ void spv_recompiler::ROTQBYI(spu_opcode_t op)
 {
 	const auto shift_distance = (op.i7 & 0xf);
 	c.v_shlsi(op.rt, op.ra, spv_constant::spread(shift_distance));
-	c.v_bfxsi(c.v_tmp0, op.ra, spv_constant::spread(32 - shift_distance));
+	c.v_bfxsi(c.v_tmp0, op.ra, spv_constant::make_si(31), spv_constant::make_si(shift_distance));
 	c.v_ors(op.rt, c.v_tmp0, op.rt);
 }
 
@@ -996,7 +1002,7 @@ void spv_recompiler::FSMBI(spu_opcode_t op)
 		result[bit] = (op.i16 & (1 << bit)) ? 0xFF : 0;
 	}
 
-	c.v_movsi(op.rt, result);
+	c.v_movsi(op.rt, spv::vector_const_t(result).as_vi());
 }
 
 void spv_recompiler::BRSL(spu_opcode_t op)
@@ -1239,3 +1245,508 @@ void spv_recompiler::FMS(spu_opcode_t op)
 	println("FMS");
 }
 
+namespace spv_constant
+{
+	spv::vector_const_t make_vu(u32 x, u32 y, u32 z, u32 w)
+	{
+		spv::vector_const_t result;
+		result.m_type = spv::constant_type::UINT;
+		result.m_width = 4;
+		result.value.u[0] = x;
+		result.value.u[1] = y;
+		result.value.u[2] = z;
+		result.value.u[3] = w;
+		return result;
+	}
+
+	spv::vector_const_t make_vi(s32 x, s32 y, s32 z, s32 w)
+	{
+		spv::vector_const_t result;
+		result.m_type = spv::constant_type::INT;
+		result.m_width = 4;
+		result.value.i[0] = x;
+		result.value.i[1] = y;
+		result.value.i[2] = z;
+		result.value.i[3] = w;
+		return result;
+	}
+
+	spv::vector_const_t make_vf(f32 x, f32 y, f32 z, f32 w)
+	{
+		spv::vector_const_t result;
+		result.m_type = spv::constant_type::FLOAT;
+		result.m_width = 4;
+		result.value.f[0] = x;
+		result.value.f[1] = y;
+		result.value.f[2] = z;
+		result.value.f[3] = w;
+		return result;
+	}
+
+	spv::vector_const_t make_vh(u16 xl, u16 yl, u16 zl, u16 wl, u16 xh, u16 yh, u16 zh, u16 wh)
+	{
+		spv::vector_const_t result;
+		result.m_type = spv::constant_type::HALF;
+		result.m_width = 8;
+		result.value.h[0] = xl;
+		result.value.h[1] = yl;
+		result.value.h[2] = zl;
+		result.value.h[3] = wl;
+		result.value.h[4] = xh;
+		result.value.h[5] = yh;
+		result.value.h[6] = zh;
+		result.value.h[7] = wh;
+		return result;
+	}
+
+	spv::scalar_const_t make_su(u32 x)
+	{
+		spv::scalar_const_t result;
+		result.m_type = spv::constant_type::UINT;
+		result.value.u = x;
+		return result;
+	}
+
+	spv::scalar_const_t make_si(s32 x)
+	{
+		spv::scalar_const_t result;
+		result.m_type = spv::constant_type::INT;
+		result.value.i = x;
+		return result;
+	}
+
+	spv::scalar_const_t make_sf(f32 x)
+	{
+		spv::scalar_const_t result;
+		result.m_type = spv::constant_type::FLOAT;
+		result.value.f = x;
+		return result;
+	}
+
+	spv::scalar_const_t make_sh(u16 x)
+	{
+		spv::scalar_const_t result;
+		result.m_type = spv::constant_type::HALF;
+		result.value.u = x;
+		return result;
+	}
+
+	spv::vector_const_t spread(u32 imm)
+	{
+		return make_vu(imm, imm, imm, imm);
+	}
+
+	spv::vector_const_t spread(s32 imm)
+	{
+		return make_vi(imm, imm, imm, imm);
+	}
+
+	spv::vector_const_t spread(f32 imm)
+	{
+		return make_vf(imm, imm, imm, imm);
+	}
+
+	spv::vector_const_t spread(u16 imm)
+	{
+		return make_vh(imm, imm, imm, imm, imm, imm, imm, imm);
+	}
+};
+
+// Management
+void spv_emitter::reset()
+{
+	m_block.clear();
+	m_v_const_array.clear();
+	m_s_const_array.clear();
+}
+
+void spv_emitter::compile()
+{
+	std::stringstream shaderbuf;
+	// Declare common
+	shaderbuf <<
+		"#version 460\n"
+		"layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;\n"
+		"\n"
+		"layout(set=0, binding=0, std430) buffer local_storage{ vec4 lsa[16384]; }\n"
+		"layout(set=0, binding=1, std430) buffer register_file{ vec4 vgpr[128]; }\n"
+		"layout(set=0, binding=2, std430) buffer control_block{ uint lr; }\n"
+		"\n"
+		"// Temp registers\n"
+		"ivec4 vgpri[2];\n"
+		"float sgpr[4];\n"
+		"\n";
+
+	// TODO: Cache/mirror registers
+
+	// Constants
+	for (usz idx = 0; idx < m_v_const_array.size(); ++idx)
+	{
+		// TODO: Non-base-type support
+		const auto& const_ = m_v_const_array[idx];
+		const auto [declared_type, array_size, initializer] = [](const spv::vector_const_t& const_) -> std::tuple<std::string_view, std::string_view, std::string>
+		{
+			switch (const_.m_type)
+			{
+				case spv::constant_type::FLOAT:
+				{
+					const auto initializer = fmt::format(
+						"vec4(%f, %f, %f, %f)",
+						const_.value.f[0], const_.value.f[1], const_.value.f[2], const_.value.f[3]);
+					return { "vec4", "",  initializer };
+				}
+				case spv::constant_type::INT:
+				{
+					const auto initializer = fmt::format(
+						"ivec4(%d, %d, %d, %d)",
+						const_.value.i[0], const_.value.i[1], const_.value.i[2], const_.value.i[3]);
+					return { "ivec4", "", initializer };
+				}
+				case spv::constant_type::UINT:
+				{
+					const auto initializer = fmt::format(
+						"uvec4(%d, %d, %d, %d)",
+						const_.value.u[0], const_.value.u[1], const_.value.u[2], const_.value.u[3]);
+					return { "uvec4", "", initializer };
+				}
+				case spv::constant_type::HALF:
+				{
+					// TODO: Width optimizations
+					const auto initializer = fmt::format(
+						"{ vec4(%f, %f, %f, %f), vec4(%f, %f, %f, %f) };\n",
+						rsx::decode_fp16(const_.value.h[0]), rsx::decode_fp16(const_.value.h[1]), rsx::decode_fp16(const_.value.h[2]), rsx::decode_fp16(const_.value.h[3]),
+						rsx::decode_fp16(const_.value.h[4]), rsx::decode_fp16(const_.value.h[5]), rsx::decode_fp16(const_.value.h[6]), rsx::decode_fp16(const_.value.h[7]));
+					return { "vec4", "[2]", initializer};
+				}
+				case spv::constant_type::SHORT:
+				{
+					const auto initializer = fmt::format(
+						"{ ivec4(%d, %d, %d, %d), ivec4(%d, %d, %d, %d) };\n",
+						const_.value.h[0], const_.value.h[1], const_.value.h[2], const_.value.h[3],
+						const_.value.h[4], const_.value.h[5], const_.value.h[6], const_.value.h[7]);
+					return { "ivec4", "[2]", initializer };
+				}
+				case spv::constant_type::USHORT:
+				{
+					const auto initializer = fmt::format(
+						"{ uvec4(%u, %u, %u, %u), uvec4(%u, %u, %u, %u) };\n",
+						const_.value.h[0], const_.value.h[1], const_.value.h[2], const_.value.h[3],
+						const_.value.h[4], const_.value.h[5], const_.value.h[6], const_.value.h[7]);
+					return { "uvec4", "[2]", initializer };
+				}
+				case spv::constant_type::BYTE:
+				{
+					const auto initializer = fmt::format(
+						"{ ivec4(%d, %d, %d, %d), ivec4(%d, %d, %d, %d), ivec4(%d, %d, %d, %d), ivec4(%d, %d, %d, %d) };\n",
+						const_.value.b[0], const_.value.b[1], const_.value.b[2], const_.value.b[3],
+						const_.value.b[4], const_.value.b[5], const_.value.b[6], const_.value.b[7],
+						const_.value.b[8], const_.value.b[9], const_.value.b[10], const_.value.b[11],
+						const_.value.b[12], const_.value.b[13], const_.value.b[14], const_.value.b[15]);
+					return { "ivec4", "[4]", initializer };
+				}
+				case spv::constant_type::UBYTE:
+				{
+					const auto initializer = fmt::format(
+						"{ uvec4(%u, %u, %u, %u), uvec4(%u, %u, %u, %u), uvec4(%u, %u, %u, %u), uvec4(%u, %u, %u, %u) };\n",
+						const_.value.b[0], const_.value.b[1], const_.value.b[2], const_.value.b[3],
+						const_.value.b[4], const_.value.b[5], const_.value.b[6], const_.value.b[7],
+						const_.value.b[8], const_.value.b[9], const_.value.b[10], const_.value.b[11],
+						const_.value.b[12], const_.value.b[13], const_.value.b[14], const_.value.b[15]);
+					return { "uvec4", "[4]", initializer };
+				}
+				default:
+				{
+					fmt::throw_exception("Unreachable");
+				}
+			};
+		}(const_);
+
+		shaderbuf << fmt::format(
+			"const %s v_const_%d%s = %s;\n",
+			declared_type, idx, array_size, initializer);
+	}
+
+	for (usz idx = 0; idx < m_s_const_array.size(); ++idx)
+	{
+		// TODO: Non-base-type support
+		const auto& const_ = m_s_const_array[idx];
+		const auto [declared_type, value] = [](const spv::scalar_const_t& const_) -> std::tuple<std::string_view,  std::string>
+		{
+			switch (const_.m_type)
+			{
+			case spv::constant_type::FLOAT:
+			{
+				return { "float", std::to_string(const_.value.f) };
+			}
+			case spv::constant_type::INT:
+			{
+				return { "int", std::to_string(const_.value.i) };
+			}
+			case spv::constant_type::UINT:
+			{
+				return { "uint", std::to_string(const_.value.u) };
+			}
+			case spv::constant_type::HALF:
+			{
+				return { "float", std::to_string(rsx::decode_fp16(const_.value.h)) };
+			}
+			case spv::constant_type::SHORT:
+			{
+				return { "int", std::to_string(const_.value.h) };
+			}
+			case spv::constant_type::USHORT:
+			{
+				return { "uint", std::to_string(const_.value.h) };
+			}
+			case spv::constant_type::BYTE:
+			{
+				return { "int", std::to_string(const_.value.b) };
+			}
+			case spv::constant_type::UBYTE:
+			{
+				return { "uint", std::to_string(const_.value.b) };
+			}
+			default:
+			{
+				fmt::throw_exception("Unreachable");
+			}
+			};
+		}(const_);
+
+		shaderbuf << fmt::format(
+			"const %s s_const_%d = %s;\n",
+			declared_type, idx, value);
+	}
+
+	// Body
+	shaderbuf <<
+		"void execute()\n"
+		"{\n" <<
+			m_block <<
+		"}\n\n";
+
+	// Entry
+	// TODO: Retire/flush cache registers
+	shaderbuf <<
+		"void main()\n"
+		"{\n"
+		"	execute();\n"
+		"}\n\n";
+
+	// TODO
+	m_block = shaderbuf.str();
+	println(m_block.data());
+	reset();
+}
+
+// Arithmetic ops
+void spv_emitter::v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] + %s);\n",
+		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::v_subs(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
+		"vgpri[1] = floatBitsToInt(vgpr[%d]);\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] - vgpri[1]);\n",
+		op0.vgpr_index, op1.vgpr_index, dst.vgpr_index);
+}
+
+void spv_emitter::s_addsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpri[0].x = floatBitsToInt(sgpr[%d]);\n"
+		"sgpr[%d] = intBitsToFloat(vgpri[0].x + %s);\n",
+		op0.sgpr_index, dst.sgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::s_adds(spv::scalar_register_t dst, spv::scalar_register_t op0, spv::scalar_register_t op1)
+{
+	m_block += fmt::format(
+		"vgpri[0].xy = floatBitsToInt(vec2(sgpr[%d], sgpr[%d]));\n"
+		"sgpr[%d] = intBitsToFloat(vgpri[0].x + vgpri[0].y);\n",
+		op0.sgpr_index, op1.sgpr_index, dst.sgpr_index);
+}
+
+// Comparison
+void spv_emitter::v_cmpeqsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
+		"vgpr[%d] = vec4(equal(vgpri[0], %s));\n",
+		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+}
+
+// Movs
+void spv_emitter::v_movsi(spv::vector_register_t dst, const spv::vector_const_t& src)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = intBitsToFloat(%s);\n",
+		dst.vgpr_index, get_const_name(src));
+}
+
+void spv_emitter::v_movfi(spv::vector_register_t dst, const spv::vector_const_t& src)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = %s;\n",
+		dst.vgpr_index, get_const_name(src));
+}
+
+void spv_emitter::v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg)
+{
+	m_block += fmt::format(
+		"lsa[floatBitsToUint(sgpr[%d]) / 4] = vgpr[%d];\n",
+		lsa.sgpr_index, src_reg.vgpr_index);
+}
+
+void spv_emitter::v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg)
+{
+	m_block += fmt::format(
+		"lsa[%s / 4] = vgpr[%d];\n",
+		get_const_name(lsa.as_u()), src_reg.vgpr_index);
+}
+
+// Bitwise
+void spv_emitter::v_ands(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
+		"vpgri[1] = floatBitsToInt(vgpr[%d];\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] & vgpri[1]);\n",
+		op0.vgpr_index, op1.vgpr_index, dst.vgpr_index);
+}
+
+void spv_emitter::v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1, const spv::scalar_const_t& op2)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = bitfieldExtract(vgpr[%d], %s, %s);\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1), get_const_name(op2));
+}
+
+void spv_emitter::v_shlsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] << %s);\n",
+		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::v_shrsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] >> %s);\n",
+		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::v_xorsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d]);\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] ^ %s);\n",
+		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::v_orsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] | %s);\n",
+		op0.vgpr_index, dst.vgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::v_ors(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
+{
+	m_block += fmt::format(
+		"vgpri[0] = floatBitsToInt(vgpr[%d];\n"
+		"vgpri[1] = floatBitsToInt(vgpr[%d];\n"
+		"vgpr[%d] = intBitsToFloat(vgpri[0] | vpgri[1]);\n",
+		op0.vgpr_index, op1.vgpr_index, dst.vgpr_index);
+}
+
+void spv_emitter::s_andsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = intBitsToFloat(floatBitsToInt(sgpr[%d]) & %s);\n",
+		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::s_xtrs(spv::scalar_register_t dst, spv::vector_register_t src, int component)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = vgpr[%d][%d];\n",
+		dst.sgpr_index, src.vgpr_index, component);
+}
+
+void spv_emitter::s_ins(spv::vector_register_t dst, spv::scalar_register_t src, int component)
+{
+	m_block += fmt::format(
+		"vgpr[%d][%d] = sgpr[%d];\n",
+		dst.vgpr_index, component, src.sgpr_index);
+}
+
+// Flow control
+void spv_emitter::s_jmp(const spv::scalar_const_t& target)
+{
+	m_block += fmt::format(
+		"lr = %s;\n",
+		get_const_name(target.as_u()));
+}
+
+void spv_emitter::s_jmp(spv::scalar_register_t target)
+{
+	m_block += fmt::format(
+		"lr = floatBitsToUint(sgpr[%d]);\n",
+		target.sgpr_index);
+}
+
+std::string spv_emitter::get_const_name(const spv::vector_const_t& const_)
+{
+	usz index = umax;
+	for (usz i = 0; i < m_v_const_array.size(); ++i)
+	{
+		const auto& this_const = m_v_const_array[i];
+		if (this_const.m_type == const_.m_type &&
+			!std::memcmp(&this_const.value, &const_.value, sizeof(const_.value)))
+		{
+			index = i;
+			break;
+		}
+	}
+
+	if (index == umax)
+	{
+		index = m_v_const_array.size();
+		m_v_const_array.push_back(const_);
+	}
+
+	return "v_const_" + std::to_string(index);
+}
+
+std::string spv_emitter::get_const_name(const spv::scalar_const_t& const_)
+{
+	usz index = umax;
+	for (usz i = 0; i < m_s_const_array.size(); ++i)
+	{
+		const auto& this_const = m_s_const_array[i];
+		if (this_const.m_type == const_.m_type &&
+			!std::memcmp(&this_const.value, &const_.value, sizeof(const_.value)))
+		{
+			index = i;
+			break;
+		}
+	}
+
+	if (index == umax)
+	{
+		index = m_s_const_array.size();
+		m_s_const_array.push_back(const_);
+	}
+
+	return "s_const_" + std::to_string(index);
+}

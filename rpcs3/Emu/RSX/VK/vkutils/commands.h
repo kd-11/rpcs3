@@ -8,18 +8,18 @@ namespace vk
 {
 	class command_pool
 	{
-		vk::render_device* owner = nullptr;
-		VkCommandPool pool       = nullptr;
-		u32 queue_family         = 0;
+		const vk::render_device* owner = nullptr;
+		VkCommandPool pool             = nullptr;
+		u32 queue_family               = 0;
 
 	public:
 		command_pool()  = default;
 		~command_pool() = default;
 
-		void create(vk::render_device& dev, u32 queue_family);
+		void create(const vk::render_device& dev, u32 queue_family);
 		void destroy();
 
-		vk::render_device& get_owner() const;
+		const vk::render_device& get_owner() const;
 		u32 get_queue_family() const;
 
 		operator VkCommandPool() const;
@@ -35,6 +35,7 @@ namespace vk
 		std::array<VkPipelineStageFlags, 4> wait_stages;
 		u32 wait_semaphores_count = 0;
 		u32 signal_semaphores_count = 0;
+		bool skip_descriptor_sync = false;
 
 		queue_submit_t() = default;
 		queue_submit_t(VkQueue queue_, vk::fence* fence_)

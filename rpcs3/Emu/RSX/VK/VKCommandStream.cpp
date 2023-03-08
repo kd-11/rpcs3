@@ -54,7 +54,10 @@ namespace vk
 
 		// Access to this method must be externally synchronized.
 		// Offloader is guaranteed to never call this for async flushes.
-		vk::descriptors::flush();
+		if (!submit_info.skip_descriptor_sync)
+		{
+			vk::descriptors::flush();
+		}
 
 		if (!flush && g_cfg.video.multithreaded_rsx)
 		{

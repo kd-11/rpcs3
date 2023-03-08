@@ -45,7 +45,7 @@ namespace vk
 	std::unique_ptr<vk::depthstencil_unresolve_EXT> g_depthstencil_unresolver;
 
 	template <typename T, typename ...Args>
-	void initialize_pass(std::unique_ptr<T>& ptr, vk::render_device& dev, Args&&... extras)
+	void initialize_pass(std::unique_ptr<T>& ptr, const vk::render_device& dev, Args&&... extras)
 	{
 		if (!ptr)
 		{

@@ -8,7 +8,7 @@ namespace vk
 	// This queue flushing method to be implemented by the backend as behavior depends on config
 	void queue_submit(const queue_submit_t& submit_info, VkBool32 flush);
 
-	void command_pool::create(vk::render_device& dev, u32 queue_family_id)
+	void command_pool::create(const vk::render_device& dev, u32 queue_family_id)
 	{
 		owner = &dev;
 		queue_family = queue_family_id;
@@ -30,7 +30,7 @@ namespace vk
 		pool = nullptr;
 	}
 
-	vk::render_device& command_pool::get_owner() const
+	const vk::render_device& command_pool::get_owner() const
 	{
 		return (*owner);
 	}

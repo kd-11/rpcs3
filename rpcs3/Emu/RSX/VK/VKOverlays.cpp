@@ -386,7 +386,7 @@ namespace vk
 			VK_BLEND_OP_ADD, VK_BLEND_OP_ADD);
 	}
 
-	vk::image_view* ui_overlay_renderer::upload_simple_texture(vk::render_device& dev, vk::command_buffer& cmd,
+	vk::image_view* ui_overlay_renderer::upload_simple_texture(const vk::render_device& dev, vk::command_buffer& cmd,
 		vk::data_heap& upload_heap, u64 key, u32 w, u32 h, u32 layers, bool font, bool temp, void* pixel_src, u32 owner_uid)
 	{
 		const VkFormat format = (font) ? VK_FORMAT_R8_UNORM : VK_FORMAT_B8G8R8A8_UNORM;

@@ -39,7 +39,7 @@ namespace vk
 
 		//DMA relevant data
 		std::unique_ptr<vk::event> dma_fence;
-		vk::render_device* m_device = nullptr;
+		const vk::render_device* m_device = nullptr;
 		vk::viewable_image* vram_texture = nullptr;
 
 	public:

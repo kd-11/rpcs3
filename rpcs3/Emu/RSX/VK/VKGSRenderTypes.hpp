@@ -121,10 +121,13 @@ namespace vk
 			if (is_pending)
 			{
 				m_submit_fence->reset();
-				vk::on_event_completed(eid_tag);
-
 				is_pending = false;
-				eid_tag = 0;
+
+				if (eid_tag != umax)
+				{
+					vk::on_event_completed(eid_tag);
+					eid_tag = 0;
+				}
 			}
 
 			return ret;
@@ -140,6 +143,11 @@ namespace vk
 			}
 
 			m_submit_fence->wait_flush();
+		}
+
+		bool is_flushed() const
+		{
+			return m_submit_fence->flushed;
 		}
 	};
 
@@ -347,6 +355,20 @@ namespace vk
 			{
 				cb.poke();
 			}
+		}
+
+		void wait_all()
+		{
+			auto current = get();
+			if (current->is_flushed())
+			{
+				current->wait(GENERAL_WAIT_TIMEOUT);
+				return;
+			}
+
+			// Wait for the previous operation to complete if the current head hasn't been submitted yet
+			auto previous = &m_cb_list[(m_current_index + Count - 1) % Count];
+			previous->wait(GENERAL_WAIT_TIMEOUT);
 		}
 
 		inline command_buffer_chunk* next()

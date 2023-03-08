@@ -1706,8 +1706,7 @@ spu_thread::spu_thread(lv2_spu_group* group, u32 index, std::string_view name, u
 {
 	if (g_cfg.core.spu_decoder == spu_decoder_type::asmjit)
 	{
-		//jit = spu_recompiler_base::make_asmjit_recompiler();
-		jit = spu_recompiler_base::make_spv_recompiler();
+		jit = spu_recompiler_base::make_asmjit_recompiler();
 	}
 	else if (g_cfg.core.spu_decoder == spu_decoder_type::llvm)
 	{
@@ -1718,6 +1717,10 @@ spu_thread::spu_thread(lv2_spu_group* group, u32 index, std::string_view name, u
 #else
 #error "Unimplemented"
 #endif
+	}
+	else if (g_cfg.core.spu_decoder == spu_decoder_type::spv)
+	{
+		jit = spu_recompiler_base::make_spv_recompiler();
 	}
 
 	if (g_cfg.core.mfc_debug)

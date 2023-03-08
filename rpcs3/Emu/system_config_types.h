@@ -13,6 +13,7 @@ enum class spu_decoder_type : unsigned
 	dynamic,
 	asmjit,
 	llvm,
+	spv
 };
 
 enum class spu_block_size_type

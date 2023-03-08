@@ -1751,6 +1751,12 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 		return;
 	}
 
+	if (g_cfg.core.spu_decoder == spu_decoder_type::spv)
+	{
+		func(spu, spu._ptr<u8>(0), nullptr);
+		return;
+	}
+
 	// Diagnostic
 	if (g_cfg.core.spu_block_size == spu_block_size_type::giga)
 	{
@@ -1771,10 +1777,7 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 	asm("DSB ISH");
 #endif
 
-	if (g_cfg.core.spu_decoder != spu_decoder_type::asmjit)
-	{
-		spu_runtime::g_tail_escape(&spu, func, nullptr);
-	}
+	spu_runtime::g_tail_escape(&spu, func, nullptr);
 }
 
 void spu_recompiler_base::branch(spu_thread& spu, void*, u8* rip)

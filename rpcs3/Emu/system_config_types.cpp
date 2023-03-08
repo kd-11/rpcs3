@@ -277,6 +277,7 @@ void fmt_class_string<spu_decoder_type>::format(std::string& out, u64 arg)
 		case spu_decoder_type::dynamic: return "Interpreter (dynamic)";
 		case spu_decoder_type::asmjit: return "Recompiler (ASMJIT)";
 		case spu_decoder_type::llvm: return "Recompiler (LLVM)";
+		case spu_decoder_type::spv: return "Recompiler (SPIRV)";
 		}
 
 		return unknown;

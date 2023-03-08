@@ -124,6 +124,8 @@ namespace spv
 		scalar_register_t(s32 reg_id) : sgpr_index(reg_id)
 		{}
 	};
+
+	struct SPUSPV_block;
 }
 
 namespace spv_constant
@@ -160,7 +162,7 @@ public:
 
 	// Management
 	void reset();
-	void compile();
+	std::unique_ptr<spv::SPUSPV_block> compile();
 
 	// Arithmetic ops
 	void v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);

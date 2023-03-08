@@ -7,8 +7,263 @@
 
 #include "Emu/RSX/rsx_utils.h"
 
+#include "Emu/RSX/VK/vkutils/buffer_object.h"
+#include "Emu/RSX/VK/vkutils/descriptors.h"
+#include "Emu/RSX/VK/vkutils/memory.h"
+#include "Emu/RSX/VK/VKProgramPipeline.h"
+#include "Emu/RSX/VK/VKPipelineCompiler.h"
+//#include "Emu/RSX/VK/VKGSRenderTypes.hpp"
+#include "Emu/RSX/VK/VKGSRender.h"
+
 #include <windows.h>
 #pragma optimize("", off)
+
+constexpr auto SPV_MAX_BLOCKS = 65536u;
+
+namespace spv
+{
+	VkDescriptorSetLayout g_set_layout = VK_NULL_HANDLE;
+	VkPipelineLayout g_pipeline_layout = VK_NULL_HANDLE;
+
+	std::mutex g_init_mutex;
+
+	static bool s_ctx_initialized = false;
+	static u32 s_used_descriptors = 0;
+
+	struct SPUSPV_block
+	{
+		std::unique_ptr<vk::glsl::shader> compute;
+		std::unique_ptr<vk::glsl::program> prog;
+		u32 start_pc = 0;
+		u32 end_pc = 0;
+		bool is_branch_block = false;
+
+		SPUSPV_block(const std::string& block_src)
+		{
+			compute = std::make_unique<vk::glsl::shader>();
+			compute->create(::glsl::glsl_compute_program, block_src);
+			const auto handle = compute->compile();
+
+			VkPipelineShaderStageCreateInfo shader_stage{};
+			shader_stage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+			shader_stage.stage = VK_SHADER_STAGE_COMPUTE_BIT;
+			shader_stage.module = handle;
+			shader_stage.pName = "main";
+
+			VkComputePipelineCreateInfo info{};
+			info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+			info.stage = shader_stage;
+			info.layout = g_pipeline_layout;
+			info.basePipelineIndex = -1;
+			info.basePipelineHandle = VK_NULL_HANDLE;
+
+			auto compiler = vk::get_pipe_compiler();
+			prog = compiler->compile(info, g_pipeline_layout, vk::pipe_compiler::COMPILE_INLINE);
+		}
+
+		~SPUSPV_block()
+		{
+			prog.reset();
+			compute->destroy();
+		}
+	};
+
+#pragma pack(push, 1)
+	struct TEB
+	{
+		u32 next_pc;
+		u32 fpscr[4];
+	};
+#pragma pack(pop)
+
+	// Context for the logical SPU
+	struct SPU_execution_context_t
+	{
+		std::unique_ptr<vk::buffer> gpr_block; // 144 GPRs (128 base + 16 spill/temp)
+		std::unique_ptr<vk::buffer> ls_block; // LSA SRAM
+		std::unique_ptr<vk::buffer> teb_block; // Next PC, interrupts, etc
+
+		TEB *teb = nullptr;
+
+		vk::descriptor_pool descriptor_pool;
+		vk::command_pool command_pool;
+
+		vk::command_buffer_chain<32> command_buffer_list;
+		vk::descriptor_set descriptor_set;
+
+		SPU_execution_context_t(const vk::render_device& dev)
+		{
+			// Descriptor pool + set
+			std::vector<VkDescriptorPoolSize> pool_sizes =
+			{
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 3 }
+			};
+			descriptor_pool.create(dev, pool_sizes.data(), ::size32(pool_sizes), 1, 1);
+			descriptor_set = descriptor_pool.allocate(g_set_layout, VK_FALSE, 0);
+
+			// Command pool + execution ring buffer
+			command_pool.create(dev, dev.get_transfer_queue_family());
+			command_buffer_list.create(command_pool, vk::command_buffer::all);
+
+			// Create our memory buffers
+			gpr_block = std::make_unique<vk::buffer>(dev, 144 * 16, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
+			ls_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
+			teb_block = std::make_unique<vk::buffer>(dev, 128, dev.get_memory_mapping().device_bar,
+				VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
+
+			// Bind our standard interface. Only needs to be done once.
+			std::vector<VkDescriptorBufferInfo> bindings;
+			bindings.push_back({ .buffer = gpr_block->value, .offset = 0, .range = gpr_block->size() });
+			bindings.push_back({ .buffer = ls_block->value, .offset = 0, .range = ls_block->size() });
+			bindings.push_back({ .buffer = gpr_block->value, .offset = 0, .range = gpr_block->size() });
+			for (u32 i = 0; i < ::size32(bindings); ++i)
+			{
+				descriptor_set.push(bindings[i], VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, i);
+			}
+			descriptor_set.flush();
+		}
+
+		~SPU_execution_context_t()
+		{
+			sync();
+
+			command_buffer_list.destroy();
+			command_pool.destroy();
+			descriptor_pool.destroy();
+
+			if (teb)
+			{
+				teb_block->unmap();
+				teb = nullptr;
+			}
+		}
+
+		void execute(spu_thread& spu, const SPUSPV_block& block)
+		{
+			// TODO: CB itself can be pre-recorded and just submitted each time
+			auto prep_ssbo = [](const vk::command_buffer& cmd, const vk::buffer& buf)
+			{
+				vk::insert_buffer_memory_barrier(cmd, buf.value, 0, buf.size(),
+					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+					VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+			};
+
+			auto cmd = command_buffer_list.next();
+			cmd->begin();
+
+			// Preamble
+			// Execution ordering barriers
+			prep_ssbo(*cmd, *gpr_block);
+			prep_ssbo(*cmd, *ls_block);
+			prep_ssbo(*cmd, *teb_block);
+			
+			// Dispatch
+			descriptor_set.bind(*cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g_pipeline_layout);
+			vkCmdBindPipeline(*cmd, VK_PIPELINE_BIND_POINT_COMPUTE, block.prog->pipeline);
+			vkCmdDispatch(*cmd, 1, 1, 1);
+
+			cmd->end();
+			cmd->eid_tag = umax;
+
+			// Submit
+			auto pdev = vk::g_render_device;
+			vk::queue_submit_t submit_info = { pdev->get_transfer_queue(), nullptr };
+			submit_info.skip_descriptor_sync = true;
+			cmd->submit(submit_info, VK_TRUE);
+
+			if (block.is_branch_block)
+			{
+				sync();
+
+				if (!teb)
+				{
+					teb = static_cast<TEB*>(teb_block->map(0, 4));
+				}
+				spu.pc = teb->next_pc;
+			}
+		}
+
+		void sync()
+		{
+			command_buffer_list.wait_all();
+		}
+	};
+
+	std::unordered_map<u32, std::unique_ptr<SPU_execution_context_t>> g_SPU_context;
+	std::unordered_map<u64, std::unique_ptr<SPUSPV_block>> g_compiled_blocks;
+
+	void init_context(const vk::render_device& dev)
+	{
+		std::lock_guard lock(g_init_mutex);
+		if (s_ctx_initialized)
+		{
+			return;
+		}
+
+		// Create the shared layout
+		std::vector<VkDescriptorSetLayoutBinding> bindings =
+		{
+			{
+				.binding = 0,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+				.pImmutableSamplers = nullptr
+			},
+			{
+				.binding = 1,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+				.pImmutableSamplers = nullptr
+			},
+			{
+				.binding = 2,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+				.pImmutableSamplers = nullptr
+			},
+		};
+
+		VkDescriptorSetLayoutCreateInfo create_layout =
+		{
+			.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+			.pNext = nullptr,
+			.flags = 0,
+			.bindingCount = ::size32(bindings),
+			.pBindings = bindings.data()
+		};
+
+		vkCreateDescriptorSetLayout(dev, &create_layout, nullptr, &g_set_layout);
+
+		VkPipelineLayoutCreateInfo layout_info = {};
+		layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+		layout_info.setLayoutCount = 1;
+		layout_info.pSetLayouts = &g_set_layout;
+		vkCreatePipelineLayout(dev, &layout_info, nullptr, &g_pipeline_layout);
+
+		s_ctx_initialized = true;
+	}
+
+	void destroy_context(const vk::render_device& dev)
+	{
+		std::lock_guard lock(g_init_mutex);
+		if (!s_ctx_initialized)
+		{
+			return;
+		}
+
+		vkDestroyPipelineLayout(dev, g_pipeline_layout, nullptr);
+		vkDestroyDescriptorSetLayout(dev, g_set_layout, nullptr);
+		g_SPU_context.clear();
+		g_compiled_blocks.clear();
+
+		s_ctx_initialized = false;
+	}
+}
 
 namespace
 {
@@ -21,9 +276,20 @@ namespace
 		rsx_log.error(buf);
 	};
 
-	void spu_spv_entry(spu_thread& /*thread*/, void* /*compiled function*/, u8*)
+	void spv_entry(spu_thread& spu, void* ls, u8* /*rip*/)
 	{
-		println("SPV function executed");
+		const auto key = static_cast<u32*>(ls)[spu.pc / 4] | (static_cast<u64>(spu.pc) << 32);
+		auto& block = spv::g_compiled_blocks[key];
+		ensure(block);
+
+		auto& executor = spv::g_SPU_context[spu.id];
+		if (!executor)
+		{
+			auto pdev = vk::g_render_device;
+			executor = std::make_unique<spv::SPU_execution_context_t>(*pdev);
+		}
+
+		executor->execute(spu, *block);
 	}
 }
 
@@ -43,6 +309,9 @@ void spv_recompiler::init()
 	{
 		m_spurt = &g_fxo->get<spu_runtime>();
 	}
+
+	auto pdev = vk::g_render_device;
+	spv::init_context(*pdev);
 }
 
 spu_function_t spv_recompiler::compile(spu_program&& _func)
@@ -136,7 +405,7 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 		}
 	}
 
-	// TODO - Init compiler state
+	// TODO
 	// Clear registers, etc
 
 	if (m_pos != start)
@@ -166,12 +435,6 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 		// Update position
 		m_pos = pos;
 
-		// Bind instruction label if necessary
-		// const auto found = instr_labels.find(pos);
-
-		// Tracing
-		//c->lea(x86::r14, get_pc(m_pos));
-
 		// Execute recompiler function
 		(this->*s_spu_decoder.decode(op))({ op });
 	}
@@ -187,25 +450,13 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 
 	// Build instruction dispatch table
 
-
 	// Compile and get function address
-	spu_function_t fn = reinterpret_cast<spu_function_t>(spu_spv_entry);
-	c.compile();
-	/*
-	spu_function_t fn = reinterpret_cast<spu_function_t>(m_asmrt._add(&code));
-
-	if (!fn)
-	{
-		spu_log.fatal("Failed to build a function");
-	}
-	else
-	{
-		jit_announce(fn, code.codeSize(), fmt::format("spu-b-%s", fmt::base57(be_t<u64>(m_hash_start))));
-	}*/
+	const u64 key = (static_cast<u64>(start0) << 32) | func.data[0];
+	spv::g_compiled_blocks[key] = c.compile();
+	spu_function_t fn = spv_entry;
 
 	// Install compiled function pointer
 	const bool added = !add_loc->compiled && add_loc->compiled.compare_and_swap_test(nullptr, fn);
-
 	if (added)
 	{
 		add_loc->compiled.notify_all();
@@ -1360,7 +1611,7 @@ void spv_emitter::reset()
 	m_s_const_array.clear();
 }
 
-void spv_emitter::compile()
+std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 {
 	std::stringstream shaderbuf;
 	// Declare common
@@ -1368,9 +1619,9 @@ void spv_emitter::compile()
 		"#version 460\n"
 		"layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;\n"
 		"\n"
-		"layout(set=0, binding=0, std430) buffer local_storage { ivec4 lsa[16384]; }\n"
-		"layout(set=0, binding=1, std430) buffer register_file { ivec4 vgpr[144]; }\n"
-		"layout(set=0, binding=2, std430) buffer control_block { int pc; }\n"
+		"layout(set=0, binding=0, std430) buffer local_storage { ivec4 lsa[16384]; };\n"
+		"layout(set=0, binding=1, std430) buffer register_file { ivec4 vgpr[144]; };\n"
+		"layout(set=0, binding=2, std430) buffer control_block { uint pc; };\n"
 		"\n"
 		"// Temp registers\n"
 		"vec4 vgprf[2];\n"
@@ -1533,10 +1784,10 @@ void spv_emitter::compile()
 		"	execute();\n"
 		"}\n\n";
 
-	// TODO
 	m_block = shaderbuf.str();
-	println(m_block.data());
-	reset();
+	auto result = std::make_unique<spv::SPUSPV_block>(m_block);
+	result->is_branch_block = true; // Is it possible to not end with a branch??????
+	return result;
 }
 
 // Arithmetic ops

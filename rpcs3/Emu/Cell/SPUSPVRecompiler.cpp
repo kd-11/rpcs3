@@ -75,11 +75,12 @@ namespace spv
 #pragma pack(push, 1)
 	struct TEB
 	{
-		u32 next_pc;
-		u32 flags;
-		u32 lr;
-		u32 sp;
-		u32 fpscr[4];
+		u32 next_pc;   // Next PC address
+		u32 flags;     // Thread flags
+		u32 lr;        // Link register (debug)
+		u32 sp;        // Stack pointer (debug)
+		u32 dr[8];     // General debug registers
+		u32 fpscr[4];  // Unused
 	};
 #pragma pack(pop)
 
@@ -547,12 +548,12 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 
 void spv_recompiler::UNK(spu_opcode_t op)
 {
-	println("UNK");
+	c.unimplemented("UNK");
 }
 
 void spv_recompiler::STOP(spu_opcode_t op)
 {
-	println("STOP");
+	c.unimplemented("STOP");
 }
 
 void spv_recompiler::LNOP(spu_opcode_t op)
@@ -562,27 +563,27 @@ void spv_recompiler::LNOP(spu_opcode_t op)
 
 void spv_recompiler::SYNC(spu_opcode_t op)
 {
-	println("SYNC");
+	c.unimplemented("SYNC");
 }
 
 void spv_recompiler::DSYNC(spu_opcode_t op)
 {
-	println("DSYNC");
+	c.unimplemented("DSYNC");
 }
 
 void spv_recompiler::MFSPR(spu_opcode_t op)
 {
-	println("MFSPR");
+	c.unimplemented("MFSPR");
 }
 
 void spv_recompiler::RDCH(spu_opcode_t op)
 {
-	println("RDCH");
+	c.unimplemented("RDCH");
 }
 
 void spv_recompiler::RCHCNT(spu_opcode_t op)
 {
-	println("RCHCNT");
+	c.unimplemented("RCHCNT");
 }
 
 void spv_recompiler::SF(spu_opcode_t op)
@@ -592,177 +593,184 @@ void spv_recompiler::SF(spu_opcode_t op)
 
 void spv_recompiler::OR(spu_opcode_t op)
 {
-	println("OR");
+	c.v_ors(op.rt, op.ra, op.rb);
 }
 
 void spv_recompiler::BG(spu_opcode_t op)
 {
-	println("BG");
+	c.unimplemented("BG");
 }
 
 void spv_recompiler::SFH(spu_opcode_t op)
 {
-	println("SFH");
+	c.unimplemented("SFH");
 }
 
 void spv_recompiler::NOR(spu_opcode_t op)
 {
-	println("NOR");
+	c.unimplemented("NOR");
 }
 
 void spv_recompiler::ABSDB(spu_opcode_t op)
 {
-	println("ABSDB");
+	c.unimplemented("ABSDB");
 }
 
 void spv_recompiler::ROT(spu_opcode_t op)
 {
-	println("ROT");
+	c.unimplemented("ROT");
 }
 
 void spv_recompiler::ROTM(spu_opcode_t op)
 {
-	println("ROTM");
+	c.unimplemented("ROTM");
 }
 
 void spv_recompiler::ROTMA(spu_opcode_t op)
 {
-	println("ROTMA");
+	c.unimplemented("ROTMA");
 }
 
 void spv_recompiler::SHL(spu_opcode_t op)
 {
-	println("SHL");
+	const auto mask = spv_constant::spread(0x3f);
+	c.v_andsi(c.v_tmp0, op.rb, mask);
+	c.v_shls(op.rt, op.ra, c.v_tmp0);
 }
 
 void spv_recompiler::ROTH(spu_opcode_t op)
 {
-	println("ROTH");
+	c.unimplemented("ROTH");
 }
 
 void spv_recompiler::ROTHM(spu_opcode_t op)
 {
-	println("ROTHM");
+	c.unimplemented("ROTHM");
 }
 
 void spv_recompiler::ROTMAH(spu_opcode_t op)
 {
-	println("ROTMAH");
+	c.unimplemented("ROTMAH");
 }
 
 void spv_recompiler::SHLH(spu_opcode_t op)
 {
-	println("SHLH");
+	c.unimplemented("SHLH");
 }
 
 void spv_recompiler::ROTI(spu_opcode_t op)
 {
-	println("ROTI");
+	c.unimplemented("ROTI");
 }
 
 void spv_recompiler::ROTMI(spu_opcode_t op)
 {
-	println("ROTMI");
+	c.unimplemented("ROTMI");
 }
 
 void spv_recompiler::ROTMAI(spu_opcode_t op)
 {
-	println("ROTMAI");
+	c.unimplemented("ROTMAI");
 }
 
 void spv_recompiler::SHLI(spu_opcode_t op)
 {
-	println("SHLI");
+	const auto distance = spv_constant::spread(static_cast<s32>(op.i7 & 0x3f));
+	c.v_shlsi(op.rt, op.ra, distance);
 }
 
 void spv_recompiler::ROTHI(spu_opcode_t op)
 {
-	println("ROTHI");
+	c.unimplemented("ROTHI");
 }
 
 void spv_recompiler::ROTHMI(spu_opcode_t op)
 {
-	println("ROTHMI");
+	c.unimplemented("ROTHMI");
 }
 
 void spv_recompiler::ROTMAHI(spu_opcode_t op)
 {
-	println("ROTMAHI");
+	c.unimplemented("ROTMAHI");
 }
 
 void spv_recompiler::SHLHI(spu_opcode_t op)
 {
-	println("SHLHI");
+	c.unimplemented("SHLHI");
 }
 
 void spv_recompiler::A(spu_opcode_t op)
 {
-	println("A");
+	c.v_adds(op.rt, op.ra, op.rb);
 }
 
 void spv_recompiler::AND(spu_opcode_t op)
 {
-	println("AND");
+	c.unimplemented("AND");
 }
 
 void spv_recompiler::CG(spu_opcode_t op)
 {
-	println("CG");
+	c.unimplemented("CG");
 }
 
 void spv_recompiler::AH(spu_opcode_t op)
 {
-	println("AH");
+	c.unimplemented("AH");
 }
 
 void spv_recompiler::NAND(spu_opcode_t op)
 {
-	println("NAND");
+	c.unimplemented("NAND");
 }
 
 void spv_recompiler::AVGB(spu_opcode_t op)
 {
-	println("AVGB");
+	c.unimplemented("AVGB");
 }
 
 void spv_recompiler::MTSPR(spu_opcode_t op)
 {
-	println("MTSPR");
+	c.unimplemented("MTSPR");
 }
 
 void spv_recompiler::WRCH(spu_opcode_t op)
 {
-	println("WRCH");
+	c.unimplemented("WRCH");
 }
 
 void spv_recompiler::BIZ(spu_opcode_t op)
 {
-	println("BIZ");
+	c.unimplemented("BIZ");
 }
 
 void spv_recompiler::BINZ(spu_opcode_t op)
 {
-	println("BINZ");
+	c.unimplemented("BINZ");
 }
 
 void spv_recompiler::BIHZ(spu_opcode_t op)
 {
-	println("BIHZ");
+	c.unimplemented("BIHZ");
 }
 
 void spv_recompiler::BIHNZ(spu_opcode_t op)
 {
-	println("BIHNZ");
+	c.unimplemented("BIHNZ");
 }
 
 void spv_recompiler::STOPD(spu_opcode_t op)
 {
-	println("STOPD");
+	c.unimplemented("STOPD");
 }
 
 void spv_recompiler::STQX(spu_opcode_t op)
 {
-	println("STQX");
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_xtrs(c.s_tmp1, op.rb, 3);
+	c.s_adds(c.s_tmp0, c.s_tmp0, c.s_tmp1);
+	c.s_andsi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(0x3fff0));
+	c.v_storq(c.s_tmp0, op.rt);
 }
 
 void spv_recompiler::BI(spu_opcode_t op)
@@ -776,7 +784,7 @@ void spv_recompiler::BI(spu_opcode_t op)
 
 void spv_recompiler::BISL(spu_opcode_t op)
 {
-	c.v_movsi(op.rt, spv_constant::make_vi(spu_branch_target(m_pos + 4)));
+	c.v_movsi(op.rt, spv_constant::make_rvi(spu_branch_target(m_pos + 4)));
 	c.s_xtrs(c.s_tmp0, op.ra, 3);
 	c.s_br(c.s_tmp0);
 
@@ -786,173 +794,197 @@ void spv_recompiler::BISL(spu_opcode_t op)
 
 void spv_recompiler::IRET(spu_opcode_t op)
 {
-	println("IRET");
+	c.unimplemented("IRET");
 }
 
 void spv_recompiler::BISLED(spu_opcode_t op)
 {
-	println("BISLED");
+	c.unimplemented("BISLED");
 }
 
 void spv_recompiler::HBR(spu_opcode_t op)
 {
-	println("HBR");
+	// NOP
 }
 
 void spv_recompiler::GB(spu_opcode_t op)
 {
-	println("GB");
+	c.unimplemented("GB");
 }
 
 void spv_recompiler::GBH(spu_opcode_t op)
 {
-	println("GBH");
+	c.unimplemented("GBH");
 }
 
 void spv_recompiler::GBB(spu_opcode_t op)
 {
-	println("GBB");
+	c.unimplemented("GBB");
 }
 
 void spv_recompiler::FSM(spu_opcode_t op)
 {
-	println("FSM");
+	c.unimplemented("FSM");
 }
 
 void spv_recompiler::FSMH(spu_opcode_t op)
 {
-	println("FSMH");
+	c.unimplemented("FSMH");
 }
 
 void spv_recompiler::FSMB(spu_opcode_t op)
 {
-	println("FSMB");
+	c.unimplemented("FSMB");
 }
 
 void spv_recompiler::FREST(spu_opcode_t op)
 {
-	println("FREST");
+	c.unimplemented("FREST");
 }
 
 void spv_recompiler::FRSQEST(spu_opcode_t op)
 {
-	println("FRSQEST");
+	c.unimplemented("FRSQEST");
 }
 
 void spv_recompiler::LQX(spu_opcode_t op)
 {
-	println("LQX");
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_xtrs(c.s_tmp1, op.rb, 3);
+	c.s_adds(c.s_tmp0, c.s_tmp0, c.s_tmp1);
+	c.s_andsi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(0x3fff0));
+	c.v_loadq(op.rt, c.s_tmp0);
 }
 
 void spv_recompiler::ROTQBYBI(spu_opcode_t op)
 {
-	println("ROTQBYBI");
+	c.unimplemented("ROTQBYBI");
 }
 
 void spv_recompiler::ROTQMBYBI(spu_opcode_t op)
 {
-	println("ROTQMBYBI");
+	c.unimplemented("ROTQMBYBI");
 }
 
 void spv_recompiler::SHLQBYBI(spu_opcode_t op)
 {
-	println("SHLQBYBI");
+	c.unimplemented("SHLQBYBI");
 }
 
 void spv_recompiler::CBX(spu_opcode_t op)
 {
-	println("CBX");
+	c.unimplemented("CBX");
 }
 
 void spv_recompiler::CHX(spu_opcode_t op)
 {
-	println("CHX");
+	c.unimplemented("CHX");
 }
 
 void spv_recompiler::CWX(spu_opcode_t op)
 {
-	println("CWX");
+	c.unimplemented("CWX");
 }
 
 void spv_recompiler::CDX(spu_opcode_t op)
 {
-	println("CDX");
+	c.unimplemented("CDX");
 }
 
 void spv_recompiler::ROTQBI(spu_opcode_t op)
 {
-	println("ROTQBI");
+	c.unimplemented("ROTQBI");
 }
 
 void spv_recompiler::ROTQMBI(spu_opcode_t op)
 {
-	println("ROTQMBI");
+	c.unimplemented("ROTQMBI");
 }
 
 void spv_recompiler::SHLQBI(spu_opcode_t op)
 {
-	println("SHLQBI");
+	c.unimplemented("SHLQBI");
 }
 
 void spv_recompiler::ROTQBY(spu_opcode_t op)
 {
+	// 0. Make a copy, in case rt == ra.
+	// TODO: Optimize this out otherwise!
+	c.v_movs(c.v_tmp1, op.ra);
+
+	// 1. SHL
 	c.v_sprd(c.v_tmp0, op.rb, 3);
 	c.v_andsi(c.v_tmp0, c.v_tmp0, spv_constant::spread(15));
 	c.v_shls(op.rt, op.ra, c.v_tmp0);
-	c.s_xtrs(c.s_tmp0, c.v_tmp0, 0);
-	c.s_movsi(c.s_tmp1, spv_constant::make_si(31));
-	c.v_bfxs(c.v_tmp0, op.ra, c.s_tmp1, c.s_tmp0);
+
+	// 2. Word rotate
+	c.v_shufwi(c.v_tmp1, c.v_tmp1, { 1, 2, 3, 0 });
+
+	// 3. SHR + mask (bfe)
+	c.s_xtrs(c.s_tmp0, c.v_tmp0, 0);                            // s0 = v0[0]
+	c.s_subsi(c.s_tmp1, spv_constant::make_si(32), c.s_tmp0);   // s1 = 32 - s0
+	c.v_bfxs(c.v_tmp0, c.v_tmp1, c.s_tmp1, c.s_tmp0);           // v0 = (v1 >> s1) & bitmask(s0)
+
+	// 4. Merge
 	c.v_ors(op.rt, c.v_tmp0, op.rt);
 }
 
 void spv_recompiler::ROTQMBY(spu_opcode_t op)
 {
-	println("ROTQMBY");
+	c.unimplemented("ROTQMBY");
 }
 
 void spv_recompiler::SHLQBY(spu_opcode_t op)
 {
-	println("SHLQBY");
+	c.unimplemented("SHLQBY");
 }
 
 void spv_recompiler::ORX(spu_opcode_t op)
 {
-	println("ORX");
+	c.unimplemented("ORX");
 }
 
 void spv_recompiler::CBD(spu_opcode_t op)
 {
-	println("CBD");
+	c.unimplemented("CBD");
 }
 
 void spv_recompiler::CHD(spu_opcode_t op)
 {
-	println("CHD");
+	c.unimplemented("CHD");
 }
 
 void spv_recompiler::CWD(spu_opcode_t op)
 {
-	println("CWD");
+	const u8 sel0[16] = { 0x1F, 0x1E, 0x1D, 0x1C, 0x1B, 0x1A, 0x19, 0x18, 0x17, 0x16, 0x15, 0x14, 0x13, 0x12, 0x11, 0x10 };
+	const auto sel0_c = spv::vector_const_t{ sel0 }.as_vi();
+	c.v_movsi(op.rt, sel0_c);
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_addsi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(op.i7));
+	c.s_xorsi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(-1));
+	c.s_andsi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(0xc));
+	c.s_shlsi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(2));
+	c.s_ins(op.rt, spv_constant::make_si(0x00010203), c.s_tmp0);
 }
 
 void spv_recompiler::CDD(spu_opcode_t op)
 {
-	println("CDD");
+	c.unimplemented("CDD");
 }
 
 void spv_recompiler::ROTQBII(spu_opcode_t op)
 {
-	println("ROTQBII");
+	c.unimplemented("ROTQBII");
 }
 
 void spv_recompiler::ROTQMBII(spu_opcode_t op)
 {
-	println("ROTQMBII");
+	c.unimplemented("ROTQMBII");
 }
 
 void spv_recompiler::SHLQBII(spu_opcode_t op)
 {
-	println("SHLQBII");
+	c.unimplemented("SHLQBII");
 }
 
 void spv_recompiler::ROTQBYI(spu_opcode_t op)
@@ -965,302 +997,302 @@ void spv_recompiler::ROTQBYI(spu_opcode_t op)
 
 void spv_recompiler::ROTQMBYI(spu_opcode_t op)
 {
-	println("ROTQMBYI");
+	c.unimplemented("ROTQMBYI");
 }
 
 void spv_recompiler::SHLQBYI(spu_opcode_t op)
 {
-	println("SHLQBYI");
+	c.unimplemented("SHLQBYI");
 }
 
 void spv_recompiler::NOP(spu_opcode_t op)
 {
-	println("NOP");
+	// NOP
 }
 
 void spv_recompiler::CGT(spu_opcode_t op)
 {
-	println("CGT");
+	c.unimplemented("CGT");
 }
 
 void spv_recompiler::XOR(spu_opcode_t op)
 {
-	println("XOR");
+	c.unimplemented("XOR");
 }
 
 void spv_recompiler::CGTH(spu_opcode_t op)
 {
-	println("CGTH");
+	c.unimplemented("CGTH");
 }
 
 void spv_recompiler::EQV(spu_opcode_t op)
 {
-	println("EQV");
+	c.unimplemented("EQV");
 }
 
 void spv_recompiler::CGTB(spu_opcode_t op)
 {
-	println("CGTB");
+	c.unimplemented("CGTB");
 }
 
 void spv_recompiler::SUMB(spu_opcode_t op)
 {
-	println("SUMB");
+	c.unimplemented("SUMB");
 }
 
 void spv_recompiler::HGT(spu_opcode_t op)
 {
-	println("HGT");
+	c.unimplemented("HGT");
 }
 
 void spv_recompiler::CLZ(spu_opcode_t op)
 {
-	println("CLZ");
+	c.unimplemented("CLZ");
 }
 
 void spv_recompiler::XSWD(spu_opcode_t op)
 {
-	println("XSWD");
+	c.unimplemented("XSWD");
 }
 
 void spv_recompiler::XSHW(spu_opcode_t op)
 {
-	println("XSHW");
+	c.unimplemented("XSHW");
 }
 
 void spv_recompiler::CNTB(spu_opcode_t op)
 {
-	println("CNTB");
+	c.unimplemented("CNTB");
 }
 
 void spv_recompiler::XSBH(spu_opcode_t op)
 {
-	println("XSBH");
+	c.unimplemented("XSBH");
 }
 
 void spv_recompiler::CLGT(spu_opcode_t op)
 {
-	println("CLGT");
+	c.unimplemented("CLGT");
 }
 
 void spv_recompiler::ANDC(spu_opcode_t op)
 {
-	println("ANDC");
+	c.unimplemented("ANDC");
 }
 
 void spv_recompiler::FCGT(spu_opcode_t op)
 {
-	println("FCGT");
+	c.unimplemented("FCGT");
 }
 
 void spv_recompiler::DFCGT(spu_opcode_t op)
 {
-	println("DFCGT");
+	c.unimplemented("DFCGT");
 }
 
 void spv_recompiler::FA(spu_opcode_t op)
 {
-	println("FA");
+	c.unimplemented("FA");
 }
 
 void spv_recompiler::FS(spu_opcode_t op)
 {
-	println("FS");
+	c.unimplemented("FS");
 }
 
 void spv_recompiler::FM(spu_opcode_t op)
 {
-	println("FM");
+	c.unimplemented("FM");
 }
 
 void spv_recompiler::CLGTH(spu_opcode_t op)
 {
-	println("CLGTH");
+	c.unimplemented("CLGTH");
 }
 
 void spv_recompiler::ORC(spu_opcode_t op)
 {
-	println("ORC");
+	c.unimplemented("ORC");
 }
 
 void spv_recompiler::FCMGT(spu_opcode_t op)
 {
-	println("FCMGT");
+	c.unimplemented("FCMGT");
 }
 
 void spv_recompiler::DFCMGT(spu_opcode_t op)
 {
-	println("DFCMGT");
+	c.unimplemented("DFCMGT");
 }
 
 void spv_recompiler::DFA(spu_opcode_t op)
 {
-	println("DFA");
+	c.unimplemented("DFA");
 }
 
 void spv_recompiler::DFS(spu_opcode_t op)
 {
-	println("DFS");
+	c.unimplemented("DFS");
 }
 
 void spv_recompiler::DFM(spu_opcode_t op)
 {
-	println("DFM");
+	c.unimplemented("DFM");
 }
 
 void spv_recompiler::CLGTB(spu_opcode_t op)
 {
-	println("CLGTB");
+	c.unimplemented("CLGTB");
 }
 
 void spv_recompiler::HLGT(spu_opcode_t op)
 {
-	println("HLGT");
+	c.unimplemented("HLGT");
 }
 
 void spv_recompiler::DFMA(spu_opcode_t op)
 {
-	println("DFMA");
+	c.unimplemented("DFMA");
 }
 
 void spv_recompiler::DFMS(spu_opcode_t op)
 {
-	println("DFMS");
+	c.unimplemented("DFMS");
 }
 
 void spv_recompiler::DFNMS(spu_opcode_t op)
 {
-	println("DFNMS");
+	c.unimplemented("DFNMS");
 }
 
 void spv_recompiler::DFNMA(spu_opcode_t op)
 {
-	println("DFNMA");
+	c.unimplemented("DFNMA");
 }
 
 void spv_recompiler::CEQ(spu_opcode_t op)
 {
-	println("CEQ");
+	c.unimplemented("CEQ");
 }
 
 void spv_recompiler::MPYHHU(spu_opcode_t op)
 {
-	println("MPYHHU");
+	c.unimplemented("MPYHHU");
 }
 
 void spv_recompiler::ADDX(spu_opcode_t op)
 {
-	println("ADDX");
+	c.unimplemented("ADDX");
 }
 
 void spv_recompiler::SFX(spu_opcode_t op)
 {
-	println("SFX");
+	c.unimplemented("SFX");
 }
 
 void spv_recompiler::CGX(spu_opcode_t op)
 {
-	println("CGX");
+	c.unimplemented("CGX");
 }
 
 void spv_recompiler::BGX(spu_opcode_t op)
 {
-	println("BGX");
+	c.unimplemented("BGX");
 }
 
 void spv_recompiler::MPYHHA(spu_opcode_t op)
 {
-	println("MPYHHA");
+	c.unimplemented("MPYHHA");
 }
 
 void spv_recompiler::MPYHHAU(spu_opcode_t op)
 {
-	println("MPYHHAU");
+	c.unimplemented("MPYHHAU");
 }
 
 void spv_recompiler::FSCRRD(spu_opcode_t op)
 {
-	println("FSCRRD");
+	c.unimplemented("FSCRRD");
 }
 
 void spv_recompiler::FESD(spu_opcode_t op)
 {
-	println("FESD");
+	c.unimplemented("FESD");
 }
 
 void spv_recompiler::FRDS(spu_opcode_t op)
 {
-	println("FRDS");
+	c.unimplemented("FRDS");
 }
 
 void spv_recompiler::FSCRWR(spu_opcode_t op)
 {
-	println("FSCRWR");
+	c.unimplemented("FSCRWR");
 }
 
 void spv_recompiler::DFTSV(spu_opcode_t op)
 {
-	println("DFTSV");
+	c.unimplemented("DFTSV");
 }
 
 void spv_recompiler::FCEQ(spu_opcode_t op)
 {
-	println("FCEQ");
+	c.unimplemented("FCEQ");
 }
 
 void spv_recompiler::DFCEQ(spu_opcode_t op)
 {
-	println("DFCEQ");
+	c.unimplemented("DFCEQ");
 }
 
 void spv_recompiler::MPY(spu_opcode_t op)
 {
-	println("MPY");
+	c.unimplemented("MPY");
 }
 
 void spv_recompiler::MPYH(spu_opcode_t op)
 {
-	println("MPYH");
+	c.unimplemented("MPYH");
 }
 
 void spv_recompiler::MPYHH(spu_opcode_t op)
 {
-	println("MPYHH");
+	c.unimplemented("MPYHH");
 }
 
 void spv_recompiler::MPYS(spu_opcode_t op)
 {
-	println("MPYS");
+	c.unimplemented("MPYS");
 }
 
 void spv_recompiler::CEQH(spu_opcode_t op)
 {
-	println("CEQH");
+	c.unimplemented("CEQH");
 }
 
 void spv_recompiler::FCMEQ(spu_opcode_t op)
 {
-	println("FCMEQ");
+	c.unimplemented("FCMEQ");
 }
 
 void spv_recompiler::DFCMEQ(spu_opcode_t op)
 {
-	println("DFCMEQ");
+	c.unimplemented("DFCMEQ");
 }
 
 void spv_recompiler::MPYU(spu_opcode_t op)
 {
-	println("MPYU");
+	c.unimplemented("MPYU");
 }
 
 void spv_recompiler::CEQB(spu_opcode_t op)
 {
-	println("CEQB");
+	c.unimplemented("CEQB");
 }
 
 void spv_recompiler::FI(spu_opcode_t op)
 {
-	println("FI");
+	c.unimplemented("FI");
 }
 
 void spv_recompiler::HEQ(spu_opcode_t op)
@@ -1273,22 +1305,22 @@ void spv_recompiler::HEQ(spu_opcode_t op)
 
 void spv_recompiler::CFLTS(spu_opcode_t op)
 {
-	println("CFLTS");
+	c.unimplemented("CFLTS");
 }
 
 void spv_recompiler::CFLTU(spu_opcode_t op)
 {
-	println("CFLTU");
+	c.unimplemented("CFLTU");
 }
 
 void spv_recompiler::CSFLT(spu_opcode_t op)
 {
-	println("CSFLT");
+	c.unimplemented("CSFLT");
 }
 
 void spv_recompiler::CUFLT(spu_opcode_t op)
 {
-	println("CUFLT");
+	c.unimplemented("CUFLT");
 }
 
 void spv_recompiler::BRZ(spu_opcode_t op)
@@ -1305,7 +1337,7 @@ void spv_recompiler::BRZ(spu_opcode_t op)
 
 void spv_recompiler::STQA(spu_opcode_t op)
 {
-	println("STQA");
+	c.unimplemented("STQA");
 }
 
 void spv_recompiler::BRNZ(spu_opcode_t op)
@@ -1322,12 +1354,12 @@ void spv_recompiler::BRNZ(spu_opcode_t op)
 
 void spv_recompiler::BRHZ(spu_opcode_t op)
 {
-	println("BRHZ");
+	c.unimplemented("BRHZ");
 }
 
 void spv_recompiler::BRHNZ(spu_opcode_t op)
 {
-	println("BRHNZ");
+	c.unimplemented("BRHNZ");
 }
 
 void spv_recompiler::STQR(spu_opcode_t op)
@@ -1338,22 +1370,24 @@ void spv_recompiler::STQR(spu_opcode_t op)
 
 void spv_recompiler::BRA(spu_opcode_t op)
 {
-	println("BRA");
+	c.unimplemented("BRA");
 }
 
 void spv_recompiler::LQA(spu_opcode_t op)
 {
-	println("LQA");
+	c.unimplemented("LQA");
 }
 
 void spv_recompiler::BRASL(spu_opcode_t op)
 {
-	println("BRASL");
+	c.unimplemented("BRASL");
 }
 
 void spv_recompiler::BR(spu_opcode_t op)
 {
-	println("BR");
+	const auto target = spu_branch_target(m_pos, op.i16);
+	c.s_bri(spv_constant::make_su(target));
+	m_pos = -1;
 }
 
 void spv_recompiler::FSMBI(spu_opcode_t op)
@@ -1373,7 +1407,7 @@ void spv_recompiler::BRSL(spu_opcode_t op)
 	const auto target = spu_branch_target(m_pos, op.i16);
 	const auto lr = spu_branch_target(m_pos + 4);
 
-	c.v_movsi(op.rt, spv_constant::make_vi(static_cast<s32>(lr)));
+	c.v_movsi(op.rt, spv_constant::make_rvi(static_cast<s32>(lr)));
 	c.s_bri(spv_constant::make_su(target));
 
 	if (target != m_pos + 4)
@@ -1397,17 +1431,17 @@ void spv_recompiler::IL(spu_opcode_t op)
 
 void spv_recompiler::ILHU(spu_opcode_t op)
 {
-	println("ILHU");
+	c.unimplemented("ILHU");
 }
 
 void spv_recompiler::ILH(spu_opcode_t op)
 {
-	println("ILH");
+	c.unimplemented("ILH");
 }
 
 void spv_recompiler::IOHL(spu_opcode_t op)
 {
-	println("IOHL");
+	c.unimplemented("IOHL");
 }
 
 void spv_recompiler::ORI(spu_opcode_t op)
@@ -1425,37 +1459,37 @@ void spv_recompiler::ORI(spu_opcode_t op)
 
 void spv_recompiler::ORHI(spu_opcode_t op)
 {
-	println("ORHI");
+	c.unimplemented("ORHI");
 }
 
 void spv_recompiler::ORBI(spu_opcode_t op)
 {
-	println("ORBI");
+	c.unimplemented("ORBI");
 }
 
 void spv_recompiler::SFI(spu_opcode_t op)
 {
-	println("SFI");
+	c.unimplemented("SFI");
 }
 
 void spv_recompiler::SFHI(spu_opcode_t op)
 {
-	println("SFHI");
+	c.unimplemented("SFHI");
 }
 
 void spv_recompiler::ANDI(spu_opcode_t op)
 {
-	println("ANDI");
+	c.unimplemented("ANDI");
 }
 
 void spv_recompiler::ANDHI(spu_opcode_t op)
 {
-	println("ANDHI");
+	c.unimplemented("ANDHI");
 }
 
 void spv_recompiler::ANDBI(spu_opcode_t op)
 {
-	println("ANDBI");
+	c.unimplemented("ANDBI");
 }
 
 void spv_recompiler::AI(spu_opcode_t op)
@@ -1465,7 +1499,7 @@ void spv_recompiler::AI(spu_opcode_t op)
 
 void spv_recompiler::AHI(spu_opcode_t op)
 {
-	println("AHI");
+	c.unimplemented("AHI");
 }
 
 void spv_recompiler::STQD(spu_opcode_t op)
@@ -1490,83 +1524,88 @@ void spv_recompiler::LQD(spu_opcode_t op)
 
 void spv_recompiler::XORI(spu_opcode_t op)
 {
-	println("XORI");
+	c.unimplemented("XORI");
 }
 
 void spv_recompiler::XORHI(spu_opcode_t op)
 {
-	println("XORHI");
+	c.unimplemented("XORHI");
 }
 
 void spv_recompiler::XORBI(spu_opcode_t op)
 {
-	println("XORBI");
+	c.unimplemented("XORBI");
 }
 
 void spv_recompiler::CGTI(spu_opcode_t op)
 {
-	println("CGTI");
+	const auto imm = spv_constant::spread(op.si10);
+	const auto all_ones = spv_constant::spread(-1);
+	c.v_cmpgtsi(c.v_tmp0, op.ra, imm);
+	c.v_mulsi(op.rt, c.v_tmp0, all_ones);
 }
 
 void spv_recompiler::CGTHI(spu_opcode_t op)
 {
-	println("CGTHI");
+	c.unimplemented("CGTHI");
 }
 
 void spv_recompiler::CGTBI(spu_opcode_t op)
 {
-	println("CGTBI");
+	c.unimplemented("CGTBI");
 }
 
 void spv_recompiler::HGTI(spu_opcode_t op)
 {
-	println("HGTI");
+	c.unimplemented("HGTI");
 }
 
 void spv_recompiler::CLGTI(spu_opcode_t op)
 {
-	println("CLGTI");
+	c.unimplemented("CLGTI");
 }
 
 void spv_recompiler::CLGTHI(spu_opcode_t op)
 {
-	println("CLGTHI");
+	c.unimplemented("CLGTHI");
 }
 
 void spv_recompiler::CLGTBI(spu_opcode_t op)
 {
-	println("CLGTBI");
+	c.unimplemented("CLGTBI");
 }
 
 void spv_recompiler::HLGTI(spu_opcode_t op)
 {
-	println("HLGTI");
+	c.unimplemented("HLGTI");
 }
 
 void spv_recompiler::MPYI(spu_opcode_t op)
 {
-	println("MPYI");
+	c.unimplemented("MPYI");
 }
 
 void spv_recompiler::MPYUI(spu_opcode_t op)
 {
-	println("MPYUI");
+	c.unimplemented("MPYUI");
 }
 
 void spv_recompiler::CEQI(spu_opcode_t op)
 {
 	const auto imm = spv_constant::spread(op.si10);
-	c.v_cmpeqsi(op.rt, op.ra, imm);
+	const auto all_ones = spv_constant::spread(-1);
+	c.v_cmpeqsi(c.v_tmp0, op.ra, imm);
+	c.v_mulsi(op.rt, c.v_tmp0, all_ones);
 }
 
 void spv_recompiler::CEQHI(spu_opcode_t op)
 {
-	println("CEQHI");
+	c.unimplemented("CEQHI");
 }
 
 void spv_recompiler::CEQBI(spu_opcode_t op)
 {
-	println("CEQBI");
+	c.unimplemented("CEQBI");
 }
 
 void spv_recompiler::HEQI(spu_opcode_t op)
@@ -1578,12 +1617,12 @@ void spv_recompiler::HEQI(spu_opcode_t op)
 
 void spv_recompiler::HBRA(spu_opcode_t op)
 {
-	println("HBRA");
+	c.unimplemented("HBRA");
 }
 
 void spv_recompiler::HBRR(spu_opcode_t op)
 {
-	println("HBRR");
+	c.unimplemented("HBRR");
 }
 
 void spv_recompiler::ILA(spu_opcode_t op)
@@ -1602,32 +1641,33 @@ void spv_recompiler::SELB(spu_opcode_t op)
 
 void spv_recompiler::SHUFB(spu_opcode_t op)
 {
-	println("SHUFB");
+	// TODO: If we already know the CW, we can redirect to shufw which is much faster
+	c.v_shufb(op.rt, op.ra, op.rb, op.rc);
 }
 
 void spv_recompiler::MPYA(spu_opcode_t op)
 {
-	println("MPYA");
+	c.unimplemented("MPYA");
 }
 
 void spv_recompiler::FNMS(spu_opcode_t op)
 {
-	println("FNMS");
+	c.unimplemented("FNMS");
 }
 
 void spv_recompiler::FMA(spu_opcode_t op)
 {
-	println("FMA");
+	c.unimplemented("FMA");
 }
 
 void spv_recompiler::FMS(spu_opcode_t op)
 {
-	println("FMS");
+	c.unimplemented("FMS");
 }
 
 namespace spv_constant
 {
-	spv::vector_const_t make_vu(u32 w, u32 z, u32 y, u32 x)
+	spv::vector_const_t make_vu(u32 x, u32 y, u32 z, u32 w)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::UINT;
@@ -1639,7 +1679,7 @@ namespace spv_constant
 		return result;
 	}
 
-	spv::vector_const_t make_vi(s32 w, s32 z, s32 y, s32 x)
+	spv::vector_const_t make_vi(s32 x, s32 y, s32 z, s32 w)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::INT;
@@ -1651,7 +1691,7 @@ namespace spv_constant
 		return result;
 	}
 
-	spv::vector_const_t make_vf(f32 w, f32 z, f32 y, f32 x)
+	spv::vector_const_t make_vf(f32 x, f32 y, f32 z, f32 w)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::FLOAT;
@@ -1663,7 +1703,7 @@ namespace spv_constant
 		return result;
 	}
 
-	spv::vector_const_t make_vh(u16 wh, u16 zh, u16 yh, u16 xh, u16 wl, u16 zl, u16 yl, u16 xl)
+	spv::vector_const_t make_vh(u16 xl, u16 yl, u16 zl, u16 wl, u16 xh, u16 yh, u16 zh, u16 wh)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::HALF;
@@ -1741,6 +1781,7 @@ void spv_emitter::reset()
 
 	m_dynamic_branch_target = false;
 	m_end_pc = -1;
+	m_uses_shufb = false;
 }
 
 std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
@@ -1759,6 +1800,7 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 		"	uint flags;\n"
 		"	uint lr;\n"
 		"	uint sp;\n"
+		"	uint dr[8];\n"
 		"};\n"
 		"\n"
 		"// Temp registers\n"
@@ -1770,6 +1812,64 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 	shaderbuf <<
 		"#define SPU_HLT " << spv::TEB_flags::hlt << "\n"
 		"\n";
+
+	// Builtin wrappers
+	shaderbuf <<
+		"ivec4 _bswap(const in ivec4 reg)\n"
+		"{\n"
+		"	const ivec4 a = bitfieldExtract(reg, 0, 8);\n"
+		"	const ivec4 b = bitfieldExtract(reg, 8, 8);\n"
+		"	const ivec4 c = bitfieldExtract(reg, 16, 8);\n"
+		"	const ivec4 d = bitfieldExtract(reg, 24, 8);\n"
+		"	const ivec4 e = d | (c << 8) | (b << 16) | (a << 24);\n"
+		"	return e.wzyx;\n"
+		"}\n"
+		"\n";
+
+	if (true || m_uses_shufb)
+	{
+		// Sad case for shufb: GPUs support permutation instructions on both NV and AMD but glsl does not expose this.
+		// TODO: Find a workaround or use SYCL
+		shaderbuf <<
+			"ivec4 _shufb(const in ivec4 a, const in ivec4 b, const in ivec4 c)\n"
+			"{\n"
+			"	ivec4 sources[2] = { b, a };\n"
+			"	int index = 0;\n"
+			"	int tmp, tmp2, tmp3, ref;\n"
+			"	ivec4 result;\n"
+			"	for (int word = 0; word < 4; ++word)\n"
+			"	{\n"
+			"		for (int bit = 0; bit < 32; bit += 8)\n"
+			"		{\n"
+			"			ref = bitfieldExtract(c[word], bit, 8);\n"
+			"			tmp = bitfieldExtract(ref, 29, 3);\n"
+			"			tmp2 = tmp & 15;\n"
+			"\n"
+			"			switch (tmp)\n"
+			"			{\n"
+			"			case 4:\n"       // 100 or 101
+			"			case 5:\n"
+			"				tmp3 = 0;\n"
+			"				break;\n"
+			"			case 6:\n"       // 110
+			"				tmp3 = 0xFF;\n"
+			"				break;\n"
+			"			case 7:\n"       // 111
+			"				tmp3 = 0x80;\n"
+			"				break;\n"
+			"			default:\n"
+			"				tmp3 = bitfieldExtract(sources[tmp >> 4][tmp2 >> 2], (tmp2 & 3) << 3, 8);\n"
+			"				break;\n"
+			"			}\n"
+			"\n"
+			"			bitfieldInsert(result[word], tmp3, bit, 8);\n"
+			"		}\n"
+			"	}\n"
+			"\n"
+			"	return result;\n"
+			"}\n"
+			"\n";
+	}
 
 	// TODO: Cache/mirror registers
 
@@ -1944,11 +2044,25 @@ void spv_emitter::v_addsi(spv::vector_register_t dst, spv::vector_register_t op0
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
+void spv_emitter::v_adds(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = vgpr[%d] + vgpr[%d];\n",
+		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
+}
+
 void spv_emitter::v_subs(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
 		"vgpr[%d] = vgpr[%d] - vgpr[%d];\n",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
+}
+
+void spv_emitter::v_mulsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = vgpr[%d] * %s;\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_addsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
@@ -1965,11 +2079,32 @@ void spv_emitter::s_adds(spv::scalar_register_t dst, spv::scalar_register_t op0,
 		dst.sgpr_index, op0.sgpr_index, op1.sgpr_index);
 }
 
+void spv_emitter::s_subsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = sgpr[%d] - %s;\n",
+		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::s_subsi(spv::scalar_register_t dst, const spv::scalar_const_t& op0, spv::scalar_register_t op1)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = %s - %s;\n",
+		dst.sgpr_index, get_const_name(op0), op1.sgpr_index);
+}
+
 // Comparison
 void spv_emitter::v_cmpeqsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
 		"vgpr[%d] = ivec4(equal(vgpr[%d], %s));\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::v_cmpgtsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = ivec4(greaterThan(vgpr[%d], %s));\n",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
@@ -2005,28 +2140,28 @@ void spv_emitter::s_movsi(spv::scalar_register_t dst_reg, const spv::scalar_cons
 void spv_emitter::v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"lsa[sgpr[%d] >> 4] = vgpr[%d];\n",
+		"lsa[sgpr[%d] >> 4] = _bswap(vgpr[%d]);\n",
 		lsa.sgpr_index, src_reg.vgpr_index);
 }
 
 void spv_emitter::v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"lsa[%s >> 4] = vgpr[%d];\n",
+		"lsa[%s >> 4] = _bswap(vgpr[%d]);\n",
 		get_const_name(lsa), src_reg.vgpr_index);
 }
 
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_register_t lsa)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = lsa[sgpr[%d] >> 4];\n",
+		"vgpr[%d] = _bswap(lsa[sgpr[%d] >> 4]);\n",
 		dst_reg.vgpr_index, lsa.sgpr_index);
 }
 
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_const_t lsa)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = lsa[%s >> 4];\n",
+		"vgpr[%d] = _bswap(lsa[%s >> 4]);\n",
 		dst_reg.vgpr_index, get_const_name(lsa));
 }
 
@@ -2115,10 +2250,40 @@ void spv_emitter::v_ors(spv::vector_register_t dst, spv::vector_register_t op0, 
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
+void spv_emitter::v_shufwi(spv::vector_register_t dst, spv::vector_register_t src, const std::array<int, 4>& shuffle)
+{
+	const char* mask_components[4] = { "x", "y", "z", "w" };
+
+	std::string mask = "";
+	for (const auto& index : shuffle)
+	{
+		ensure(index < 4);
+		mask += mask_components[index];
+	}
+
+	m_block += fmt::format(
+		"vgpr[%d] = vgpr[%d].%s;\n",
+		dst.vgpr_index, src.vgpr_index, mask);
+}
+
 void spv_emitter::s_andsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
 		"sgpr[%d] = sgpr[%d] & %s;\n",
+		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::s_xorsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = sgpr[%d] ^ %s;\n",
+		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::s_shlsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = sgpr[%d] << %s;\n",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
@@ -2134,6 +2299,22 @@ void spv_emitter::s_ins(spv::vector_register_t dst, spv::scalar_register_t src, 
 	m_block += fmt::format(
 		"vgpr[%d][%d] = sgpr[%d];\n",
 		dst.vgpr_index, component, src.sgpr_index);
+}
+
+void spv_emitter::s_ins(spv::vector_register_t dst, const spv::scalar_const_t& src, spv::scalar_register_t select)
+{
+	m_block += fmt::format(
+		"vgpr[%d][sgpr[%d]] = %s;\n",
+		dst.vgpr_index, select.sgpr_index, get_const_name(src));
+}
+
+void spv_emitter::v_shufb(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1, spv::vector_register_t op2)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = _shufb(vgpr[%d], vgpr[%d], vgpr[%d]);\n",
+		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index, op2.vgpr_index);
+
+	m_uses_shufb = true;
 }
 
 // Flow control
@@ -2205,6 +2386,15 @@ void spv_emitter::s_heqi(spv::scalar_register_t op1, const spv::scalar_const_t& 
 		op1.sgpr_index, get_const_name(op2));
 
 	m_dynamic_branch_target = true;
+}
+
+void spv_emitter::unimplemented(const std::string_view& name)
+{
+	m_block += fmt::format(
+		"%s();\n",
+		name);
+
+	println(name.data());
 }
 
 std::string spv_emitter::get_const_name(const spv::vector_const_t& const_)

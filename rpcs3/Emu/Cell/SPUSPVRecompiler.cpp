@@ -34,9 +34,13 @@ namespace spv
 	{
 		std::unique_ptr<vk::glsl::shader> compute;
 		std::unique_ptr<vk::glsl::program> prog;
-		u32 start_pc = 0;
-		u32 end_pc = 0;
-		bool is_branch_block = false;
+
+		// PC
+		int start_pc = -1;
+		int end_pc = -1;
+
+		// Flags
+		bool is_dynamic_branch_block = false;
 
 		SPUSPV_block(const std::string& block_src)
 		{
@@ -72,9 +76,15 @@ namespace spv
 	struct TEB
 	{
 		u32 next_pc;
+		u32 flags;
 		u32 fpscr[4];
 	};
 #pragma pack(pop)
+
+	enum TEB_flags : u32
+	{
+		hlt = 1
+	};
 
 	// Context for the logical SPU
 	struct SPU_execution_context_t
@@ -83,7 +93,9 @@ namespace spv
 		std::unique_ptr<vk::buffer> ls_block; // LSA SRAM
 		std::unique_ptr<vk::buffer> teb_block; // Next PC, interrupts, etc
 
+		bool flush_caches = true;
 		TEB *teb = nullptr;
+		u8* ls = nullptr;
 
 		vk::descriptor_pool descriptor_pool;
 		vk::command_pool command_pool;
@@ -107,21 +119,27 @@ namespace spv
 
 			// Create our memory buffers
 			gpr_block = std::make_unique<vk::buffer>(dev, 144 * 16, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
-			ls_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
+			ls_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().device_bar,
+				VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 			teb_block = std::make_unique<vk::buffer>(dev, 128, dev.get_memory_mapping().device_bar,
 				VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 
 			// Bind our standard interface. Only needs to be done once.
 			std::vector<VkDescriptorBufferInfo> bindings;
-			bindings.push_back({ .buffer = gpr_block->value, .offset = 0, .range = gpr_block->size() });
 			bindings.push_back({ .buffer = ls_block->value, .offset = 0, .range = ls_block->size() });
 			bindings.push_back({ .buffer = gpr_block->value, .offset = 0, .range = gpr_block->size() });
+			bindings.push_back({ .buffer = teb_block->value, .offset = 0, .range = teb_block->size() });
 			for (u32 i = 0; i < ::size32(bindings); ++i)
 			{
 				descriptor_set.push(bindings[i], VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, i);
 			}
 			descriptor_set.flush();
+
+			// Map execution memory
+			teb = static_cast<TEB*>(teb_block->map(0, sizeof(TEB)));
+			ls = static_cast<u8*>(ls_block->map(0, ls_block->size()));
 		}
 
 		~SPU_execution_context_t()
@@ -137,10 +155,22 @@ namespace spv
 				teb_block->unmap();
 				teb = nullptr;
 			}
+
+			if (ls)
+			{
+				ls_block->unmap();
+				ls = nullptr;
+			}
 		}
 
 		void execute(spu_thread& spu, const SPUSPV_block& block)
 		{
+			if (flush_caches)
+			{
+				std::memcpy(ls, spu._ptr<u8>(0), 256 * 1024);
+				flush_caches = false;
+			}
+
 			// TODO: CB itself can be pre-recorded and just submitted each time
 			auto prep_ssbo = [](const vk::command_buffer& cmd, const vk::buffer& buf)
 			{
@@ -173,16 +203,24 @@ namespace spv
 			submit_info.skip_descriptor_sync = true;
 			cmd->submit(submit_info, VK_TRUE);
 
-			if (block.is_branch_block)
+			if (!block.is_dynamic_branch_block)
 			{
-				sync();
-
-				if (!teb)
-				{
-					teb = static_cast<TEB*>(teb_block->map(0, 4));
-				}
-				spu.pc = teb->next_pc;
+				spu.pc = static_cast<u32>(block.end_pc);
+				return;
 			}
+
+			// Wait for GPU
+			sync();
+
+			// Check TEB flags
+			if (teb->flags & TEB_flags::hlt)
+			{
+				spu.halt();
+				return;
+			}
+
+			// Next
+			spu.pc = teb->next_pc;
 		}
 
 		void sync()
@@ -193,6 +231,7 @@ namespace spv
 
 	std::unordered_map<u32, std::unique_ptr<SPU_execution_context_t>> g_SPU_context;
 	std::unordered_map<u64, std::unique_ptr<SPUSPV_block>> g_compiled_blocks;
+	shared_mutex g_compiled_blocks_mutex;
 
 	void init_context(const vk::render_device& dev)
 	{
@@ -263,23 +302,23 @@ namespace spv
 
 		s_ctx_initialized = false;
 	}
-}
-
-namespace
-{
-	const spu_decoder<spv_recompiler> s_spu_decoder;
-
-	const auto println = [](const char* s)
-	{
-		char buf[512];
-		snprintf(buf, 512, "[spvc] %s\n", s);
-		rsx_log.error(buf);
-	};
 
 	void spv_entry(spu_thread& spu, void* ls, u8* /*rip*/)
 	{
-		const auto key = static_cast<u32*>(ls)[spu.pc / 4] | (static_cast<u64>(spu.pc) << 32);
-		auto& block = spv::g_compiled_blocks[key];
+		auto func = spu.jit->get_runtime().find(static_cast<u32*>(ls), spu.pc);
+		if (!func)
+		{
+			func = spu.jit->compile(spu.jit->analyse(spu._ptr<u32>(0), spu.pc));
+		}
+
+		ensure(func);
+		const auto hash = reinterpret_cast<u64>(func);
+
+		spv::SPUSPV_block* block = nullptr;
+		{
+			reader_lock lock(spv::g_compiled_blocks_mutex);
+			block = spv::g_compiled_blocks[hash].get();
+		}
 		ensure(block);
 
 		auto& executor = spv::g_SPU_context[spu.id];
@@ -291,6 +330,21 @@ namespace
 
 		executor->execute(spu, *block);
 	}
+}
+
+namespace
+{
+	const spu_decoder<spv_recompiler> s_spu_decoder;
+
+	const auto println = [](const char* s)
+	{
+		char buf[512];
+		snprintf(buf, 512, "[spvc] %s\n", s);
+		rsx_log.error(buf);
+		OutputDebugStringA(buf);
+	};
+
+
 }
 
 std::unique_ptr<spu_recompiler_base> spu_recompiler_base::make_spv_recompiler()
@@ -341,11 +395,6 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 		}
 
 		return add_loc->compiled;
-	}
-
-	if (auto& cache = g_fxo->get<spu_cache>(); cache && g_cfg.core.spu_cache && !add_loc->cached.exchange(1))
-	{
-		cache.add(func);
 	}
 
 	{
@@ -437,6 +486,12 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 
 		// Execute recompiler function
 		(this->*s_spu_decoder.decode(op))({ op });
+
+		if (m_pos < 0)
+		{
+			// Early exit
+			break;
+		}
 	}
 
 	// Make fallthrough if necessary
@@ -451,9 +506,16 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 	// Build instruction dispatch table
 
 	// Compile and get function address
-	const u64 key = (static_cast<u64>(start0) << 32) | func.data[0];
-	spv::g_compiled_blocks[key] = c.compile();
-	spu_function_t fn = spv_entry;
+	auto compiled = c.compile();
+	ensure(compiled->prog);
+	{
+		std::lock_guard lock(spv::g_compiled_blocks_mutex);
+		if (spv::g_compiled_blocks.find(m_hash_start) == spv::g_compiled_blocks.end())
+		{
+			spv::g_compiled_blocks[m_hash_start] = std::move(compiled);
+		}
+	}
+	spu_function_t fn = reinterpret_cast<spu_function_t>(m_hash_start);
 
 	// Install compiled function pointer
 	const bool added = !add_loc->compiled && add_loc->compiled.compare_and_swap_test(nullptr, fn);
@@ -687,12 +749,21 @@ void spv_recompiler::STQX(spu_opcode_t op)
 
 void spv_recompiler::BI(spu_opcode_t op)
 {
-	println("BI");
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_br(c.s_tmp0);
+
+	// TODO: Interrupt status
+	m_pos = -1;
 }
 
 void spv_recompiler::BISL(spu_opcode_t op)
 {
-	println("BISL");
+	c.v_movsi(op.rt, spv_constant::make_vi(spu_branch_target(m_pos + 4)));
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_br(c.s_tmp0);
+
+	// TODO: Interrupt status
+	m_pos = -1;
 }
 
 void spv_recompiler::IRET(spu_opcode_t op)
@@ -807,7 +878,13 @@ void spv_recompiler::SHLQBI(spu_opcode_t op)
 
 void spv_recompiler::ROTQBY(spu_opcode_t op)
 {
-	println("ROTQBY");
+	c.v_sprd(c.v_tmp0, op.rb, 3);
+	c.v_andsi(c.v_tmp0, c.v_tmp0, spv_constant::spread(15));
+	c.v_shls(op.rt, op.ra, c.v_tmp0);
+	c.s_xtrs(c.s_tmp0, c.v_tmp0, 0);
+	c.s_movsi(c.s_tmp1, spv_constant::make_si(31));
+	c.v_bfxs(c.v_tmp0, op.ra, c.s_tmp1, c.s_tmp0);
+	c.v_ors(op.rt, c.v_tmp0, op.rt);
 }
 
 void spv_recompiler::ROTQMBY(spu_opcode_t op)
@@ -1170,7 +1247,10 @@ void spv_recompiler::FI(spu_opcode_t op)
 
 void spv_recompiler::HEQ(spu_opcode_t op)
 {
-	println("HEQ");
+	const auto value = spv_constant::make_si(op.si10);
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_xtrs(c.s_tmp1, op.rb, 3);
+	c.s_heq(c.s_tmp0, c.s_tmp1);
 }
 
 void spv_recompiler::CFLTS(spu_opcode_t op)
@@ -1195,7 +1275,14 @@ void spv_recompiler::CUFLT(spu_opcode_t op)
 
 void spv_recompiler::BRZ(spu_opcode_t op)
 {
-	println("BRZ");
+	const u32 target = spu_branch_target(m_pos, op.i16);
+	if (target == m_pos + 4)
+	{
+		return;
+	}
+
+	c.s_xtrs(c.s_tmp0, op.rt, 3);
+	c.s_brz(spv_constant::make_su(target), c.s_tmp0);
 }
 
 void spv_recompiler::STQA(spu_opcode_t op)
@@ -1260,7 +1347,7 @@ void spv_recompiler::BRSL(spu_opcode_t op)
 {
 	const auto target = spu_branch_target(m_pos, op.i16);
 	c.v_movsi(op.rt, spv_constant::make_vi(static_cast<s32>(target)));
-	c.s_jmp(spv_constant::make_su(target));
+	c.s_bri(spv_constant::make_su(target));
 
 	if (target != m_pos + 4)
 	{
@@ -1271,7 +1358,8 @@ void spv_recompiler::BRSL(spu_opcode_t op)
 
 void spv_recompiler::LQR(spu_opcode_t op)
 {
-	println("LQR");
+	const auto address = spv_constant::make_su(spu_ls_target(m_pos, op.i16));
+	c.v_loadq(op.rt, address);
 }
 
 void spv_recompiler::IL(spu_opcode_t op)
@@ -1358,7 +1446,12 @@ void spv_recompiler::STQD(spu_opcode_t op)
 
 void spv_recompiler::LQD(spu_opcode_t op)
 {
-	println("LQD");
+	const auto offset = spv_constant::make_si(op.si10 * 16);
+	const auto address_mask = spv_constant::make_si(0x3fff0);
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_addsi(c.s_tmp0, c.s_tmp0, offset);
+	c.s_andsi(c.s_tmp0, c.s_tmp0, address_mask);
+	c.v_loadq(op.rt, c.s_tmp0);
 }
 
 void spv_recompiler::XORI(spu_opcode_t op)
@@ -1444,7 +1537,9 @@ void spv_recompiler::CEQBI(spu_opcode_t op)
 
 void spv_recompiler::HEQI(spu_opcode_t op)
 {
-	println("HEQI");
+	const auto value = spv_constant::make_si(op.si10);
+	c.s_xtrs(c.s_tmp0, op.ra, 3);
+	c.s_heqi(c.s_tmp0, value);
 }
 
 void spv_recompiler::HBRA(spu_opcode_t op)
@@ -1621,11 +1716,16 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 		"\n"
 		"layout(set=0, binding=0, std430) buffer local_storage { ivec4 lsa[16384]; };\n"
 		"layout(set=0, binding=1, std430) buffer register_file { ivec4 vgpr[144]; };\n"
-		"layout(set=0, binding=2, std430) buffer control_block { uint pc; };\n"
+		"layout(set=0, binding=2, std430) buffer control_block { uint pc; uint flags; };\n"
 		"\n"
 		"// Temp registers\n"
 		"vec4 vgprf[2];\n"
 		"int sgpr[4];\n"
+		"\n";
+
+	// Builtin constants
+	shaderbuf <<
+		"#define SPU_HLT " << spv::TEB_flags::hlt << "\n"
 		"\n";
 
 	// TODO: Cache/mirror registers
@@ -1786,7 +1886,8 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 
 	m_block = shaderbuf.str();
 	auto result = std::make_unique<spv::SPUSPV_block>(m_block);
-	result->is_branch_block = true; // Is it possible to not end with a branch??????
+	result->is_dynamic_branch_block = has_dynamic_branch_target();
+	result->end_pc = get_pc();
 	return result;
 }
 
@@ -1842,6 +1943,13 @@ void spv_emitter::v_movfi(spv::vector_register_t dst, const spv::vector_const_t&
 		dst.vgpr_index, get_const_name(src));
 }
 
+void spv_emitter::s_movsi(spv::scalar_register_t dst_reg, const spv::scalar_const_t& src)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = %s;\n",
+		dst_reg.sgpr_index, get_const_name(src));
+}
+
 void spv_emitter::v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
@@ -1856,7 +1964,42 @@ void spv_emitter::v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_re
 		get_const_name(lsa), src_reg.vgpr_index);
 }
 
+void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_register_t lsa)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = lsa[sgpr[%d] >> 2];\n",
+		dst_reg.vgpr_index, lsa.sgpr_index);
+}
+
+void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_const_t lsa)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = lsa[%s >> 2];\n",
+		dst_reg.vgpr_index, get_const_name(lsa));
+}
+
+void spv_emitter::v_sprd(spv::vector_register_t dst_reg, spv::scalar_register_t src_reg)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = ivec4(sgpr[%d]);\n",
+		dst_reg.vgpr_index, src_reg.sgpr_index);
+}
+
+void spv_emitter::v_sprd(spv::vector_register_t dst_reg, spv::vector_register_t src_reg, int component)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = ivec4(vgpr[%d][%d]);\n",
+		dst_reg.vgpr_index, src_reg.vgpr_index, component);
+}
+
 // Bitwise
+void spv_emitter::v_andsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t op1)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = vgpr[%d] & %s;\n",
+		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
+}
+
 void spv_emitter::v_ands(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
@@ -1871,11 +2014,25 @@ void spv_emitter::v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1), get_const_name(op2));
 }
 
+void spv_emitter::v_bfxs(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1, spv::scalar_register_t op2)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = bitfieldExtract(vgpr[%d], sgpr[%d], sgpr[%d]);\n",
+		dst.vgpr_index, op0.vgpr_index, op1.sgpr_index, op2.sgpr_index);
+}
+
 void spv_emitter::v_shlsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
 		"vgpr[%d] = vgpr[%d] << %s;\n",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::v_shls(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = vgpr[%d] << vgpr[%d];\n",
+		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_shrsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
@@ -1928,18 +2085,61 @@ void spv_emitter::s_ins(spv::vector_register_t dst, spv::scalar_register_t src, 
 }
 
 // Flow control
-void spv_emitter::s_jmp(const spv::scalar_const_t& target)
+void spv_emitter::s_bri(const spv::scalar_const_t& target)
 {
 	m_block += fmt::format(
 		"pc = %s;\n",
 		get_const_name(target.as_u()));
+
+	m_end_pc = target.value.i;
 }
 
-void spv_emitter::s_jmp(spv::scalar_register_t target)
+void spv_emitter::s_br(spv::scalar_register_t target)
 {
 	m_block += fmt::format(
 		"pc = sgpr[%d];\n",
 		target.sgpr_index);
+
+	m_dynamic_branch_target = true;
+}
+
+void spv_emitter::s_brz(const spv::scalar_const_t& target, spv::scalar_register_t cond)
+{
+	m_block += fmt::format(
+		"if (sgpr[%d] == 0)\n"
+		"{\n"
+		"	pc = %s;\n"
+		"	return;\n"
+		"}\n",
+		cond.sgpr_index, get_const_name(target.as_u()));
+
+	m_dynamic_branch_target = true;
+}
+
+void spv_emitter::s_heq(spv::scalar_register_t op1, spv::scalar_register_t op2)
+{
+	m_block += fmt::format(
+		"if (sgpr[%d] == sgpr[%d])\n"
+		"{\n"
+		"	flags = SPU_HLT;\n"
+		"	return;\n"
+		"}\n",
+		op1.sgpr_index, op2.sgpr_index);
+
+	m_dynamic_branch_target = true;
+}
+
+void spv_emitter::s_heqi(spv::scalar_register_t op1, const spv::scalar_const_t& op2)
+{
+	m_block += fmt::format(
+		"if (sgpr[%d] == %s)\n"
+		"{\n"
+		"	flags = SPU_HLT;\n"
+		"	return;\n"
+		"}\n",
+		op1.sgpr_index, get_const_name(op2));
+
+	m_dynamic_branch_target = true;
 }
 
 std::string spv_emitter::get_const_name(const spv::vector_const_t& const_)

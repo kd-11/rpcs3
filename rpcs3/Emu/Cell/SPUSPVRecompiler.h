@@ -164,6 +164,9 @@ public:
 	void reset();
 	std::unique_ptr<spv::SPUSPV_block> compile();
 
+	int get_pc() const { return m_end_pc; }
+	bool has_dynamic_branch_target() const { return m_dynamic_branch_target; }
+
 	// Arithmetic ops
 	void v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
 	void v_subs(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
@@ -178,11 +181,20 @@ public:
 	void v_movfi(spv::vector_register_t dst, const spv::vector_const_t& src);
 	void v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg);
 	void v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg);
+	void v_loadq(spv::vector_register_t dst_reg, spv::scalar_register_t lsa);
+	void v_loadq(spv::vector_register_t dst_reg, spv::scalar_const_t lsa);
+	void v_sprd(spv::vector_register_t dst_reg, spv::scalar_register_t src_reg);
+	void v_sprd(spv::vector_register_t dst_reg, spv::vector_register_t src_reg, int component);
+
+	void s_movsi(spv::scalar_register_t dst_reg, const spv::scalar_const_t& src);
 
 	// Bitwise
+	void v_andsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t op1);
 	void v_ands(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
 	void v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1, const spv::scalar_const_t& op2);
+	void v_bfxs(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1, spv::scalar_register_t op2);
 	void v_shlsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_shls(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
 	void v_shrsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
 	void v_xorsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
 	void v_orsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
@@ -194,13 +206,19 @@ public:
 	void s_ins(spv::vector_register_t dst, spv::scalar_register_t src, int component);
 
 	// Flow control
-	void s_jmp(const spv::scalar_const_t& target);
-	void s_jmp(spv::scalar_register_t target);
+	void s_bri(const spv::scalar_const_t& target);
+	void s_br(spv::scalar_register_t target);
+	void s_brz(const spv::scalar_const_t& target, spv::scalar_register_t cond);
+	void s_heq(spv::scalar_register_t op1, spv::scalar_register_t op2);
+	void s_heqi(spv::scalar_register_t op1, const spv::scalar_const_t& op2);
 
 private:
 	std::string m_block;
 	std::vector<spv::vector_const_t> m_v_const_array;
 	std::vector<spv::scalar_const_t> m_s_const_array;
+
+	bool m_dynamic_branch_target = false;
+	int m_end_pc = -1;
 
 	std::string get_const_name(const spv::vector_const_t& const_);
 	std::string get_const_name(const spv::scalar_const_t& const_);

@@ -1671,6 +1671,8 @@ spu_recompiler_base::~spu_recompiler_base()
 
 void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 {
+	ensure(g_cfg.core.spu_decoder != spu_decoder_type::spv);
+
 	// If code verification failed from a patched patchpoint, clear it with a dispatcher jump
 	if (rip)
 	{
@@ -1748,12 +1750,6 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 	if (!func)
 	{
 		spu_log.fatal("[0x%05x] Compilation failed.", spu.pc);
-		return;
-	}
-
-	if (g_cfg.core.spu_decoder == spu_decoder_type::spv)
-	{
-		func(spu, spu._ptr<u8>(0), nullptr);
 		return;
 	}
 

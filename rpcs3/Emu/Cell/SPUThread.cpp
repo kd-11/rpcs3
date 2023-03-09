@@ -39,6 +39,11 @@
 
 using spu_rdata_t = decltype(spu_thread::rdata);
 
+namespace spv
+{
+	void spv_entry(spu_thread&, void*, u8*);
+}
+
 template <>
 void fmt_class_string<mfc_atomic_status>::format(std::string& out, u64 arg)
 {
@@ -1496,7 +1501,28 @@ void spu_thread::cpu_task()
 		}
 	}
 
-	if (jit)
+	if (g_cfg.core.spu_decoder == spu_decoder_type::spv)
+	{
+		// Works more like a interpreter
+		while (true)
+		{
+			if (state) [[unlikely]]
+			{
+				if (check_state())
+					break;
+			}
+
+			if (_ref<u32>(pc) == 0x0u)
+			{
+				if (spu_thread::stop_and_signal(0x0))
+					pc += 4;
+				continue;
+			}
+
+			spv::spv_entry(*this, _ptr<u8>(0), nullptr);
+		}
+	}
+	else if (jit)
 	{
 		while (true)
 		{

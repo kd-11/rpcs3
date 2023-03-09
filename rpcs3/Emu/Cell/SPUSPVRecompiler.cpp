@@ -77,6 +77,8 @@ namespace spv
 	{
 		u32 next_pc;
 		u32 flags;
+		u32 lr;
+		u32 sp;
 		u32 fpscr[4];
 	};
 #pragma pack(pop)
@@ -205,6 +207,7 @@ namespace spv
 
 			if (!block.is_dynamic_branch_block)
 			{
+				sync();
 				spu.pc = static_cast<u32>(block.end_pc);
 				return;
 			}
@@ -215,7 +218,22 @@ namespace spv
 			// Check TEB flags
 			if (teb->flags & TEB_flags::hlt)
 			{
-				spu.halt();
+				// HALT
+				// TODO: Unify with spu_thread::halt
+				if (spu.get_type() >= spu_type::raw)
+				{
+					spu.state += cpu_flag::stop + cpu_flag::wait;
+					spu.status_npc.atomic_op([&spu](auto& state)
+					{
+						state.status |= SPU_STATUS_STOPPED_BY_HALT;
+						state.status &= ~SPU_STATUS_RUNNING;
+						state.npc = spu.pc | +spu.interrupts_enabled;
+					});
+
+					spu.status_npc.notify_one();
+					spu.int_ctrl[2].set(SPU_INT2_STAT_SPU_HALT_OR_STEP_INT);
+				}
+
 				return;
 			}
 
@@ -487,7 +505,7 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 		// Execute recompiler function
 		(this->*s_spu_decoder.decode(op))({ op });
 
-		if (m_pos < 0)
+		if (m_pos == umax)
 		{
 			// Early exit
 			break;
@@ -539,7 +557,7 @@ void spv_recompiler::STOP(spu_opcode_t op)
 
 void spv_recompiler::LNOP(spu_opcode_t op)
 {
-	println("LNOP");
+	// NOP
 }
 
 void spv_recompiler::SYNC(spu_opcode_t op)
@@ -1292,7 +1310,14 @@ void spv_recompiler::STQA(spu_opcode_t op)
 
 void spv_recompiler::BRNZ(spu_opcode_t op)
 {
-	println("BRNZ");
+	const u32 target = spu_branch_target(m_pos, op.i16);
+	if (target == m_pos + 4)
+	{
+		return;
+	}
+
+	c.s_xtrs(c.s_tmp0, op.rt, 3);
+	c.s_brnz(spv_constant::make_su(target), c.s_tmp0);
 }
 
 void spv_recompiler::BRHZ(spu_opcode_t op)
@@ -1346,7 +1371,9 @@ void spv_recompiler::FSMBI(spu_opcode_t op)
 void spv_recompiler::BRSL(spu_opcode_t op)
 {
 	const auto target = spu_branch_target(m_pos, op.i16);
-	c.v_movsi(op.rt, spv_constant::make_vi(static_cast<s32>(target)));
+	const auto lr = spu_branch_target(m_pos + 4);
+
+	c.v_movsi(op.rt, spv_constant::make_vi(static_cast<s32>(lr)));
 	c.s_bri(spv_constant::make_su(target));
 
 	if (target != m_pos + 4)
@@ -1385,6 +1412,13 @@ void spv_recompiler::IOHL(spu_opcode_t op)
 
 void spv_recompiler::ORI(spu_opcode_t op)
 {
+	if (op.si10 == 0)
+	{
+		// MR
+		c.v_movs(op.rt, op.ra);
+		return;
+	}
+
 	const auto var = spv_constant::spread(op.si10);
 	c.v_orsi(op.rt, op.ra, var);
 }
@@ -1593,7 +1627,7 @@ void spv_recompiler::FMS(spu_opcode_t op)
 
 namespace spv_constant
 {
-	spv::vector_const_t make_vu(u32 x, u32 y, u32 z, u32 w)
+	spv::vector_const_t make_vu(u32 w, u32 z, u32 y, u32 x)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::UINT;
@@ -1605,7 +1639,7 @@ namespace spv_constant
 		return result;
 	}
 
-	spv::vector_const_t make_vi(s32 x, s32 y, s32 z, s32 w)
+	spv::vector_const_t make_vi(s32 w, s32 z, s32 y, s32 x)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::INT;
@@ -1617,7 +1651,7 @@ namespace spv_constant
 		return result;
 	}
 
-	spv::vector_const_t make_vf(f32 x, f32 y, f32 z, f32 w)
+	spv::vector_const_t make_vf(f32 w, f32 z, f32 y, f32 x)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::FLOAT;
@@ -1629,7 +1663,7 @@ namespace spv_constant
 		return result;
 	}
 
-	spv::vector_const_t make_vh(u16 xl, u16 yl, u16 zl, u16 wl, u16 xh, u16 yh, u16 zh, u16 wh)
+	spv::vector_const_t make_vh(u16 wh, u16 zh, u16 yh, u16 xh, u16 wl, u16 zl, u16 yl, u16 xl)
 	{
 		spv::vector_const_t result;
 		result.m_type = spv::constant_type::HALF;
@@ -1704,6 +1738,9 @@ void spv_emitter::reset()
 	m_block.clear();
 	m_v_const_array.clear();
 	m_s_const_array.clear();
+
+	m_dynamic_branch_target = false;
+	m_end_pc = -1;
 }
 
 std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
@@ -1716,7 +1753,13 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 		"\n"
 		"layout(set=0, binding=0, std430) buffer local_storage { ivec4 lsa[16384]; };\n"
 		"layout(set=0, binding=1, std430) buffer register_file { ivec4 vgpr[144]; };\n"
-		"layout(set=0, binding=2, std430) buffer control_block { uint pc; uint flags; };\n"
+		"layout(set=0, binding=2, std430) buffer control_block\n"
+		"{\n"
+		"	uint pc;\n"
+		"	uint flags;\n"
+		"	uint lr;\n"
+		"	uint sp;\n"
+		"};\n"
 		"\n"
 		"// Temp registers\n"
 		"vec4 vgprf[2];\n"
@@ -1882,6 +1925,8 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 		"void main()\n"
 		"{\n"
 		"	execute();\n"
+		"	lr = vgpr[0].w;\n"
+		"	sp = vgpr[1].w;\n"
 		"}\n\n";
 
 	m_block = shaderbuf.str();
@@ -1936,6 +1981,13 @@ void spv_emitter::v_movsi(spv::vector_register_t dst, const spv::vector_const_t&
 		dst.vgpr_index, get_const_name(src));
 }
 
+void spv_emitter::v_movs(spv::vector_register_t dst, spv::vector_register_t src)
+{
+	m_block += fmt::format(
+		"vgpr[%d] = vgpr[%d];\n",
+		dst.vgpr_index, src.vgpr_index);
+}
+
 void spv_emitter::v_movfi(spv::vector_register_t dst, const spv::vector_const_t& src)
 {
 	m_block += fmt::format(
@@ -1953,28 +2005,28 @@ void spv_emitter::s_movsi(spv::scalar_register_t dst_reg, const spv::scalar_cons
 void spv_emitter::v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"lsa[sgpr[%d] >> 2] = vgpr[%d];\n",
+		"lsa[sgpr[%d] >> 4] = vgpr[%d];\n",
 		lsa.sgpr_index, src_reg.vgpr_index);
 }
 
 void spv_emitter::v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"lsa[%s >> 2] = vgpr[%d];\n",
+		"lsa[%s >> 4] = vgpr[%d];\n",
 		get_const_name(lsa), src_reg.vgpr_index);
 }
 
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_register_t lsa)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = lsa[sgpr[%d] >> 2];\n",
+		"vgpr[%d] = lsa[sgpr[%d] >> 4];\n",
 		dst_reg.vgpr_index, lsa.sgpr_index);
 }
 
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_const_t lsa)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = lsa[%s >> 2];\n",
+		"vgpr[%d] = lsa[%s >> 4];\n",
 		dst_reg.vgpr_index, get_const_name(lsa));
 }
 
@@ -2107,6 +2159,19 @@ void spv_emitter::s_brz(const spv::scalar_const_t& target, spv::scalar_register_
 {
 	m_block += fmt::format(
 		"if (sgpr[%d] == 0)\n"
+		"{\n"
+		"	pc = %s;\n"
+		"	return;\n"
+		"}\n",
+		cond.sgpr_index, get_const_name(target.as_u()));
+
+	m_dynamic_branch_target = true;
+}
+
+void spv_emitter::s_brnz(const spv::scalar_const_t& target, spv::scalar_register_t cond)
+{
+	m_block += fmt::format(
+		"if (sgpr[%d] != 0)\n"
 		"{\n"
 		"	pc = %s;\n"
 		"	return;\n"

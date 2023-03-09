@@ -178,6 +178,7 @@ public:
 
 	// Movs
 	void v_movsi(spv::vector_register_t dst, const spv::vector_const_t& src);
+	void v_movs(spv::vector_register_t dst, spv::vector_register_t src);
 	void v_movfi(spv::vector_register_t dst, const spv::vector_const_t& src);
 	void v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg);
 	void v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg);
@@ -209,6 +210,7 @@ public:
 	void s_bri(const spv::scalar_const_t& target);
 	void s_br(spv::scalar_register_t target);
 	void s_brz(const spv::scalar_const_t& target, spv::scalar_register_t cond);
+	void s_brnz(const spv::scalar_const_t& target, spv::scalar_register_t cond);
 	void s_heq(spv::scalar_register_t op1, spv::scalar_register_t op2);
 	void s_heqi(spv::scalar_register_t op1, const spv::scalar_const_t& op2);
 

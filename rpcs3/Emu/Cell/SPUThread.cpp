@@ -1506,6 +1506,11 @@ void spu_thread::cpu_task()
 		// Works more like a interpreter
 		while (true)
 		{
+			while (Emu.IsPaused())
+			{
+				std::this_thread::sleep_for(1ms);
+			}
+
 			if (state) [[unlikely]]
 			{
 				if (check_state())

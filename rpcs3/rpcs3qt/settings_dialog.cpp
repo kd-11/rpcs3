@@ -424,12 +424,14 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	SubscribeTooltip(ui->spu_dynamic, tooltips.settings.spu_dynamic);
 	SubscribeTooltip(ui->spu_asmjit,  tooltips.settings.spu_asmjit);
 	SubscribeTooltip(ui->spu_llvm,    tooltips.settings.spu_llvm);
+	SubscribeTooltip(ui->spu_llvm,    tooltips.settings.spu_spv);
 
 	QButtonGroup* spu_bg = new QButtonGroup(this);
 	spu_bg->addButton(ui->spu__static, static_cast<int>(spu_decoder_type::_static));
 	spu_bg->addButton(ui->spu_dynamic, static_cast<int>(spu_decoder_type::dynamic));
 	spu_bg->addButton(ui->spu_asmjit,  static_cast<int>(spu_decoder_type::asmjit));
 	spu_bg->addButton(ui->spu_llvm,    static_cast<int>(spu_decoder_type::llvm));
+	spu_bg->addButton(ui->spu_spv,     static_cast<int>(spu_decoder_type::spv));
 
 	connect(spu_bg, &QButtonGroup::idToggled, [this](int id, bool checked)
 	{
@@ -443,6 +445,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 			ui->xfloatAccuracy->setEnabled(true);
 			break;
 		case static_cast<int>(spu_decoder_type::asmjit):
+		case static_cast<int>(spu_decoder_type::spv):
 			ui->xfloatAccuracy->setEnabled(false);
 			break;
 		default:

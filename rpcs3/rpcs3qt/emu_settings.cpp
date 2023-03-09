@@ -1138,6 +1138,7 @@ QString emu_settings::GetLocalizedSetting(const QString& original, emu_settings_
 		case spu_decoder_type::dynamic: return tr("Interpreter (dynamic)", "SPU decoder");
 		case spu_decoder_type::asmjit: return tr("Recompiler (ASMJIT)", "SPU decoder");
 		case spu_decoder_type::llvm: return tr("Recompiler (LLVM)", "SPU decoder");
+		case spu_decoder_type::spv: return tr("Recompiler (SPIRV)", "SPU decoder");
 		}
 		break;
 	case emu_settings_type::EnterButtonAssignment:

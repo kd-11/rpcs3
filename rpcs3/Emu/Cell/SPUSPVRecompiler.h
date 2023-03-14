@@ -126,6 +126,14 @@ namespace spv
 	};
 
 	struct SPUSPV_block;
+
+	enum class exit_code
+	{
+		SUCCESS = 0,
+		HLT = 1,
+		MFC_CMD = 2,
+		RDCH3 = 3
+	};
 }
 
 namespace spv_constant
@@ -163,12 +171,49 @@ public:
 	spv::scalar_register_t s_tmp2 = 2;
 	spv::scalar_register_t s_tmp3 = 3;
 
+	// Symbolic registers
+	spv::vector_register_t v_fpscr = 1024;
+	spv::scalar_register_t s_srr0  = 1025;
+	spv::scalar_register_t s_flags = 1026;
+
+	struct
+	{
+		spv::scalar_register_t ch_tag_mask = 1027;
+		spv::scalar_register_t ch_tag_stat_count = 1028;
+		spv::scalar_register_t ch_tag_stat_value = 1029;
+		spv::scalar_register_t ch_tag_update = 1030;
+		spv::scalar_register_t cmd_tag_id = 1031;
+		spv::scalar_register_t cmd_lsa = 1032;
+		spv::scalar_register_t cmd_eal = 1033;
+		spv::scalar_register_t cmd_eah = 1034;
+		spv::scalar_register_t cmd_size = 1035;
+		spv::scalar_register_t cmd = 1036;
+		spv::scalar_register_t fence = 1037;
+	} mfc;
+
+	const std::array<std::string_view, 13> m_system_register_names_s = {
+		"srr0",
+		"flags",
+		"MFC_tag_mask",
+		"MFC_tag_stat_count",
+		"MFC_tag_stat_value",
+		"MFC_tag_update",
+		"MFC_tag_id",
+		"MFC_lsa",
+		"MFC_eal",
+		"MFC_eah",
+		"MFC_size",
+		"MFC_cmd_id",
+		"MFC_fence"
+	};
+
 	// Management
 	void reset();
 	std::unique_ptr<spv::SPUSPV_block> compile();
 
-	int get_pc() const { return m_end_pc; }
-	bool has_dynamic_branch_target() const { return m_dynamic_branch_target; }
+	int get_pc() const { return m_compiler_config.end_pc; }
+	bool has_dynamic_branch_target() const { return m_compiler_config.dynamic_branch_target; }
+	bool has_memory_dependency() const { return m_compiler_config.uses_mfc; }
 
 	// Arithmetic ops
 	void v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
@@ -196,39 +241,51 @@ public:
 	void v_sprd(spv::vector_register_t dst_reg, spv::scalar_register_t src_reg);
 	void v_sprd(spv::vector_register_t dst_reg, spv::vector_register_t src_reg, int component);
 
+	void v_storsr(spv::vector_register_t dst_reg, spv::vector_register_t src);
+	void v_loadsr(spv::vector_register_t dst_reg, spv::vector_register_t src);
+
 	void s_movsi(spv::scalar_register_t dst_reg, const spv::scalar_const_t& src);
 
+	void s_storsr(spv::scalar_register_t dst_reg, spv::scalar_register_t src);
+	void s_loadsr(spv::scalar_register_t dst_reg, spv::scalar_register_t src);
+
 	// Bitwise
-	void v_andsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t op1);
-	void v_ands(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
-	void v_bfxsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1, const spv::scalar_const_t& op2);
-	void v_bfxs(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1, spv::scalar_register_t op2);
-	void v_shlsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
-	void v_shls(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
-	void v_shrsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
-	void v_xorsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
-	void v_orsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
-	void v_ors(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_andi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t op1);
+	void v_and(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_bfxi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1, const spv::scalar_const_t& op2);
+	void v_bfx(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1, spv::scalar_register_t op2);
+	void v_shli(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_shl(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_shri(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_xori(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_ori(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_or(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
 
 	void v_shufwi(spv::vector_register_t dst, spv::vector_register_t src, const std::array<int, 4>& shuffle);
 
-	void s_andsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
-	void s_xorsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
-	void s_shlsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
+	void s_andi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
+	void s_xori(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
+	void s_shli(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 
-	void s_xtrs(spv::scalar_register_t dst, spv::vector_register_t src, int component);
+	void s_xtr(spv::scalar_register_t dst, spv::vector_register_t src, int component);
 	void s_ins(spv::vector_register_t dst, spv::scalar_register_t src, int component);
 	void s_ins(spv::vector_register_t dst, const spv::scalar_const_t& src, spv::scalar_register_t select);
 
-	void v_shufb(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1, spv::vector_register_t op2);
+	void q_shufb(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1, spv::vector_register_t op2);
+	void q_rotl(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+	void q_rotr(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+	void q_shl(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+	void q_shr(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
 
 	// Flow control
 	void s_bri(const spv::scalar_const_t& target);
 	void s_br(spv::scalar_register_t target);
-	void s_brz(const spv::scalar_const_t& target, spv::scalar_register_t cond);
+	void s_brz(const spv::scalar_const_t& target, spv::scalar_register_t cond, spv::exit_code exit_code = spv::exit_code::SUCCESS);
 	void s_brnz(const spv::scalar_const_t& target, spv::scalar_register_t cond);
 	void s_heq(spv::scalar_register_t op1, spv::scalar_register_t op2);
 	void s_heqi(spv::scalar_register_t op1, const spv::scalar_const_t& op2);
+	void s_exit(const spv::exit_code& code);
+	void s_call(const std::string_view& function, const std::vector<std::string_view>& args = {});
 
 	// General
 	void unimplemented(const std::string_view& name);
@@ -238,12 +295,40 @@ private:
 	std::vector<spv::vector_const_t> m_v_const_array;
 	std::vector<spv::scalar_const_t> m_s_const_array;
 
-	bool m_dynamic_branch_target = false;
-	bool m_uses_shufb = false;
-	int m_end_pc = -1;
+	struct
+	{
+		bool dynamic_branch_target = false;
+		bool uses_shufb = false;
+		bool uses_qrotl32 = false;
+		bool uses_qrotr32 = false;
+		bool uses_qrotl = false;
+		bool uses_qrotr = false;
+		bool uses_qshl32 = false;
+		bool uses_qshr32 = false;
+		bool uses_qshl = false;
+		bool uses_qshr = false;
+		bool uses_mfc = false;
+		int  end_pc = -1;
+
+		void enable_dynamic_branch() { dynamic_branch_target = true; }
+		void set_pc(int value) { end_pc = value; }
+
+		void enable_shufb() { uses_shufb = true; }
+		void enable_qrotl() { uses_qrotl = uses_qrotl32 = true; }
+		void enable_qrotr() { uses_qrotr = uses_qrotr32 = true; }
+		void enable_qshl() { uses_qshl = uses_qrotl = uses_qrotl32 = true; }
+		void enable_qshr() { uses_qshr = uses_qrotr = uses_qrotr32 = true; }
+		void enable_qshl32() { uses_qshl32 = uses_qrotl32 = true; }
+		void enable_qshr32() { uses_qshr32 = uses_qrotr32 = true; }
+		void enable_mfc() { uses_mfc = true; }
+
+	} m_compiler_config;
 
 	std::string get_const_name(const spv::vector_const_t& const_);
 	std::string get_const_name(const spv::scalar_const_t& const_);
+
+	std::string_view get_sysreg_name(const spv::scalar_register_t& reg);
+	std::string_view get_sysreg_name(const spv::vector_register_t& reg);
 };
 
 // SPU SPIR-V Recompiler

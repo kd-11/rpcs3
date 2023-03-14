@@ -37,8 +37,8 @@ layout(set=0, binding=2, std430) writeonly restrict buffer control_block
 layout(set=0, binding=3, std430) readonly restrict buffer constants_block
 {
 	// Static constants
-	ivec4 qshl_mask_lookup[128];
 	ivec4 qshr_mask_lookup[128];
+	ivec4 qshl_mask_lookup[128];
 };
 
 // Temp registers
@@ -46,17 +46,23 @@ vec4 vgprf[2];
 int sgpr[4];
 
 // Standard definitions
+#define SPU_SUCCESS 0
 #define SPU_HLT     1
 #define SPU_MFC_CMD 2
 
 // Standard wrappers
 ivec4 _bswap(const in ivec4 reg)
 {
-	const ivec4 a = bitfieldExtract(reg, 0, 8);
-	const ivec4 b = bitfieldExtract(reg, 8, 8);
-	const ivec4 c = bitfieldExtract(reg, 16, 8);
-	const ivec4 d = bitfieldExtract(reg, 24, 8);
-	const ivec4 e = d | (c << 8) | (b << 16) | (a << 24);
-	return e.wzyx;
+	const uvec4 ureg = uvec4(reg);
+	const uvec4 a = bitfieldExtract(ureg, 0, 8);
+	const uvec4 b = bitfieldExtract(ureg, 8, 8);
+	const uvec4 c = bitfieldExtract(ureg, 16, 8);
+	const uvec4 d = bitfieldExtract(ureg, 24, 8);
+	const uvec4 e = d | (c << 8) | (b << 16) | (a << 24);
+	return ivec4(e.wzyx);
 }
+
+// Workaround for signed bfe being fucked
+#define _vbfe(v, o, c) ivec4(bitfieldExtract(uvec4(v), o, c))
+
 )"

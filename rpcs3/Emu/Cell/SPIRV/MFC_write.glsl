@@ -9,6 +9,7 @@ R"(
 void MFC_tag_complete(const in int completed)
 {
 	MFC_tag_stat_value = completed;
+	MFC_tag_stat_count = 1;
 	MFC_tag_update = MFC_TAG_UPDATE_IMMEDIATE;
 }
 

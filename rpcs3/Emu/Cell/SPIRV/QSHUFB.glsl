@@ -1,15 +1,15 @@
 R"(
 ivec4 _dqshufb(const in ivec4 a, const in ivec4 b, const in ivec4 c)
 {
-	const ivec4 sources[2] = { b, a };
-	int tmp, tmp2, tmp3, ref;
-	ivec4 result;
+	const uvec4 sources[2] = { uvec4(b), uvec4(a) };
+	uint tmp, tmp2, tmp3, ref;
+	uvec4 result;
 
 	for (int word = 0; word < 4; ++word)
 	{
 		for (int bit = 0; bit < 32; bit += 8)
 		{
-			ref = bitfieldExtract(c[word], bit, 8);     // ref = shuffle word
+			ref = bitfieldExtract(uint(c[word]), bit, 8);     // ref = shuffle word
 			tmp = bitfieldExtract(ref, 29, 3);          // tmp = control word
 			tmp2 = ref & 15;                            // tmp2 = ref % 16
 
@@ -33,7 +33,7 @@ ivec4 _dqshufb(const in ivec4 a, const in ivec4 b, const in ivec4 c)
 				}
 				default:
 				{
-					tmp3 = bitfieldExtract(sources[(ref >> 4) & 1][tmp2 >> 2], (tmp2 & 3) << 3, 8);
+					tmp3 = bitfieldExtract(sources[(ref >> 4) & 1][tmp2 >> 2], int(tmp2 & 3) << 3, 8);
 					break;
 				}
 			}
@@ -42,6 +42,6 @@ ivec4 _dqshufb(const in ivec4 a, const in ivec4 b, const in ivec4 c)
 		}
 	}
 
-	return result;
+	return ivec4(result);
 }
 )"

@@ -43,12 +43,14 @@ layout(set=0, binding=3, std430) readonly restrict buffer constants_block
 
 // Temp registers
 vec4 vgprf[2];
+uvec4 vgpru[2];
 int sgpr[4];
 
 // Standard definitions
-#define SPU_SUCCESS 0
-#define SPU_HLT     1
-#define SPU_MFC_CMD 2
+#define SPU_SUCCESS         0
+#define SPU_HLT             1
+#define SPU_MFC_CMD         2
+#define SPU_RDCH_SigNotify1 3
 
 // Standard wrappers
 ivec4 _bswap(const in ivec4 reg)

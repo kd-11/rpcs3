@@ -217,18 +217,36 @@ public:
 
 	// Arithmetic ops
 	void v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_addui(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
 	void v_adds(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
 	void v_subs(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_subsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_subsi(spv::vector_register_t dst, const spv::vector_const_t& op0, spv::vector_register_t op1);
+	void v_addf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_subf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
 	void v_mulsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_muls(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_mulu(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_mulfi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_mulf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_rcpf(spv::vector_register_t dst, spv::vector_register_t op0);
+	void v_rsqf(spv::vector_register_t dst, spv::vector_register_t op0);
 
 	void s_addsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 	void s_adds(spv::scalar_register_t dst, spv::scalar_register_t op0, spv::scalar_register_t op1);
 	void s_subsi(spv::scalar_register_t dst, const spv::scalar_const_t& op0, spv::scalar_register_t op1);
 	void s_subsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 
+	void s_dp4si(spv::scalar_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void s_dp4s(spv::scalar_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+
 	// Comparison
 	void v_cmpeqsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
 	void v_cmpgtsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
+	void v_cmpgts(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_cmpgtu(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_cmpgtf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
+	void v_clampfi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& min, const spv::vector_const_t& max);
 
 	// Movs
 	void v_movsi(spv::vector_register_t dst, const spv::vector_const_t& src);
@@ -249,6 +267,11 @@ public:
 	void s_storsr(spv::scalar_register_t dst_reg, spv::scalar_register_t src);
 	void s_loadsr(spv::scalar_register_t dst_reg, spv::scalar_register_t src);
 
+	// Casts
+	void v_fcvtu(spv::vector_register_t dst, spv::vector_register_t src);
+	void v_scvtf(spv::vector_register_t dst, spv::vector_register_t src);
+	void v_ucvtf(spv::vector_register_t dst, spv::vector_register_t src);
+
 	// Bitwise
 	void v_andi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t op1);
 	void v_and(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1);
@@ -266,6 +289,7 @@ public:
 	void s_andi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 	void s_xori(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 	void s_shli(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
+	void s_hzor(spv::scalar_register_t dst, spv::vector_register_t op0);
 
 	void s_xtr(spv::scalar_register_t dst, spv::vector_register_t src, int component);
 	void s_ins(spv::vector_register_t dst, spv::scalar_register_t src, int component);

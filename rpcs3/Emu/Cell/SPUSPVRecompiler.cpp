@@ -2708,7 +2708,7 @@ void spv_emitter::v_cmpgtf(spv::vector_register_t dst, spv::vector_register_t op
 void spv_emitter::v_clampfi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& min, const spv::vector_const_t& max)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(clamp(intBitsToFloat(vgpr[%d]), %s, %s));\n",
+		"vgpr[%d] = floatBitsToInt(clamp(intBitsToFloat(vgpr[%d]), %s, %s));\n",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(min), get_const_name(max));
 }
 
@@ -2802,7 +2802,7 @@ void spv_emitter::v_sprd(spv::vector_register_t dst_reg, spv::vector_register_t 
 void spv_emitter::v_fcvtu(spv::vector_register_t dst, spv::vector_register_t src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(intBitsToFloat(vgpr[%d]));\n",
+		"vgpr[%d] = ivec4(uvec4(intBitsToFloat(vgpr[%d])));\n",
 		dst.vgpr_index, src.vgpr_index);
 }
 

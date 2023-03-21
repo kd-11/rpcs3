@@ -289,6 +289,7 @@ public:
 	void s_andi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 	void s_xori(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 	void s_shli(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
+	void s_shri(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1);
 	void s_hzor(spv::scalar_register_t dst, spv::vector_register_t op0);
 
 	void s_xtr(spv::scalar_register_t dst, spv::vector_register_t src, int component);

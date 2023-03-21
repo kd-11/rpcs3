@@ -10,8 +10,8 @@ ivec4 _dqshufb(const in ivec4 a, const in ivec4 b, const in ivec4 c)
 		for (int bit = 0; bit < 32; bit += 8)
 		{
 			ref = bitfieldExtract(uint(c[word]), bit, 8);     // ref = shuffle word
-			tmp = bitfieldExtract(ref, 29, 3);          // tmp = control word
-			tmp2 = ref & 15;                            // tmp2 = ref % 16
+			tmp = bitfieldExtract(ref, 29, 3);                // tmp = control word
+			tmp2 = (ref & 31) ^ 31;                           // tmp2 = reverse(ref % 32)
 
 			switch (tmp)
 			{
@@ -33,12 +33,12 @@ ivec4 _dqshufb(const in ivec4 a, const in ivec4 b, const in ivec4 c)
 				}
 				default:
 				{
-					tmp3 = bitfieldExtract(sources[(ref >> 4) & 1][tmp2 >> 2], int(tmp2 & 3) << 3, 8);
+					tmp3 = bitfieldExtract(sources[(tmp2 >> 4) & 1][(tmp2 >> 2) & 3], int(tmp2 & 3) << 3, 8);
 					break;
 				}
 			}
 
-			bitfieldInsert(result[word], tmp3, bit, 8);
+			result[word] = bitfieldInsert(result[word], tmp3, bit, 8);
 		}
 	}
 

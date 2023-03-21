@@ -18,7 +18,12 @@
 #include <windows.h>
 #pragma optimize("", off)
 
+#define SPU_DEBUG 0
+
 constexpr auto SPV_MAX_BLOCKS = 65536u;
+
+extern fs::file g_tty;
+extern atomic_t<s64> g_tty_size;
 
 template <>
 void fmt_class_string<spv::exit_code>::format(std::string& out, u64 arg)
@@ -36,6 +41,26 @@ void fmt_class_string<spv::exit_code>::format(std::string& out, u64 arg)
 
 		return unknown;
 	});
+}
+
+namespace
+{
+	const spu_decoder<spv_recompiler> s_spu_decoder;
+
+	const auto println = [](const char* s)
+	{
+		char buf[512];
+		snprintf(buf, 512, "[spvc] %s\n", s);
+		rsx_log.error(buf);
+		OutputDebugStringA(buf);
+	};
+
+	const auto tty_write = [](const std::string& msg)
+	{
+		g_tty_size -= (1ll << 48);
+		g_tty.write(msg);
+		g_tty_size += (1ll << 48) + msg.length();
+	};
 }
 
 namespace spv
@@ -159,13 +184,13 @@ namespace spv
 			command_buffer_list.create(command_pool, vk::command_buffer::all);
 
 			// Create our memory buffers
-#if 0
-			gpr_block = std::make_unique<vk::buffer>(dev, 256 * 16, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
-#else
+#if 1//SPU_DEBUG
 			gpr_block = std::make_unique<vk::buffer>(dev, 256 * 16, dev.get_memory_mapping().device_bar,
 				VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 			gpr = static_cast<SPU_GPR*>(gpr_block->map(0, 128 * 16));
+#else
+			gpr_block = std::make_unique<vk::buffer>(dev, 256 * 16, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 #endif
 
 			gpu_constants = std::make_unique<vk::buffer>(dev, 8192, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
@@ -196,7 +221,8 @@ namespace spv
 
 		~SPU_execution_context_t()
 		{
-			sync();
+			//sync();
+			command_buffer_list.wait_all();
 
 			command_buffer_list.destroy();
 			command_pool.destroy();
@@ -213,6 +239,12 @@ namespace spv
 				ls_block->unmap();
 				ls = nullptr;
 			}
+
+			if (gpr)
+			{
+				gpr_block->unmap();
+				gpr = nullptr;
+			}
 		}
 
 		void execute(spu_thread& spu, const SPUSPV_block& block)
@@ -225,12 +257,6 @@ namespace spv
 					VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
 					VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 			};
-
-			if (spu.pc == 0x6e8)
-			{
-				int a = 0;
-				a++;
-			}
 
 			auto cmd = command_buffer_list.next();
 			cmd->begin();
@@ -270,13 +296,14 @@ namespace spv
 
 			if (!block.is_dynamic_branch_block && !block.issues_memory_op)
 			{
-				sync();
+				//u32 next_pc = block.end_pc;
+				//sync(&next_pc);
 				spu.pc = static_cast<u32>(block.end_pc);
 				return;
 			}
 
 			// Wait for GPU
-			sync();
+			sync(&teb->next_pc);
 
 			// Check TEB flags
 			const auto exit_code = static_cast<spv::exit_code>(teb->exit_code);
@@ -337,6 +364,9 @@ namespace spv
 				const spu_opcode_t op = { *reinterpret_cast<const be_t<u32>*>(ls + spu.pc) };
 				const s64 result = spu.get_ch_value(op.ra);
 				gpr->vgpr[op.rt][3] = result;
+				gpr->vgpr[op.rt][2] = 0;
+				gpr->vgpr[op.rt][1] = 0;
+				gpr->vgpr[op.rt][0] = 0;
 				spu.pc = teb->next_pc + 4;
 				return;
 			}
@@ -346,9 +376,32 @@ namespace spv
 			spu.pc = teb->next_pc;
 		}
 
-		void sync()
+		void sync(volatile u32 volatile* p_next_pc)
 		{
 			command_buffer_list.wait_all();
+
+#if SPU_DEBUG
+			dump(*p_next_pc);
+#endif
+		}
+
+		void dump(u32 next_pc)
+		{
+			// Dump regs
+			const auto banner = fmt::format(" [%x] -- DUMP REGS --", next_pc);
+			println(banner.data());
+			for (int i = 0; i < 128; ++i)
+			{
+				const auto regstr = fmt::format("r%d %x %x %x %x (%f %f %f %f)",
+					i, gpr->vgpr[i][0], gpr->vgpr[i][1], gpr->vgpr[i][2], gpr->vgpr[i][3],
+					std::bit_cast<f32>(gpr->vgpr[i][0]), std::bit_cast<f32>(gpr->vgpr[i][1]),
+					std::bit_cast<f32>(gpr->vgpr[i][2]), std::bit_cast<f32>(gpr->vgpr[i][3]));
+				println(regstr.data());
+			}
+
+			tty_write(fmt::format("pc = 0x%x, r17 = 0x%x 0x%x 0x%x 0x%x, r85 = 0x%x 0x%x 0x%x 0x%x\n",
+				next_pc, gpr->vgpr[17][0], gpr->vgpr[17][1], gpr->vgpr[17][2], gpr->vgpr[17][3],
+				gpr->vgpr[85][0], gpr->vgpr[85][1], gpr->vgpr[85][2], gpr->vgpr[85][3]));
 		}
 
 		void do_cache_sync(const vk::command_buffer& cmd, spu_thread& spu)
@@ -566,20 +619,6 @@ namespace spv
 	}
 }
 
-namespace
-{
-	const spu_decoder<spv_recompiler> s_spu_decoder;
-
-	const auto println = [](const char* s)
-	{
-		char buf[512];
-		snprintf(buf, 512, "[spvc] %s\n", s);
-		rsx_log.error(buf);
-		OutputDebugStringA(buf);
-	};
-
-
-}
 
 std::unique_ptr<spu_recompiler_base> spu_recompiler_base::make_spv_recompiler()
 {
@@ -807,6 +846,7 @@ void spv_recompiler::RDCH(spu_opcode_t op)
 		c.s_loadsr(c.s_tmp0, c.mfc.ch_tag_stat_count);
 		c.s_brz(spv_constant::make_su(m_pos), c.s_tmp0, spv::exit_code::HLT); // TODO
 		c.s_loadsr(c.s_tmp1, c.mfc.ch_tag_stat_value);
+		c.v_movsi(op.rt, spv_constant::spread(0));
 		c.s_ins(op.rt, c.s_tmp1, 3);
 		return;
 	}
@@ -832,7 +872,8 @@ void spv_recompiler::OR(spu_opcode_t op)
 
 void spv_recompiler::BG(spu_opcode_t op)
 {
-	c.unimplemented("BG");
+	c.v_cmpgtu(c.v_tmp0, op.ra, op.rb);
+	c.v_xori(op.rt, c.v_tmp0, spv_constant::spread(-1));
 }
 
 void spv_recompiler::SFH(spu_opcode_t op)
@@ -941,7 +982,7 @@ void spv_recompiler::A(spu_opcode_t op)
 
 void spv_recompiler::AND(spu_opcode_t op)
 {
-	c.v_or(op.rt, op.ra, op.rb);
+	c.v_and(op.rt, op.ra, op.rb);
 }
 
 void spv_recompiler::CG(spu_opcode_t op)
@@ -1165,7 +1206,7 @@ void spv_recompiler::HBR(spu_opcode_t op)
 void spv_recompiler::GB(spu_opcode_t op)
 {
 	c.v_shli(c.v_tmp0, op.ra, spv_constant::make_vi(24, 25, 26, 27));
-	c.v_ori(c.v_tmp0, c.v_tmp0, spv_constant::make_vi(1 << 24, 1 << 25, 1 << 26, 1 << 27));
+	c.v_andi(c.v_tmp0, c.v_tmp0, spv_constant::make_vi(1 << 24, 1 << 25, 1 << 26, 1 << 27));
 	c.s_hzor(c.s_tmp0, c.v_tmp0); // Horizontal sum = horizontal or
 	c.v_movsi(op.rt, spv_constant::spread(0));
 	c.s_ins(op.rt, c.s_tmp0, 3);
@@ -1198,7 +1239,8 @@ void spv_recompiler::FSMB(spu_opcode_t op)
 
 void spv_recompiler::FREST(spu_opcode_t op)
 {
-	c.v_rcpf(op.rt, op.ra);
+	c.v_rcpf(c.v_tmp0, op.ra);
+	c.v_andi(op.rt, c.v_tmp0, spv_constant::spread(0xfffffc00).as_vi());
 }
 
 void spv_recompiler::FRSQEST(spu_opcode_t op)
@@ -1308,7 +1350,7 @@ void spv_recompiler::CWD(spu_opcode_t op)
 	c.s_addsi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(op.i7));
 	c.s_xori(c.s_tmp0, c.s_tmp0, spv_constant::make_si(-1));
 	c.s_andi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(0xc));
-	c.s_shli(c.s_tmp0, c.s_tmp0, spv_constant::make_si(2));
+	c.s_shri(c.s_tmp0, c.s_tmp0, spv_constant::make_si(2));
 	c.s_ins(op.rt, spv_constant::make_si(0x00010203), c.s_tmp0);
 }
 
@@ -1421,7 +1463,7 @@ void spv_recompiler::XSBH(spu_opcode_t op)
 	c.v_bfxi(c.v_tmp0, op.ra, spv_constant::make_si(7), spv_constant::make_si(1));
 	c.v_mulsi(c.v_tmp0, c.v_tmp0, spv_constant::spread(0xffff0000).as_vi());
 	c.v_andi(c.v_tmp1, op.ra, spv_constant::spread(0x0000ffff));
-	c.v_and(op.rt, c.v_tmp0, c.v_tmp1);
+	c.v_or(op.rt, c.v_tmp0, c.v_tmp1);
 }
 
 void spv_recompiler::CLGT(spu_opcode_t op)
@@ -1548,7 +1590,10 @@ void spv_recompiler::ADDX(spu_opcode_t op)
 
 void spv_recompiler::SFX(spu_opcode_t op)
 {
-	c.unimplemented("SFX");
+	c.v_xori(c.v_tmp0, op.rt, spv_constant::spread(-1));
+	c.v_andi(c.v_tmp0, c.v_tmp0, spv_constant::spread(1));
+	c.v_subs(c.v_tmp1, op.rb, op.ra);
+	c.v_subs(op.rt, c.v_tmp1, c.v_tmp0);
 }
 
 void spv_recompiler::CGX(spu_opcode_t op)
@@ -1660,7 +1705,7 @@ void spv_recompiler::FI(spu_opcode_t op)
 {
 	// TODO
 	const auto mask_se = spv_constant::spread(0xff800000).as_vi(); // sign and exponent mask
-	const auto mask_bf = spv_constant::spread(0xff800000).as_vi(); // base fraction mask
+	const auto mask_bf = spv_constant::spread(0x007ffc00).as_vi(); // base fraction mask
 	const auto mask_sf = spv_constant::spread(0x000003ff).as_vi(); // step fraction mask
 	const auto mask_yf = spv_constant::spread(0x0007ffff).as_vi(); // Y fraction mask (bits 13..31)
 
@@ -2060,20 +2105,21 @@ void spv_recompiler::ILA(spu_opcode_t op)
 
 void spv_recompiler::SELB(spu_opcode_t op)
 {
-	c.v_xori(c.v_tmp0, op.rc, spv_constant::spread(0));
+	c.v_xori(c.v_tmp0, op.rc, spv_constant::spread(0xffffffff).as_vi());
 	c.v_and(c.v_tmp1, op.rc, op.rb);
 	c.v_and(c.v_tmp0, c.v_tmp0, op.ra);
-	c.v_or(op.rt, c.v_tmp0, c.v_tmp1);
+	c.v_or(op.rt4, c.v_tmp0, c.v_tmp1);
 }
 
 void spv_recompiler::SHUFB(spu_opcode_t op)
 {
 	// TODO: If we already know the CW, we can redirect to shufw which is much faster
-	c.q_shufb(op.rt, op.ra, op.rb, op.rc);
+	c.q_shufb(op.rt4, op.ra, op.rb, op.rc);
 }
 
 void spv_recompiler::MPYA(spu_opcode_t op)
 {
+	// RT4!
 	c.unimplemented("MPYA");
 }
 
@@ -2082,7 +2128,7 @@ void spv_recompiler::FNMS(spu_opcode_t op)
 	// TODO: xfloat
 	// TODO: native FMA
 	c.v_mulf(c.v_tmp0, op.ra, op.rb);
-	c.v_subf(op.rt, op.rc, c.v_tmp0);
+	c.v_subf(op.rt4, op.rc, c.v_tmp0);
 }
 
 void spv_recompiler::FMA(spu_opcode_t op)
@@ -2090,11 +2136,12 @@ void spv_recompiler::FMA(spu_opcode_t op)
 	// TODO: xfloat
 	// TODO: native FMA
 	c.v_mulf(c.v_tmp0, op.ra, op.rb);
-	c.v_addf(op.rt, op.rc, c.v_tmp0);
+	c.v_addf(op.rt4, op.rc, c.v_tmp0);
 }
 
 void spv_recompiler::FMS(spu_opcode_t op)
 {
+	// RT4!
 	c.unimplemented("FMS");
 }
 
@@ -2459,11 +2506,11 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 		"	execute();\n"
 		"	lr = vgpr[0].w;\n"
 		"	sp = vgpr[1].w;\n"
-		"	dr[11] = vgpr[80][0];\n"
-		"	dr[12] = vgpr[80][1];\n"
-		"	dr[13] = vgpr[80][2];\n"
-		"	dr[14] = vgpr[80][3];\n"
-		"	dr[15] = sgpr[0];\n"
+		"	dr[11] = vgpr[95][0];\n"
+		"	dr[12] = vgpr[95][1];\n"
+		"	dr[13] = vgpr[95][2];\n"
+		"	dr[14] = vgpr[95][3];\n"
+		"	dr[15] = vgpr[9][2];\n"
 		"}\n\n"; //qshl_mask_lookup
 
 	m_block = shaderbuf.str();
@@ -2878,6 +2925,13 @@ void spv_emitter::s_shli(spv::scalar_register_t dst, spv::scalar_register_t op0,
 {
 	m_block += fmt::format(
 		"sgpr[%d] = sgpr[%d] << %s;\n",
+		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
+}
+
+void spv_emitter::s_shri(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
+{
+	m_block += fmt::format(
+		"sgpr[%d] = sgpr[%d] >> %s;\n",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 

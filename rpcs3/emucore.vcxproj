@@ -880,6 +880,31 @@
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>
+    <None Include="Emu\Cell\SPIRV\MFC_read.glsl" />
+    <None Include="Emu\Cell\SPIRV\MFC_write.glsl" />
+    <None Include="Emu\Cell\SPIRV\QROTL.glsl" />
+    <None Include="Emu\Cell\SPIRV\QROTL32.glsl" />
+    <None Include="Emu\Cell\SPIRV\QROTR.glsl" />
+    <None Include="Emu\Cell\SPIRV\QROTR32.glsl" />
+    <None Include="Emu\Cell\SPIRV\QSHL.glsl" />
+    <None Include="Emu\Cell\SPIRV\QSHL32.glsl" />
+    <None Include="Emu\Cell\SPIRV\QSHR.glsl" />
+    <None Include="Emu\Cell\SPIRV\QSHR32.glsl" />
+    <None Include="Emu\Cell\SPIRV\QSHUFB.glsl" />
+    <None Include="Emu\Cell\SPIRV\SPU_Defines.glsl" />
+    <None Include="Emu\Cell\SPIRV\SPV_Header.glsl" />
+    <None Include="Emu\Cell\SPRIV\MFC_read.glsl" />
+    <None Include="Emu\Cell\SPRIV\QROTL.glsl" />
+    <None Include="Emu\Cell\SPRIV\QROTL8.glsl" />
+    <None Include="Emu\Cell\SPRIV\QROTR.glsl" />
+    <None Include="Emu\Cell\SPRIV\QROTR8.glsl" />
+    <None Include="Emu\Cell\SPRIV\QSHL.glsl" />
+    <None Include="Emu\Cell\SPRIV\QSHL8.glsl" />
+    <None Include="Emu\Cell\SPRIV\QSHR.glsl" />
+    <None Include="Emu\Cell\SPRIV\QSHR8.glsl" />
+    <None Include="Emu\Cell\SPRIV\QSHUFB.glsl" />
+    <None Include="Emu\Cell\SPRIV\SPU_Defines.glsl" />
+    <None Include="Emu\Cell\SPRIV\MFC_write.glsl" />
     <None Include="Emu\RSX\Program\GLSLInterpreter\FragmentInterpreter.glsl" />
     <None Include="Emu\RSX\Program\GLSLInterpreter\VertexInterpreter.glsl" />
     <None Include="Emu\RSX\Program\GLSLSnippets\CopyBufferToColorImage.glsl" />

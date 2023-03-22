@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SPURecompiler.h"
+#include "Emu/RSX/Common/simple_array.hpp"
 
 #include <functional>
 
@@ -132,7 +133,8 @@ namespace spv
 		SUCCESS = 0,
 		HLT = 1,
 		MFC_CMD = 2,
-		RDCH3 = 3
+		RDCH3 = 3,
+		STOP_AND_SIGNAL = 4
 	};
 }
 
@@ -191,7 +193,13 @@ public:
 		spv::scalar_register_t fence = 1037;
 	} mfc;
 
-	const std::array<std::string_view, 13> m_system_register_names_s = {
+	// Debug registers
+	spv::scalar_register_t s_dr0 = 1038;
+	spv::scalar_register_t s_dr1 = 1039;
+	spv::scalar_register_t s_dr2 = 1040;
+	spv::scalar_register_t s_dr3 = 1041;
+
+	const std::array<std::string_view, 17> m_system_register_names_s = {
 		"srr0",
 		"flags",
 		"MFC_tag_mask",
@@ -204,7 +212,11 @@ public:
 		"MFC_eah",
 		"MFC_size",
 		"MFC_cmd_id",
-		"MFC_fence"
+		"MFC_fence",
+		"dr[0]",
+		"dr[1]",
+		"dr[2]",
+		"dr[3]"
 	};
 
 	// Management
@@ -214,6 +226,8 @@ public:
 	int get_pc() const { return m_compiler_config.end_pc; }
 	bool has_dynamic_branch_target() const { return m_compiler_config.dynamic_branch_target; }
 	bool has_memory_dependency() const { return m_compiler_config.uses_mfc; }
+
+	void signal_mem() { m_compiler_config.enable_mfc(); }
 
 	// Arithmetic ops
 	void v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1);
@@ -334,6 +348,7 @@ private:
 		bool uses_qshr = false;
 		bool uses_mfc = false;
 		int  end_pc = -1;
+		int  end_pc_blob_marker = -1;
 
 		void enable_dynamic_branch() { dynamic_branch_target = true; }
 		void set_pc(int value) { end_pc = value; }
@@ -368,6 +383,9 @@ public:
 
 private:
 	spv_emitter c;
+	rsx::simple_array<u32> m_jump_targets;
+
+	void compile_block(const spu_program& func);
 
 public:
 	void UNK(spu_opcode_t op);

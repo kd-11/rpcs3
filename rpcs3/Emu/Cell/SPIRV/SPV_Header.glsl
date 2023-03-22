@@ -51,6 +51,7 @@ int sgpr[4];
 #define SPU_HLT             1
 #define SPU_MFC_CMD         2
 #define SPU_RDCH_SigNotify1 3
+#define SPU_STOP_AND_SIGNAL 4
 
 // Standard wrappers
 ivec4 _bswap(const in ivec4 reg)

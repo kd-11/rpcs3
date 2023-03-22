@@ -334,5 +334,18 @@ namespace rsx
 
 			std::sort(begin(), end(), predicate);
 		}
+
+		bool includes(const Ty& element) requires std::is_integral_v<Ty> // TODO: Should work for all trivially comparable
+		{
+			for (auto ptr = _data, last = _data + _size; ptr < last; ptr++)
+			{
+				if (*ptr == element)
+				{
+					return true;
+				}
+			}
+
+			return false;
+		}
 	};
 }

@@ -48,6 +48,8 @@ struct spu_program
 	// Program data with intentionally wrong endianness (on LE platform opcode values are swapped)
 	std::vector<u32> data;
 
+	const be_t<u32>* ls;
+
 	bool operator==(const spu_program& rhs) const noexcept;
 
 	bool operator<(const spu_program& rhs) const noexcept;

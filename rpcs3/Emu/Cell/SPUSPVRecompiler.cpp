@@ -36,6 +36,7 @@ void fmt_class_string<spv::exit_code>::format(std::string& out, u64 arg)
 		case spv::exit_code::HLT: return "SPU_HLT";
 		case spv::exit_code::MFC_CMD: return "SPU_MFC_CMD";
 		case spv::exit_code::RDCH3: return "SPU_RDCH_SigNotify1";
+		case spv::exit_code::STOP_AND_SIGNAL: return "SPU_STOP_AND_SIGNAL";
 		default: break;
 		}
 
@@ -158,6 +159,8 @@ namespace spv
 
 		bool flush_caches = true;
 		bool init_constants = true;
+
+		std::pair<u32, u32> flush_cache_region = {0 , 256 * 1024};
 
 		TEB *teb = nullptr;
 		u8* ls = nullptr;
@@ -331,9 +334,6 @@ namespace spv
 			}
 			case spv::exit_code::MFC_CMD:
 			{
-				// TODO: Be smarter about this
-				std::memcpy(spu._ptr<u8>(0), ls, 256 * 1024);
-
 				auto regs = reinterpret_cast<MFC_registers_t*>(teb->dr);
 				spu.ch_tag_mask = regs->MFC_tag_mask;
 				spu.ch_tag_stat.set_value(regs->MFC_tag_stat_value, regs->MFC_tag_stat_count); // value, count
@@ -346,9 +346,13 @@ namespace spv
 				spu.ch_mfc_cmd.cmd = MFC(regs->MFC_cmd);
 				spu.mfc_fence = regs->MFC_fence;
 
+				// TODO: Be smarter about this
+				std::memcpy(spu._ptr<u8>(regs->MFC_lsa), ls + regs->MFC_lsa, utils::align(static_cast<u32>(regs->MFC_size), 128u));
+
 				spu.process_mfc_cmd();
 
 				flush_caches = true;
+				flush_cache_region = { regs->MFC_lsa, utils::align(static_cast<u32>(regs->MFC_size), 128u) };
 
 				if (!block.is_dynamic_branch_block)
 				{
@@ -361,7 +365,7 @@ namespace spv
 			case spv::exit_code::RDCH3:
 			{
 				// TODO: This fall is correct as we're waiting, but channels are poorly supported in general
-				const spu_opcode_t op = { *reinterpret_cast<const be_t<u32>*>(ls + spu.pc) };
+				const spu_opcode_t op = { *reinterpret_cast<const be_t<u32>*>(ls + teb->dr[0])};
 				const s64 result = spu.get_ch_value(op.ra);
 				gpr->vgpr[op.rt][3] = result;
 				gpr->vgpr[op.rt][2] = 0;
@@ -406,7 +410,7 @@ namespace spv
 
 		void do_cache_sync(const vk::command_buffer& cmd, spu_thread& spu)
 		{
-			std::memcpy(ls, spu._ptr<u8>(0), 256 * 1024);
+			std::memcpy(ls + flush_cache_region.first, spu._ptr<u8>(flush_cache_region.first), flush_cache_region.second);
 
 			// Update MFC registers
 			MFC_registers_t reg_upd;
@@ -641,6 +645,58 @@ void spv_recompiler::init()
 	spv::init_context(*pdev);
 }
 
+void spv_recompiler::compile_block(const spu_program& func)
+{
+	m_pos = func.lower_bound;
+	m_size += ::size32(func.data) * 4;
+	const u32 start = m_pos;
+
+	m_jump_targets.push_back(start);
+
+	for (u32 i = 0; i < func.data.size(); i++)
+	{
+		const u32 pos = start + i * 4;
+		const u32 op = std::bit_cast<be_t<u32>>(func.data[i]);
+
+		if (!op)
+		{
+			// Ignore hole
+			if (m_pos + 1)
+			{
+				spu_log.error("Unexpected fallthrough to 0x%x", pos);
+				// TODO
+				// branch_fixed(spu_branch_target(pos));
+				m_pos = -1;
+			}
+
+			continue;
+		}
+
+		// Update position
+		m_pos = pos;
+
+		// Execute recompiler function
+		(this->*s_spu_decoder.decode(op))({ op });
+
+		if (m_pos == umax || i == func.data.size() - 1)
+		{
+			// Is this the end?
+			const auto new_pos = m_pos == umax ? c.get_pc() : m_pos + 4;
+			if (!c.has_memory_dependency() && new_pos != umax)
+			{
+				if (m_jump_targets.size() < 16 && !m_jump_targets.includes(new_pos))
+				{
+					// Merge
+					spu_program next_func = analyse(func.ls, new_pos);
+					compile_block(next_func);
+				}
+			}
+
+			break;
+		}
+	}
+}
+
 spu_function_t spv_recompiler::compile(spu_program&& _func)
 {
 	const u32 start0 = _func.entry_point;
@@ -670,6 +726,7 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 		return add_loc->compiled;
 	}
 
+	if (false)
 	{
 		sha1_context ctx;
 		u8 output[20];
@@ -682,101 +739,18 @@ spu_function_t spv_recompiler::compile(spu_program&& _func)
 		std::memcpy(&hash_start, output, sizeof(hash_start));
 		m_hash_start = hash_start;
 	}
-
-	m_pos = func.lower_bound;
-	u32 m_base = func.entry_point;
-	m_size = ::size32(func.data) * 4;
-	const u32 start = m_pos;
-	const u32 end = start + m_size;
+	else
+	{
+		m_hash_start = func.lower_bound;
+	}
 
 	// Clear
 	c.reset();
 
-	// Create block labels
+	m_size = 0;
+	m_jump_targets.clear();
 
-	// Get bit mask of valid code words for a given range (up to 128 bytes)
-	auto get_code_mask = [&](u32 starta, u32 enda) -> u32
-	{
-		u32 result = 0;
-
-		for (u32 addr = starta, m = 1; addr < enda && m; addr += 4, m <<= 1)
-		{
-			// Filter out if out of range, or is a hole
-			if (addr >= start && addr < end && func.data[(addr - start) / 4])
-			{
-				result |= m;
-			}
-		}
-
-		return result;
-	};
-
-	// Check code
-	u32 starta = start;
-
-	// Skip holes at the beginning (giga only)
-	for (u32 j = start; j < end; j += 4)
-	{
-		if (!func.data[(j - start) / 4])
-		{
-			starta += 4;
-		}
-		else
-		{
-			break;
-		}
-	}
-
-	// TODO
-	// Clear registers, etc
-
-	if (m_pos != start)
-	{
-		// Jump to the entry point if necessary
-	}
-
-	for (u32 i = 0; i < func.data.size(); i++)
-	{
-		const u32 pos = start + i * 4;
-		const u32 op = std::bit_cast<be_t<u32>>(func.data[i]);
-
-		if (!op)
-		{
-			// Ignore hole
-			if (m_pos + 1)
-			{
-				spu_log.error("Unexpected fallthrough to 0x%x", pos);
-				// TODO
-				// branch_fixed(spu_branch_target(pos));
-				m_pos = -1;
-			}
-
-			continue;
-		}
-
-		// Update position
-		m_pos = pos;
-
-		// Execute recompiler function
-		(this->*s_spu_decoder.decode(op))({ op });
-
-		if (m_pos == umax)
-		{
-			// Early exit
-			break;
-		}
-	}
-
-	// Make fallthrough if necessary
-	if (m_pos + 1)
-	{
-		// TODO
-		// branch_fixed(spu_branch_target(end));
-	}
-
-	// Epilogue
-
-	// Build instruction dispatch table
+	compile_block(func);
 
 	// Compile and get function address
 	auto compiled = c.compile();
@@ -807,7 +781,12 @@ void spv_recompiler::UNK(spu_opcode_t op)
 
 void spv_recompiler::STOP(spu_opcode_t op)
 {
-	c.unimplemented("STOP");
+	// TODO
+	c.s_movsi(c.s_tmp0, spv_constant::make_si(op.opcode));
+	c.s_storsr(c.s_dr0, c.s_tmp0);
+	c.s_movsi(c.s_tmp0, spv_constant::make_si(0));
+	c.s_brz(spv_constant::make_si(m_pos + 4), c.s_tmp0, spv::exit_code::STOP_AND_SIGNAL);
+	c.signal_mem();
 }
 
 void spv_recompiler::LNOP(spu_opcode_t op)
@@ -837,8 +816,12 @@ void spv_recompiler::RDCH(spu_opcode_t op)
 	case SPU_RdSigNotify1:
 	{
 		// TODO
+		c.s_movsi(c.s_tmp0, spv_constant::make_si(m_pos));
+		c.s_storsr(c.s_dr0, c.s_tmp0);
 		c.s_movsi(c.s_tmp0, spv_constant::make_si(0));
 		c.s_brz(spv_constant::make_su(m_pos + 4), c.s_tmp0, spv::exit_code::RDCH3);
+		c.signal_mem();
+		m_pos = -1;
 		return;
 	}
 	case MFC_RdTagStat:
@@ -1033,7 +1016,13 @@ void spv_recompiler::WRCH(spu_opcode_t op)
 	case SPU_WrOutMbox:
 	{
 		// TODO:
-		break;
+		c.s_movsi(c.s_tmp0, spv_constant::make_si(m_pos));
+		c.s_storsr(c.s_dr0, c.s_tmp0);
+		c.s_movsi(c.s_tmp0, spv_constant::make_si(0));
+		c.s_brz(spv_constant::make_si(m_pos + 4), c.s_tmp0, spv::exit_code::HLT);
+		c.signal_mem();
+		m_pos = -1;
+		return;
 	}
 
 	case MFC_WrTagMask:
@@ -1851,11 +1840,11 @@ void spv_recompiler::BRSL(spu_opcode_t op)
 	const auto lr = spu_branch_target(m_pos + 4);
 
 	c.v_movsi(op.rt, spv_constant::make_rvi(static_cast<s32>(lr)));
-	c.s_bri(spv_constant::make_su(target));
 
 	if (target != m_pos + 4)
 	{
 		// Fall out
+		c.s_bri(spv_constant::make_su(target));
 		m_pos = -1;
 	}
 }

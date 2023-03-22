@@ -1903,6 +1903,7 @@ spu_program spu_recompiler_base::analyse(const be_t<u32>* ls, u32 entry_point)
 {
 	// Result: addr + raw instruction data
 	spu_program result;
+	result.ls = ls;
 	result.data.reserve(10000);
 	result.entry_point = entry_point;
 	result.lower_bound = entry_point;

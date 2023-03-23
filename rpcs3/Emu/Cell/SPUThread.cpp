@@ -1042,7 +1042,7 @@ void spu_thread::dump_regs(std::string& ret) const
 
 		fmt::append(ret, "%s%s ", spu_reg_name[i], is_const ? "©" : ":");
 
-		if (auto [size, dst, src] = SPUDisAsm::try_get_insert_mask_info(r); size)
+		if (auto [size, dst, src] = SPUDisAsm::try_get_insert_mask_info(r); false && size)
 		{
 			// Special: insertion masks
 
@@ -1500,6 +1500,9 @@ void spu_thread::cpu_task()
 			spurs_addr = group->name.ends_with("CellSpursKernelGroup"sv) && vm::check_addr(arg) ? arg : 0u - 0x80;
 		}
 	}
+
+	Emu.Pause();
+	while (Emu.IsPaused());
 
 	if (g_cfg.core.spu_decoder == spu_decoder_type::spv)
 	{

@@ -65,6 +65,14 @@ ivec4 _bswap(const in ivec4 reg)
 	return ivec4(e.wzyx);
 }
 
+vec4 xfloat(const in ivec4 reg)
+{
+	const ivec4 sign_ = reg & ivec4(0x80000000);
+	const ivec4 mag = reg & ivec4(0x7fffffff);
+	const ivec4 bits = min(mag, ivec4(0x7f7fffff));
+	return intBitsToFloat(bits | sign_);
+}
+
 // Workaround for signed bfe being fucked
 #define _vbfe(v, o, c) ivec4(bitfieldExtract(uvec4(v), o, c))
 

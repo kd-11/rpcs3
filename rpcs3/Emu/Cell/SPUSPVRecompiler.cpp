@@ -53,7 +53,7 @@ namespace
 		char buf[512];
 		snprintf(buf, 512, "[spvc] %s\n", s);
 		rsx_log.error(buf);
-		OutputDebugStringA(buf);
+		//OutputDebugStringA(buf);
 	};
 
 	const auto tty_write = [](const std::string& msg)
@@ -224,7 +224,6 @@ namespace spv
 
 		~SPU_execution_context_t()
 		{
-			//sync();
 			command_buffer_list.wait_all();
 
 			command_buffer_list.destroy();
@@ -396,7 +395,7 @@ namespace spv
 			println(banner.data());
 			for (int i = 0; i < 128; ++i)
 			{
-				const auto regstr = fmt::format("r%d %x %x %x %x (%f %f %f %f)",
+				const auto regstr = fmt::format("r%d %x %x %x %x (%e %e %e %e)",
 					i, gpr->vgpr[i][0], gpr->vgpr[i][1], gpr->vgpr[i][2], gpr->vgpr[i][3],
 					std::bit_cast<f32>(gpr->vgpr[i][0]), std::bit_cast<f32>(gpr->vgpr[i][1]),
 					std::bit_cast<f32>(gpr->vgpr[i][2]), std::bit_cast<f32>(gpr->vgpr[i][3]));
@@ -680,6 +679,7 @@ void spv_recompiler::compile_block(const spu_program& func)
 
 		if (m_pos == umax || i == func.data.size() - 1)
 		{
+#if !SPU_DEBUG
 			// Is this the end?
 			const auto new_pos = m_pos == umax ? c.get_pc() : m_pos + 4;
 			if (!c.has_memory_dependency() && new_pos != umax)
@@ -691,6 +691,7 @@ void spv_recompiler::compile_block(const spu_program& func)
 					compile_block(next_func);
 				}
 			}
+#endif
 
 			break;
 		}
@@ -866,6 +867,13 @@ void spv_recompiler::SFH(spu_opcode_t op)
 
 void spv_recompiler::NOR(spu_opcode_t op)
 {
+	if (op.ra == op.rb)
+	{
+		// NOT
+		c.v_xori(op.rt, op.ra, spv_constant::spread(0xffffffff).as_vi());
+		return;
+	}
+
 	c.v_or(c.v_tmp0, op.ra, op.rb);
 	c.v_xori(op.rt, c.v_tmp0, spv_constant::spread(0xffffffff).as_vi());
 }
@@ -1229,7 +1237,7 @@ void spv_recompiler::FSMB(spu_opcode_t op)
 void spv_recompiler::FREST(spu_opcode_t op)
 {
 	c.v_rcpf(c.v_tmp0, op.ra);
-	c.v_andi(op.rt, c.v_tmp0, spv_constant::spread(0xfffffc00).as_vi());
+	c.v_andi(op.rt, c.v_tmp0, spv_constant::spread(0xfffff000).as_vi());
 }
 
 void spv_recompiler::FRSQEST(spu_opcode_t op)
@@ -1448,10 +1456,12 @@ void spv_recompiler::CNTB(spu_opcode_t op)
 
 void spv_recompiler::XSBH(spu_opcode_t op)
 {
-	// s16 sext
 	c.v_bfxi(c.v_tmp0, op.ra, spv_constant::make_si(7), spv_constant::make_si(1));
-	c.v_mulsi(c.v_tmp0, c.v_tmp0, spv_constant::spread(0xffff0000).as_vi());
-	c.v_andi(c.v_tmp1, op.ra, spv_constant::spread(0x0000ffff));
+	c.v_bfxi(c.v_tmp1, op.ra, spv_constant::make_si(23), spv_constant::make_si(1));
+	c.v_mulsi(c.v_tmp0, c.v_tmp0, spv_constant::spread(0x0000ff00).as_vi());
+	c.v_mulsi(c.v_tmp1, c.v_tmp1, spv_constant::spread(0xff000000).as_vi());
+	c.v_andi(c.v_tmp2, op.ra, spv_constant::spread(0x00ff00ff));
+	c.v_or(c.v_tmp1, c.v_tmp1, c.v_tmp2);
 	c.v_or(op.rt, c.v_tmp0, c.v_tmp1);
 }
 
@@ -1757,6 +1767,9 @@ void spv_recompiler::BRZ(spu_opcode_t op)
 
 	c.s_xtr(c.s_tmp0, op.rt, 3);
 	c.s_brz(spv_constant::make_su(target), c.s_tmp0);
+
+	c.s_bri(spv_constant::make_si(m_pos + 4));
+	m_pos = -1; // TODO
 }
 
 void spv_recompiler::STQA(spu_opcode_t op)
@@ -1774,6 +1787,9 @@ void spv_recompiler::BRNZ(spu_opcode_t op)
 
 	c.s_xtr(c.s_tmp0, op.rt, 3);
 	c.s_brnz(spv_constant::make_su(target), c.s_tmp0);
+
+	c.s_bri(spv_constant::make_si(m_pos + 4));
+	m_pos = -1; // TODO
 }
 
 void spv_recompiler::BRHZ(spu_opcode_t op)
@@ -1787,6 +1803,9 @@ void spv_recompiler::BRHZ(spu_opcode_t op)
 	c.s_xtr(c.s_tmp0, op.rt, 3);
 	c.s_andi(c.s_tmp0, c.s_tmp0, spv_constant::make_si(0xffff));
 	c.s_brz(spv_constant::make_su(target), c.s_tmp0);
+
+	c.s_bri(spv_constant::make_si(m_pos + 4));
+	m_pos = -1; // TODO
 }
 
 void spv_recompiler::BRHNZ(spu_opcode_t op)
@@ -2351,7 +2370,7 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 				case spv::constant_type::FLOAT:
 				{
 					const auto initializer = fmt::format(
-						"vec4(%f, %f, %f, %f)",
+						"vec4(%.12e, %.12e, %.12e, %.12e)",
 						const_.value.f[0], const_.value.f[1], const_.value.f[2], const_.value.f[3]);
 					return { "vec4", "",  initializer };
 				}
@@ -2373,7 +2392,7 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 				{
 					// TODO: Width optimizations
 					const auto initializer = fmt::format(
-						"{ vec4(%f, %f, %f, %f), vec4(%f, %f, %f, %f) };\n",
+						"{ vec4(%.12e, %.12e, %.12e, %.12e), vec4(%.12e, %.12e, %.12e, %.12e) };\n",
 						rsx::decode_fp16(const_.value.h[0]), rsx::decode_fp16(const_.value.h[1]), rsx::decode_fp16(const_.value.h[2]), rsx::decode_fp16(const_.value.h[3]),
 						rsx::decode_fp16(const_.value.h[4]), rsx::decode_fp16(const_.value.h[5]), rsx::decode_fp16(const_.value.h[6]), rsx::decode_fp16(const_.value.h[7]));
 					return { "vec4", "[2]", initializer};
@@ -2549,14 +2568,14 @@ void spv_emitter::v_subsi(spv::vector_register_t dst, const spv::vector_const_t&
 void spv_emitter::v_addf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(intBitsToFloat(vgpr[%d]) + intBitsToFloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) + xfloat(vgpr[%d]));\n",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_subf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(intBitsToFloat(vgpr[%d]) - intBitsToFloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) - xfloat(vgpr[%d]));\n",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
@@ -2584,28 +2603,28 @@ void spv_emitter::v_mulu(spv::vector_register_t dst, spv::vector_register_t op0,
 void spv_emitter::v_mulfi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(intBitsToFloat(vgpr[%d]) * %s);\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) * %s);\n",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_mulf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(intBitsToFloat(vgpr[%d]) * intBitsToFloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) * xfloat(vgpr[%d]));\n",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_rcpf(spv::vector_register_t dst, spv::vector_register_t op0)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(1.f / intBitsToFloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(1.f / xfloat(vgpr[%d]));\n",
 		dst.vgpr_index, op0.vgpr_index);
 }
 
 void spv_emitter::v_rsqf(spv::vector_register_t dst, spv::vector_register_t op0)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(inversesqrt(intBitsToFloat(vgpr[%d])));\n",
+		"vgpr[%d] = floatBitsToInt(inversesqrt(xfloat(vgpr[%d])));\n",
 		dst.vgpr_index, op0.vgpr_index);
 }
 
@@ -2690,14 +2709,14 @@ void spv_emitter::v_cmpgtu(spv::vector_register_t dst, spv::vector_register_t op
 void spv_emitter::v_cmpgtf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(greaterThan(intBitsToFloat(vgpr[%d]), intBitsToFloat(vgpr[%d])));\n",
+		"vgpr[%d] = ivec4(greaterThan(xfloat(vgpr[%d]), xfloat(vgpr[%d])));\n",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_clampfi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& min, const spv::vector_const_t& max)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(clamp(intBitsToFloat(vgpr[%d]), %s, %s));\n",
+		"vgpr[%d] = floatBitsToInt(clamp(xfloat(vgpr[%d]), %s, %s));\n",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(min), get_const_name(max));
 }
 
@@ -2791,7 +2810,7 @@ void spv_emitter::v_sprd(spv::vector_register_t dst_reg, spv::vector_register_t 
 void spv_emitter::v_fcvtu(spv::vector_register_t dst, spv::vector_register_t src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(uvec4(intBitsToFloat(vgpr[%d])));\n",
+		"vgpr[%d] = ivec4(uvec4(xfloat(vgpr[%d])));\n",
 		dst.vgpr_index, src.vgpr_index);
 }
 

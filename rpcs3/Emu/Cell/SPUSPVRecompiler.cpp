@@ -2786,9 +2786,8 @@ void spv_emitter::v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_re
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_register_t lsa)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _bswap(ls[sgpr[%d] >> 4]);"
-		"dr[3] = sgpr[%d];",
-		dst_reg.vgpr_index, lsa.sgpr_index, lsa.sgpr_index);
+		"vgpr[%d] = _bswap(ls[sgpr[%d] >> 4]);",
+		dst_reg.vgpr_index, lsa.sgpr_index);
 }
 
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_const_t lsa)

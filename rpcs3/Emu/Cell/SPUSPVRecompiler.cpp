@@ -674,6 +674,12 @@ void spv_recompiler::compile_block(const spu_program& func)
 		// Update position
 		m_pos = pos;
 
+		// Verify that we're not trampling ourselves
+		if (!c.push_label(pos))
+		{
+			spu_log.error("Circled back to our code....");
+		}
+
 		// Execute recompiler function
 		(this->*s_spu_decoder.decode(op))({ op });
 
@@ -2502,7 +2508,7 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 		"\n"
 		"void execute()\n"
 		"{\n" <<
-			m_block <<
+			m_block.compile() <<
 		"}\n\n";
 
 	// Entry
@@ -2521,8 +2527,8 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 		"	dr[15] = vgpr[9][2];\n"
 		"}\n\n"; //qshl_mask_lookup
 
-	m_block = shaderbuf.str();
-	auto result = std::make_unique<spv::SPUSPV_block>(m_block);
+	const auto glsl_src = shaderbuf.str();
+	auto result = std::make_unique<spv::SPUSPV_block>(glsl_src);
 	result->is_dynamic_branch_block = has_dynamic_branch_target();
 	result->issues_memory_op = has_memory_dependency();
 	result->end_pc = get_pc();
@@ -2533,147 +2539,147 @@ std::unique_ptr<spv::SPUSPV_block> spv_emitter::compile()
 void spv_emitter::v_addsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] + %s;\n",
+		"vgpr[%d] = vgpr[%d] + %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_adds(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] + vgpr[%d];\n",
+		"vgpr[%d] = vgpr[%d] + vgpr[%d];",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_subs(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] - vgpr[%d];\n",
+		"vgpr[%d] = vgpr[%d] - vgpr[%d];",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_subsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] - %s;\n",
+		"vgpr[%d] = vgpr[%d] - %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_subsi(spv::vector_register_t dst, const spv::vector_const_t& op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = %s - vgpr[%d];\n",
+		"vgpr[%d] = %s - vgpr[%d];",
 		dst.vgpr_index, get_const_name(op0), op1.vgpr_index);
 }
 
 void spv_emitter::v_addf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) + xfloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) + xfloat(vgpr[%d]));",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_subf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) - xfloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) - xfloat(vgpr[%d]));",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_mulsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] * %s;\n",
+		"vgpr[%d] = vgpr[%d] * %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_muls(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] * vgpr[%d];\n",
+		"vgpr[%d] = vgpr[%d] * vgpr[%d];",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_mulu(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(uvec4(vgpr[%d]) * uvec4(vgpr[%d]));\n",
+		"vgpr[%d] = ivec4(uvec4(vgpr[%d]) * uvec4(vgpr[%d]));",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_mulfi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) * %s);\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) * %s);",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_mulf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) * xfloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(xfloat(vgpr[%d]) * xfloat(vgpr[%d]));",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_rcpf(spv::vector_register_t dst, spv::vector_register_t op0)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(1.f / xfloat(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(1.f / xfloat(vgpr[%d]));",
 		dst.vgpr_index, op0.vgpr_index);
 }
 
 void spv_emitter::v_rsqf(spv::vector_register_t dst, spv::vector_register_t op0)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(inversesqrt(xfloat(vgpr[%d])));\n",
+		"vgpr[%d] = floatBitsToInt(inversesqrt(xfloat(vgpr[%d])));",
 		dst.vgpr_index, op0.vgpr_index);
 }
 
 void spv_emitter::v_addui(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(uvec4(vgpr[%d]) + %s);\n",
+		"vgpr[%d] = ivec4(uvec4(vgpr[%d]) + %s);",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1.as_vu()));
 }
 
 void spv_emitter::s_addsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = sgpr[%d] + %s;\n",
+		"sgpr[%d] = sgpr[%d] + %s;",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_adds(spv::scalar_register_t dst, spv::scalar_register_t op0, spv::scalar_register_t op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = sgpr[%d] + sgpr[%d];\n",
+		"sgpr[%d] = sgpr[%d] + sgpr[%d];",
 		dst.sgpr_index, op0.sgpr_index, op1.sgpr_index);
 }
 
 void spv_emitter::s_subsi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = sgpr[%d] - %s;\n",
+		"sgpr[%d] = sgpr[%d] - %s;",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_subsi(spv::scalar_register_t dst, const spv::scalar_const_t& op0, spv::scalar_register_t op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = %s - %s;\n",
+		"sgpr[%d] = %s - %s;",
 		dst.sgpr_index, get_const_name(op0), op1.sgpr_index);
 }
 
 void spv_emitter::s_dp4s(spv::scalar_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = int(dot(vgpr[%d], vgpr[%d]));\n",
+		"sgpr[%d] = int(dot(vgpr[%d], vgpr[%d]));",
 		dst.sgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::s_dp4si(spv::scalar_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = int(dot(vgpr[%d], %s));\n",
+		"sgpr[%d] = int(dot(vgpr[%d], %s));",
 		dst.sgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
@@ -2681,42 +2687,42 @@ void spv_emitter::s_dp4si(spv::scalar_register_t dst, spv::vector_register_t op0
 void spv_emitter::v_cmpeqsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(equal(vgpr[%d], %s));\n",
+		"vgpr[%d] = ivec4(equal(vgpr[%d], %s));",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_cmpgtsi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(greaterThan(vgpr[%d], %s));\n",
+		"vgpr[%d] = ivec4(greaterThan(vgpr[%d], %s));",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_cmpgts(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(greaterThan(vgpr[%d], vgpr[%d]));\n",
+		"vgpr[%d] = ivec4(greaterThan(vgpr[%d], vgpr[%d]));",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_cmpgtu(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(greaterThan(uvec4(vgpr[%d]), uvec4(vgpr[%d])));\n",
+		"vgpr[%d] = ivec4(greaterThan(uvec4(vgpr[%d]), uvec4(vgpr[%d])));",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_cmpgtf(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(greaterThan(xfloat(vgpr[%d]), xfloat(vgpr[%d])));\n",
+		"vgpr[%d] = ivec4(greaterThan(xfloat(vgpr[%d]), xfloat(vgpr[%d])));",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_clampfi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& min, const spv::vector_const_t& max)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(clamp(xfloat(vgpr[%d]), %s, %s));\n",
+		"vgpr[%d] = floatBitsToInt(clamp(xfloat(vgpr[%d]), %s, %s));",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(min), get_const_name(max));
 }
 
@@ -2724,85 +2730,85 @@ void spv_emitter::v_clampfi(spv::vector_register_t dst, spv::vector_register_t o
 void spv_emitter::v_movsi(spv::vector_register_t dst, const spv::vector_const_t& src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = %s;\n",
+		"vgpr[%d] = %s;",
 		dst.vgpr_index, get_const_name(src));
 }
 
 void spv_emitter::v_movs(spv::vector_register_t dst, spv::vector_register_t src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d];\n",
+		"vgpr[%d] = vgpr[%d];",
 		dst.vgpr_index, src.vgpr_index);
 }
 
 void spv_emitter::v_movfi(spv::vector_register_t dst, const spv::vector_const_t& src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(%s);\n",
+		"vgpr[%d] = floatBitsToInt(%s);",
 		dst.vgpr_index, get_const_name(src));
 }
 
 void spv_emitter::s_movsi(spv::scalar_register_t dst_reg, const spv::scalar_const_t& src)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = %s;\n",
+		"sgpr[%d] = %s;",
 		dst_reg.sgpr_index, get_const_name(src));
 }
 
 void spv_emitter::s_storsr(spv::scalar_register_t dst_reg, spv::scalar_register_t src)
 {
 	m_block += fmt::format(
-		"%s = sgpr[%d];\n",
+		"%s = sgpr[%d];",
 		get_sysreg_name(dst_reg), src.sgpr_index);
 }
 
 void spv_emitter::s_loadsr(spv::scalar_register_t dst_reg, spv::scalar_register_t src)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = %s;\n",
+		"sgpr[%d] = %s;",
 		dst_reg.sgpr_index, get_sysreg_name(src));
 }
 
 void spv_emitter::v_storq(spv::scalar_register_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"ls[sgpr[%d] >> 4] = _bswap(vgpr[%d]);\n",
+		"ls[sgpr[%d] >> 4] = _bswap(vgpr[%d]);",
 		lsa.sgpr_index, src_reg.vgpr_index);
 }
 
 void spv_emitter::v_storq(spv::scalar_const_t lsa, spv::vector_register_t src_reg)
 {
 	m_block += fmt::format(
-		"ls[%s >> 4] = _bswap(vgpr[%d]);\n",
+		"ls[%s >> 4] = _bswap(vgpr[%d]);",
 		get_const_name(lsa), src_reg.vgpr_index);
 }
 
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_register_t lsa)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _bswap(ls[sgpr[%d] >> 4]);\n"
-		"dr[3] = sgpr[%d];\n",
+		"vgpr[%d] = _bswap(ls[sgpr[%d] >> 4]);"
+		"dr[3] = sgpr[%d];",
 		dst_reg.vgpr_index, lsa.sgpr_index, lsa.sgpr_index);
 }
 
 void spv_emitter::v_loadq(spv::vector_register_t dst_reg, spv::scalar_const_t lsa)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _bswap(ls[%s >> 4]);\n",
+		"vgpr[%d] = _bswap(ls[%s >> 4]);",
 		dst_reg.vgpr_index, get_const_name(lsa));
 }
 
 void spv_emitter::v_sprd(spv::vector_register_t dst_reg, spv::scalar_register_t src_reg)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(sgpr[%d]);\n",
+		"vgpr[%d] = ivec4(sgpr[%d]);",
 		dst_reg.vgpr_index, src_reg.sgpr_index);
 }
 
 void spv_emitter::v_sprd(spv::vector_register_t dst_reg, spv::vector_register_t src_reg, int component)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(vgpr[%d][%d]);\n",
+		"vgpr[%d] = ivec4(vgpr[%d][%d]);",
 		dst_reg.vgpr_index, src_reg.vgpr_index, component);
 }
 
@@ -2810,21 +2816,21 @@ void spv_emitter::v_sprd(spv::vector_register_t dst_reg, spv::vector_register_t 
 void spv_emitter::v_fcvtu(spv::vector_register_t dst, spv::vector_register_t src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = ivec4(uvec4(xfloat(vgpr[%d])));\n",
+		"vgpr[%d] = ivec4(uvec4(xfloat(vgpr[%d])));",
 		dst.vgpr_index, src.vgpr_index);
 }
 
 void spv_emitter::v_scvtf(spv::vector_register_t dst, spv::vector_register_t src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(vec4(vgpr[%d]));\n",
+		"vgpr[%d] = floatBitsToInt(vec4(vgpr[%d]));",
 		dst.vgpr_index, src.vgpr_index);
 }
 
 void spv_emitter::v_ucvtf(spv::vector_register_t dst, spv::vector_register_t src)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = floatBitsToInt(vec4(uvec4(vgpr[%d])));\n",
+		"vgpr[%d] = floatBitsToInt(vec4(uvec4(vgpr[%d])));",
 		dst.vgpr_index, src.vgpr_index);
 }
 
@@ -2832,70 +2838,70 @@ void spv_emitter::v_ucvtf(spv::vector_register_t dst, spv::vector_register_t src
 void spv_emitter::v_andi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] & %s;\n",
+		"vgpr[%d] = vgpr[%d] & %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_and(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] & vgpr[%d];\n",
+		"vgpr[%d] = vgpr[%d] & vgpr[%d];",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_bfxi(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1, const spv::scalar_const_t& op2)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _vbfe(vgpr[%d], %s, %s);\n",
+		"vgpr[%d] = _vbfe(vgpr[%d], %s, %s);",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1), get_const_name(op2));
 }
 
 void spv_emitter::v_bfx(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1, spv::scalar_register_t op2)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _vbfe(vgpr[%d], sgpr[%d], sgpr[%d]);\n",
+		"vgpr[%d] = _vbfe(vgpr[%d], sgpr[%d], sgpr[%d]);",
 		dst.vgpr_index, op0.vgpr_index, op1.sgpr_index, op2.sgpr_index);
 }
 
 void spv_emitter::v_shli(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] << %s;\n",
+		"vgpr[%d] = vgpr[%d] << %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_shl(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] << vgpr[%d];\n",
+		"vgpr[%d] = vgpr[%d] << vgpr[%d];",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
 void spv_emitter::v_shri(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] >> %s;\n",
+		"vgpr[%d] = vgpr[%d] >> %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_xori(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] ^ %s;\n",
+		"vgpr[%d] = vgpr[%d] ^ %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_ori(spv::vector_register_t dst, spv::vector_register_t op0, const spv::vector_const_t& op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] | %s;\n",
+		"vgpr[%d] = vgpr[%d] | %s;",
 		dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::v_or(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d] | vgpr[%d];\n",
+		"vgpr[%d] = vgpr[%d] | vgpr[%d];",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index);
 }
 
@@ -2911,70 +2917,70 @@ void spv_emitter::v_shufwi(spv::vector_register_t dst, spv::vector_register_t sr
 	}
 
 	m_block += fmt::format(
-		"vgpr[%d] = vgpr[%d].%s;\n",
+		"vgpr[%d] = vgpr[%d].%s;",
 		dst.vgpr_index, src.vgpr_index, mask);
 }
 
 void spv_emitter::s_andi(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = sgpr[%d] & %s;\n",
+		"sgpr[%d] = sgpr[%d] & %s;",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_xori(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = sgpr[%d] ^ %s;\n",
+		"sgpr[%d] = sgpr[%d] ^ %s;",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_shli(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = sgpr[%d] << %s;\n",
+		"sgpr[%d] = sgpr[%d] << %s;",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_shri(spv::scalar_register_t dst, spv::scalar_register_t op0, const spv::scalar_const_t& op1)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = sgpr[%d] >> %s;\n",
+		"sgpr[%d] = sgpr[%d] >> %s;",
 		dst.sgpr_index, op0.sgpr_index, get_const_name(op1));
 }
 
 void spv_emitter::s_hzor(spv::scalar_register_t dst, spv::vector_register_t op0)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = (vgpr[%d].x | vgpr[%d].y | vgpr[%d].z | vgpr[%d].w);\n",
+		"sgpr[%d] = (vgpr[%d].x | vgpr[%d].y | vgpr[%d].z | vgpr[%d].w);",
 		dst.sgpr_index, op0.vgpr_index, op0.vgpr_index, op0.vgpr_index, op0.vgpr_index);
 }
 
 void spv_emitter::s_xtr(spv::scalar_register_t dst, spv::vector_register_t src, int component)
 {
 	m_block += fmt::format(
-		"sgpr[%d] = vgpr[%d][%d];\n",
+		"sgpr[%d] = vgpr[%d][%d];",
 		dst.sgpr_index, src.vgpr_index, component);
 }
 
 void spv_emitter::s_ins(spv::vector_register_t dst, spv::scalar_register_t src, int component)
 {
 	m_block += fmt::format(
-		"vgpr[%d][%d] = sgpr[%d];\n",
+		"vgpr[%d][%d] = sgpr[%d];",
 		dst.vgpr_index, component, src.sgpr_index);
 }
 
 void spv_emitter::s_ins(spv::vector_register_t dst, const spv::scalar_const_t& src, spv::scalar_register_t select)
 {
 	m_block += fmt::format(
-		"vgpr[%d][sgpr[%d]] = %s;\n",
+		"vgpr[%d][sgpr[%d]] = %s;",
 		dst.vgpr_index, select.sgpr_index, get_const_name(src));
 }
 
 void spv_emitter::q_shufb(spv::vector_register_t dst, spv::vector_register_t op0, spv::vector_register_t op1, spv::vector_register_t op2)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _dqshufb(vgpr[%d], vgpr[%d], vgpr[%d]);\n",
+		"vgpr[%d] = _dqshufb(vgpr[%d], vgpr[%d], vgpr[%d]);",
 		dst.vgpr_index, op0.vgpr_index, op1.vgpr_index, op2.vgpr_index);
 
 	m_compiler_config.enable_shufb();
@@ -2983,8 +2989,13 @@ void spv_emitter::q_shufb(spv::vector_register_t dst, spv::vector_register_t op0
 // Flow control
 void spv_emitter::s_bri(const spv::scalar_const_t& target)
 {
+	if (s_loopi(target, "true"s))
+	{
+		return;
+	}
+
 	m_block += fmt::format(
-		"pc = %s;\n",
+		"pc = %s;",
 		get_const_name(target.as_u()));
 
 	m_compiler_config.set_pc(target.value.i);
@@ -2993,7 +3004,7 @@ void spv_emitter::s_bri(const spv::scalar_const_t& target)
 void spv_emitter::s_br(spv::scalar_register_t target)
 {
 	m_block += fmt::format(
-		"pc = sgpr[%d];\n",
+		"pc = sgpr[%d];",
 		target.sgpr_index);
 
 	m_compiler_config.enable_dynamic_branch();
@@ -3001,6 +3012,12 @@ void spv_emitter::s_br(spv::scalar_register_t target)
 
 void spv_emitter::s_brz(const spv::scalar_const_t& target, spv::scalar_register_t cond, spv::exit_code exit_code)
 {
+	if (exit_code == spv::exit_code::SUCCESS &&
+		s_loopi(target, fmt::format("sgpr[%d] == 0", cond.sgpr_index)))
+	{
+		return;
+	}
+
 	m_block += fmt::format(
 		"if (sgpr[%d] == 0)\n"
 		"{\n"
@@ -3015,6 +3032,11 @@ void spv_emitter::s_brz(const spv::scalar_const_t& target, spv::scalar_register_
 
 void spv_emitter::s_brnz(const spv::scalar_const_t& target, spv::scalar_register_t cond)
 {
+	if (s_loopi(target, fmt::format("sgpr[%d] != 0", cond.sgpr_index)))
+	{
+		return;
+	}
+
 	m_block += fmt::format(
 		"if (sgpr[%d] != 0)\n"
 		"{\n"
@@ -3054,10 +3076,8 @@ void spv_emitter::s_heqi(spv::scalar_register_t op1, const spv::scalar_const_t& 
 
 void spv_emitter::s_exit(const spv::exit_code& code)
 {
-	m_block += fmt::format(
-		"exit_code = %s;\n"
-		"return;\n",
-		code);
+	m_block += fmt::format("exit_code = %s;", code);
+	m_block += "return;"s;
 }
 
 void spv_emitter::s_call(const std::string_view& function, const std::vector<std::string_view>& args)
@@ -3072,9 +3092,7 @@ void spv_emitter::s_call(const std::string_view& function, const std::vector<std
 		argsstr += arg;
 	}
 
-	m_block += fmt::format(
-		"%s(%s);\n",
-		function, argsstr);
+	m_block += fmt::format("%s(%s);",function, argsstr);
 
 	if (function.starts_with("MFC"))
 	{
@@ -3082,10 +3100,47 @@ void spv_emitter::s_call(const std::string_view& function, const std::vector<std
 	}
 }
 
+bool spv_emitter::s_loopi(const spv::scalar_const_t& target, const std::string& exit_cond)
+{
+	// internal optimization check
+	const auto jmp_target = target.value.u;
+	const auto range = m_block.range();
+
+	if (jmp_target < range.start || jmp_target > range.end)
+	{
+		// NOP - out of range
+		return false;
+	}
+
+	// Validate range
+	for (u32 address = jmp_target; address < range.end; address += 4)
+	{
+		const auto& inst = m_block[address];
+		if (inst.label != address)
+		{
+			// TODO - Maybe multiblock shenanigans
+			return false;
+		}
+
+		if (address == jmp_target && !inst.expression.empty())
+		{
+			// NOP - Multiple jumps to the same address??
+			return false;
+		}
+	}
+
+	auto& inst = m_block[jmp_target];
+	inst.expression = "do {";
+
+	m_block.increment_indent(jmp_target, range.end);
+	std::string loop_end = "} while ("s + exit_cond + ");\n";
+	m_block += loop_end;
+}
+
 void spv_emitter::q_rotl(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _qrotl(vgpr[%d], sgpr[%d]);\n",
+		"vgpr[%d] = _qrotl(vgpr[%d], sgpr[%d]);",
 		dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
 
 	m_compiler_config.enable_qrotl();
@@ -3094,7 +3149,7 @@ void spv_emitter::q_rotl(spv::vector_register_t dst, spv::vector_register_t op0,
 void spv_emitter::q_rotr(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _qrotr(vgpr[%d], sgpr[%d]);\n",
+		"vgpr[%d] = _qrotr(vgpr[%d], sgpr[%d]);",
 		dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
 
 	m_compiler_config.enable_qrotr();
@@ -3103,7 +3158,7 @@ void spv_emitter::q_rotr(spv::vector_register_t dst, spv::vector_register_t op0,
 void spv_emitter::q_shl(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _qshl(vgpr[%d], sgpr[%d]);\n",
+		"vgpr[%d] = _qshl(vgpr[%d], sgpr[%d]);",
 		dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
 
 	m_compiler_config.enable_qshl();
@@ -3112,7 +3167,7 @@ void spv_emitter::q_shl(spv::vector_register_t dst, spv::vector_register_t op0, 
 void spv_emitter::q_shr(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
 {
 	m_block += fmt::format(
-		"vgpr[%d] = _qshr(vgpr[%d], sgpr[%d]);\n",
+		"vgpr[%d] = _qshr(vgpr[%d], sgpr[%d]);",
 		dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
 
 	m_compiler_config.enable_qshr();
@@ -3120,11 +3175,23 @@ void spv_emitter::q_shr(spv::vector_register_t dst, spv::vector_register_t op0, 
 
 void spv_emitter::unimplemented(const std::string_view& name)
 {
-	m_block += fmt::format(
-		"%s();\n",
-		name);
+	m_block += fmt::format("%s();", name);
 
 	println(name.data());
+}
+
+bool spv_emitter::push_label(u32 pos)
+{
+	if (m_block[pos].label == pos)
+	{
+		return false;
+	}
+
+	instruction_t label{};
+	label.label = pos;
+	m_block += label;
+
+	return true;
 }
 
 std::string spv_emitter::get_const_name(const spv::vector_const_t& const_)

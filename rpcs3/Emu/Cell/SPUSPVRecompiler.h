@@ -2,6 +2,7 @@
 
 #include "SPURecompiler.h"
 #include "Emu/RSX/Common/simple_array.hpp"
+#include "Utilities/address_range.h"
 
 #include <functional>
 
@@ -325,12 +326,154 @@ public:
 	void s_heqi(spv::scalar_register_t op1, const spv::scalar_const_t& op2);
 	void s_exit(const spv::exit_code& code);
 	void s_call(const std::string_view& function, const std::vector<std::string_view>& args = {});
+	bool s_loopi(const spv::scalar_const_t& target, const std::string& exit_cond);
 
 	// General
 	void unimplemented(const std::string_view& name);
+	bool push_label(u32 pos);
 
 private:
-	std::string m_block;
+
+	struct instruction_t
+	{
+		u32 label = umax;
+		u32 level = 1;
+		std::string expression;
+
+		instruction_t() = default;
+
+		instruction_t(const std::string& that)
+			: expression(that)
+		{}
+
+		instruction_t(const std::string_view& that)
+			: expression(that)
+		{}
+	};
+
+	struct spv_function_t
+	{
+		std::vector<instruction_t> instructions;
+		instruction_t null_instruction = "BAD_CALL()"sv;
+
+		utils::address_range range() const
+		{
+			if (instructions.size() == 0)
+			{
+				return {};
+			}
+
+			const u32 head = instructions[0].label;
+			u32 tail = umax;
+
+			for (auto it = instructions.crbegin(); it != instructions.crend(); ++it)
+			{
+				if (it->label != umax)
+				{
+					tail = it->label;
+					break;
+				}
+			}
+
+			if (head == umax || tail == umax)
+			{
+				return {};
+			}
+
+			return utils::address_range::start_end(head, tail);
+		}
+
+		void operator += (const std::string& that)
+		{
+			instructions.emplace_back(that);
+		}
+
+		void operator += (const instruction_t& that)
+		{
+			instructions.push_back(that);
+		}
+
+		void clear()
+		{
+			instructions.clear();
+		}
+
+		std::string compile() const
+		{
+			const std::array indents = {
+				"",
+				"  ",
+				"    ",
+				"      ",
+				"        ",
+				"          "
+			};
+
+			auto get_indent = [&indents](const instruction_t &inst) -> std::string {
+				if (inst.level < indents.size())
+				{
+					return indents[inst.level];
+				}
+
+				std::string result = "";
+				for (u32 i = 0; i < inst.level; ++i)
+				{
+					result += "  ";
+				}
+				return result;
+			};
+
+			std::stringstream os;
+			for (const auto& inst : instructions)
+			{
+				if (!inst.expression.empty())
+				{
+					os << get_indent(inst) << inst.expression << "\n";
+				}
+			}
+
+			return os.str();
+		}
+
+		void increment_indent(u32 from, u32 to)
+		{
+			bool increment = false;
+			for (auto& inst : instructions)
+			{
+				if (!increment)
+				{
+					if (inst.label == from)
+					{
+						increment = true;
+					}
+					continue;
+				}
+
+				inst.level++;
+
+				if (inst.label == to)
+				{
+					break;
+				}
+			}
+		}
+
+		template <typename T> requires Integral<T>
+		instruction_t& operator[](T address)
+		{
+			for (auto& inst : instructions)
+			{
+				if (inst.label == address)
+				{
+					return inst;
+				}
+			}
+
+			return null_instruction;
+		}
+	};
+
+	spv_function_t m_block;
 	std::vector<spv::vector_const_t> m_v_const_array;
 	std::vector<spv::scalar_const_t> m_s_const_array;
 

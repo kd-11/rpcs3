@@ -25,6 +25,8 @@ constexpr auto SPV_MAX_BLOCKS = 65536u;
 extern fs::file g_tty;
 extern atomic_t<s64> g_tty_size;
 
+atomic_t<u32> g_leader;
+
 template <>
 void fmt_class_string<spv::exit_code>::format(std::string& out, u64 arg)
 {
@@ -50,10 +52,7 @@ namespace
 
 	const auto println = [](const char* s)
 	{
-		char buf[512];
-		snprintf(buf, 512, "[spvc] %s\n", s);
-		rsx_log.error(buf);
-		//OutputDebugStringA(buf);
+		spu_log.error("[spvc] %s", s);
 	};
 
 	const auto tty_write = [](const std::string& msg)
@@ -158,9 +157,11 @@ namespace spv
 		std::unique_ptr<vk::buffer> gpu_constants; // Builtin constants lookup table
 
 		bool flush_caches = true;
+		bool flush_regs = true;
 		bool init_constants = true;
 
 		std::pair<u32, u32> flush_cache_region = {0 , 256 * 1024};
+		std::pair<u32, u32> flush_regs_region = { 0, 128 };
 
 		TEB *teb = nullptr;
 		u8* ls = nullptr;
@@ -171,6 +172,8 @@ namespace spv
 
 		vk::command_buffer_chain<32> command_buffer_list;
 		vk::descriptor_set descriptor_set;
+
+		bool is_leader = (0u == g_leader++);
 
 		SPU_execution_context_t(const vk::render_device& dev)
 		{
@@ -187,7 +190,7 @@ namespace spv
 			command_buffer_list.create(command_pool, vk::command_buffer::all);
 
 			// Create our memory buffers
-#if 1//SPU_DEBUG
+#if SPU_DEBUG
 			gpr_block = std::make_unique<vk::buffer>(dev, 256 * 16, dev.get_memory_mapping().device_bar,
 				VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
@@ -198,11 +201,12 @@ namespace spv
 
 			gpu_constants = std::make_unique<vk::buffer>(dev, 8192, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 
-			ls_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().device_bar,
-				VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			ls_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().host_visible_coherent,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
-			teb_block = std::make_unique<vk::buffer>(dev, 256, dev.get_memory_mapping().device_bar,
-				VK_MEMORY_PROPERTY_DEVICE_COHERENT_BIT_AMD | VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+
+			teb_block = std::make_unique<vk::buffer>(dev, 256, dev.get_memory_mapping().host_visible_coherent,
+				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 
 			// Bind our standard interface. Only needs to be done once.
@@ -260,6 +264,13 @@ namespace spv
 					VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 			};
 
+			u64 tstamp;
+			if (is_leader)
+			{
+				println("begin execute...");
+				tstamp = rsx::uclock();
+			}
+
 			auto cmd = command_buffer_list.next();
 			cmd->begin();
 
@@ -267,6 +278,12 @@ namespace spv
 			{
 				flush_caches = false;
 				do_cache_sync(*cmd, spu);
+			}
+
+			if (flush_regs)
+			{
+				flush_regs = false;
+				do_sync_regs(*cmd, spu);
 			}
 
 			if (init_constants)
@@ -296,16 +313,40 @@ namespace spv
 			submit_info.skip_descriptor_sync = true;
 			cmd->submit(submit_info, VK_TRUE);
 
+			if (is_leader)
+			{
+				const auto now = rsx::uclock();
+				println("Job submitted.");
+				spu_log.error("Submit took %llu us", now - tstamp);
+				tstamp = now;
+			}
+
 			if (!block.is_dynamic_branch_block && !block.issues_memory_op)
 			{
 				//u32 next_pc = block.end_pc;
 				//sync(&next_pc);
+				if (is_leader)
+				{
+					println("Jump to next");
+				}
 				spu.pc = static_cast<u32>(block.end_pc);
 				return;
 			}
 
+			if (is_leader)
+			{
+				println("Wait...");
+			}
+
 			// Wait for GPU
 			sync(&teb->next_pc);
+
+			if (is_leader)
+			{
+				const auto now = rsx::uclock();
+				spu_log.error("GPU wait took %llu us. Current=0x%x Next=0x%x Code=%s", now - tstamp, spu.pc, teb->next_pc, static_cast<spv::exit_code>(teb->exit_code));
+				tstamp = now;
+			}
 
 			// Check TEB flags
 			const auto exit_code = static_cast<spv::exit_code>(teb->exit_code);
@@ -329,6 +370,11 @@ namespace spv
 					spu.int_ctrl[2].set(SPU_INT2_STAT_SPU_HALT_OR_STEP_INT);
 				}
 
+				if (is_leader)
+				{
+					const auto now = rsx::uclock();
+					spu_log.error("Post-exit (%s) took %llu us", exit_code, now - tstamp);
+				}
 				return;
 			}
 			case spv::exit_code::MFC_CMD:
@@ -353,12 +399,17 @@ namespace spv
 				flush_caches = true;
 				flush_cache_region = { regs->MFC_lsa, utils::align(static_cast<u32>(regs->MFC_size), 128u) };
 
+				if (is_leader)
+				{
+					const auto now = rsx::uclock();
+					spu_log.error("Post-exit (%s) took %llu us", exit_code, now - tstamp);
+				}
+
 				if (!block.is_dynamic_branch_block)
 				{
 					spu.pc = static_cast<u32>(block.end_pc);
 					return;
 				}
-
 				break;
 			}
 			case spv::exit_code::RDCH3:
@@ -366,11 +417,20 @@ namespace spv
 				// TODO: This fall is correct as we're waiting, but channels are poorly supported in general
 				const spu_opcode_t op = { *reinterpret_cast<const be_t<u32>*>(ls + teb->dr[0])};
 				const s64 result = spu.get_ch_value(op.ra);
-				gpr->vgpr[op.rt][3] = result;
-				gpr->vgpr[op.rt][2] = 0;
-				gpr->vgpr[op.rt][1] = 0;
-				gpr->vgpr[op.rt][0] = 0;
+				spu.gpr[op.rt]._u32[3] = result;
+				spu.gpr[op.rt]._u32[2] = 0;
+				spu.gpr[op.rt]._u32[1] = 0;
+				spu.gpr[op.rt]._u32[0] = 0;
 				spu.pc = teb->next_pc + 4;
+
+				flush_regs_region = { op.rt, 1 };
+				flush_regs = true;
+
+				if (is_leader)
+				{
+					const auto now = rsx::uclock();
+					spu_log.error("Post-exit (%s) took %llu us", exit_code, now - tstamp);
+				}
 				return;
 			}
 			}
@@ -507,6 +567,16 @@ namespace spv
 			vkCmdUpdateBuffer(cmd, gpr_block->value, 0, 128 * 16, regs);
 
 			vk::insert_buffer_memory_barrier(cmd, gpr_block->value, 0, gpr_block->size(),
+				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+		}
+
+		void do_sync_regs(const vk::command_buffer& cmd, const spu_thread& spu)
+		{
+			const auto [offset, count] = flush_regs_region;
+			vkCmdUpdateBuffer(cmd, gpr_block->value, offset * 16, count * 16, &spu.gpr[offset]._u32[0]);
+
+			vk::insert_buffer_memory_barrier(cmd, gpr_block->value, offset * 16, count * 16,
 				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 		}

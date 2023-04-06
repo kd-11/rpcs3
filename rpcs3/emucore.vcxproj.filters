@@ -88,6 +88,9 @@
     <Filter Include="Emu\Cell\SPIRV">
       <UniqueIdentifier>{d927e377-1c31-49a2-8a72-b56815b74012}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Emu\Cell\SPIRV\glsl">
+      <UniqueIdentifier>{011329a1-cff3-44a1-8d77-0dc3846dc50c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Crypto\aes.cpp">
@@ -1155,6 +1158,15 @@
     </ClCompile>
     <ClCompile Include="Emu\Cell\SPUSPVRecompiler.cpp">
       <Filter>Emu\Cell</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\Cell\SPIRV\RegisterAllocatorPass.cpp">
+      <Filter>Emu\Cell\SPIRV</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\Cell\SPIRV\Compiler.cpp">
+      <Filter>Emu\Cell\SPIRV</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\Cell\SPIRV\Runtime.cpp">
+      <Filter>Emu\Cell\SPIRV</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -2329,6 +2341,15 @@
     <ClInclude Include="Emu\Cell\SPUSPVRecompiler.h">
       <Filter>Emu\Cell</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\Cell\SPIRV\RegisterAllocatorPass.h">
+      <Filter>Emu\Cell\SPIRV</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Cell\SPIRV\Compiler.h">
+      <Filter>Emu\Cell\SPIRV</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\Cell\SPIRV\Runtime.h">
+      <Filter>Emu\Cell\SPIRV</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="Emu\RSX\Program\GLSLSnippets\GPUDeswizzle.glsl">
@@ -2364,42 +2385,6 @@
     <None Include="Emu\RSX\Program\GLSLSnippets\OverlayRenderFS.glsl">
       <Filter>Emu\GPU\RSX\Program\Snippets</Filter>
     </None>
-    <None Include="Emu\Cell\SPIRV\MFC_read.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\MFC_write.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QROTL.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QROTL32.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QROTR.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QROTR32.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QSHL.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QSHL32.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QSHR.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QSHR32.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\QSHUFB.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
-    <None Include="Emu\Cell\SPIRV\SPU_Defines.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
-    </None>
     <None Include="Emu\Cell\SPRIV\MFC_read.glsl" />
     <None Include="Emu\Cell\SPRIV\QROTL.glsl" />
     <None Include="Emu\Cell\SPRIV\QROTL8.glsl" />
@@ -2412,8 +2397,44 @@
     <None Include="Emu\Cell\SPRIV\QSHUFB.glsl" />
     <None Include="Emu\Cell\SPRIV\SPU_Defines.glsl" />
     <None Include="Emu\Cell\SPRIV\MFC_write.glsl" />
+    <None Include="Emu\Cell\SPIRV\MFC_read.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\MFC_write.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QROTL.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QROTL32.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QROTR.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QROTR32.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QSHL.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QSHL32.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QSHR.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QSHR32.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\QSHUFB.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
+    <None Include="Emu\Cell\SPIRV\SPU_Defines.glsl">
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
+    </None>
     <None Include="Emu\Cell\SPIRV\SPV_Header.glsl">
-      <Filter>Emu\Cell\SPIRV</Filter>
+      <Filter>Emu\Cell\SPIRV\glsl</Filter>
     </None>
   </ItemGroup>
 </Project>

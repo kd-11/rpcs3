@@ -78,18 +78,6 @@ vec4 xfloat(const in ivec4 reg)
 	return intBitsToFloat(bits | sign_);
 }
 
-void flush_LS(const in int offset, const in int length)
-{
-	const int start = ALIGN_DOWN(offset, 16);
-	const int end = ALIGN_UP(offset + length, 16);
-	const int word_offset = start >> 4;
-	const int word_count = (end - start) >> 4;
-	for (int i = word_offset; i < (word_offset + word_count); ++i)
-	{
-		ls_mirror[i] = ls[i];
-	}
-}
-
 // Workaround for signed bfe being fucked
 #define _vbfe(v, o, c) ivec4(bitfieldExtract(uvec4(v), o, c))
 

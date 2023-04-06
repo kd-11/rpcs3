@@ -18,6 +18,7 @@
 #pragma optimize("", off)
 
 #define SPU_DEBUG 0
+#define SPU_PERF_TRACE 0
 
 constexpr auto SPV_MAX_BLOCKS = 65536u;
 
@@ -98,7 +99,7 @@ namespace spv
 		vk::command_buffer_chain<32> command_buffer_list;
 		vk::descriptor_set descriptor_set;
 
-#if SPU_DEBUG
+#if SPU_PERF_TRACE
 		bool is_leader = (0u == g_leader++);
 #else
 		const bool is_leader = false;

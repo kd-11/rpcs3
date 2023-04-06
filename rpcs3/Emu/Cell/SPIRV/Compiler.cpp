@@ -8,6 +8,8 @@
 // TODO: Make fp16 a native type
 #include "Emu/RSX/rsx_utils.h"
 
+#define SPU_DEBUG 0
+
 namespace spv
 {
 	// Helpers
@@ -378,25 +380,35 @@ namespace spv
 			"	exit_code = 0;\n"
 			"	execute();\n";
 
-		for (const auto& reg_data : allocator_output.temp_regs)
+		if (!allocator_output.temp_regs.empty())
 		{
-			const auto& reg = reg_data.second;
-			if (!reg.require_sync)
-			{
-				continue;
-			}
+			shaderbuf << "\n";
 
-			shaderbuf << reg.old_name << " = " << reg.new_name << ";\n";
+			for (const auto& reg_data : allocator_output.temp_regs)
+			{
+				const auto& reg = reg_data.second;
+				if (!reg.require_sync)
+				{
+					continue;
+				}
+
+				shaderbuf << "\t" << reg.old_name << " = " << reg.new_name << ";\n";
+			}
 		}
 
+#if SPU_DEBUG
 		shaderbuf <<
+			"\n"
 			"	lr = vgpr[0].w;\n"
 			"	sp = vgpr[1].w;\n"
 			"	dr[11] = vgpr[95][0];\n"
 			"	dr[12] = vgpr[95][1];\n"
 			"	dr[13] = vgpr[95][2];\n"
 			"	dr[14] = vgpr[95][3];\n"
-			"	dr[15] = vgpr[9][2];\n"
+			"	dr[15] = vgpr[9][2];\n";
+#endif
+
+		shaderbuf <<
 			"}\n\n"; //qshl_mask_lookup
 
 		const auto glsl_src = shaderbuf.str();

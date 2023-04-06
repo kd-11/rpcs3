@@ -58,6 +58,9 @@ void MFC_write_tag_update(const in int value)
 
 void MFC_cmd()
 {
+	// Flush LS
+	flush_LS(MFC_lsa, MFC_size);
+
 	// Would need direct access to system memory. Doable, but hard.
 	exit_code = SPU_MFC_CMD;
 

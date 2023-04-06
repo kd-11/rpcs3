@@ -75,10 +75,11 @@ namespace spv
 	// Context for the logical SPU
 	struct SPU_execution_context_t
 	{
-		std::unique_ptr<vk::buffer> gpr_block;     // 144 GPRs (128 base + 16 spill/temp)
-		std::unique_ptr<vk::buffer> ls_block;      // LSA SRAM
-		std::unique_ptr<vk::buffer> teb_block;     // Next PC, interrupts, etc
-		std::unique_ptr<vk::buffer> gpu_constants; // Builtin constants lookup table
+		std::unique_ptr<vk::buffer> gpr_block;       // 144 GPRs (128 base + 16 spill/temp)
+		std::unique_ptr<vk::buffer> ls_block;        // LS SRAM
+		std::unique_ptr<vk::buffer> ls_mirror_block; // LS SRAM
+		std::unique_ptr<vk::buffer> teb_block;       // Next PC, interrupts, etc
+		std::unique_ptr<vk::buffer> gpu_constants;   // Builtin constants lookup table
 
 		bool flush_caches = true;
 		bool flush_regs = true;
@@ -97,7 +98,7 @@ namespace spv
 		vk::command_buffer_chain<32> command_buffer_list;
 		vk::descriptor_set descriptor_set;
 
-#if 1//SPU_DEBUG
+#if SPU_DEBUG
 		bool is_leader = (0u == g_leader++);
 #else
 		const bool is_leader = false;
@@ -108,7 +109,7 @@ namespace spv
 			// Descriptor pool + set
 			std::vector<VkDescriptorPoolSize> pool_sizes =
 			{
-				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 4 }
+				{ VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 5 }
 			};
 			descriptor_pool.create(dev, pool_sizes.data(), ::size32(pool_sizes), 1, 1);
 			descriptor_set = descriptor_pool.allocate(g_set_layout, VK_FALSE, 0);
@@ -129,9 +130,11 @@ namespace spv
 
 			gpu_constants = std::make_unique<vk::buffer>(dev, 8192, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 
-			ls_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().host_visible_coherent,
+			ls_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().device_local, 0, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
+
+			ls_mirror_block = std::make_unique<vk::buffer>(dev, 256 * 1024, dev.get_memory_mapping().device_bar,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
+				VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, 0, vk::VMM_ALLOCATION_POOL_SYSTEM);
 
 			teb_block = std::make_unique<vk::buffer>(dev, 256, dev.get_memory_mapping().host_visible_coherent,
 				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -140,6 +143,7 @@ namespace spv
 			// Bind our standard interface. Only needs to be done once.
 			std::vector<VkDescriptorBufferInfo> bindings;
 			bindings.push_back({ .buffer = ls_block->value, .offset = 0, .range = ls_block->size() });
+			bindings.push_back({ .buffer = ls_mirror_block->value, .offset = 0, .range = ls_mirror_block->size() });
 			bindings.push_back({ .buffer = gpr_block->value, .offset = 0, .range = gpr_block->size() });
 			bindings.push_back({ .buffer = teb_block->value, .offset = 0, .range = teb_block->size() });
 			bindings.push_back({ .buffer = gpu_constants->value, .offset = 0, .range = gpu_constants->size() });
@@ -151,7 +155,7 @@ namespace spv
 
 			// Map execution memory
 			teb = static_cast<TEB*>(teb_block->map(0, sizeof(TEB)));
-			ls = static_cast<u8*>(ls_block->map(0, ls_block->size()));
+			ls = static_cast<u8*>(ls_mirror_block->map(0, ls_mirror_block->size()));
 		}
 
 		~SPU_execution_context_t()
@@ -170,7 +174,7 @@ namespace spv
 
 			if (ls)
 			{
-				ls_block->unmap();
+				ls_mirror_block->unmap();
 				ls = nullptr;
 			}
 
@@ -320,12 +324,12 @@ namespace spv
 				spu.mfc_fence = regs->MFC_fence;
 
 				// TODO: Be smarter about this
-				std::memcpy(spu._ptr<u8>(regs->MFC_lsa), ls + regs->MFC_lsa, utils::align(static_cast<u32>(regs->MFC_size), 128u));
+				std::memcpy(spu._ptr<u8>(regs->MFC_lsa), ls + regs->MFC_lsa, regs->MFC_size);
 
 				spu.process_mfc_cmd();
 
 				flush_caches = true;
-				flush_cache_region = { regs->MFC_lsa, utils::align(static_cast<u32>(regs->MFC_size), 128u) };
+				flush_cache_region = { regs->MFC_lsa, regs->MFC_size };
 
 				if (is_leader)
 				{
@@ -343,7 +347,7 @@ namespace spv
 			case spv::exit_code::RDCH3:
 			{
 				// TODO: This fall is correct as we're waiting, but channels are poorly supported in general
-				const spu_opcode_t op = { *reinterpret_cast<const be_t<u32>*>(ls + teb->dr[0])};
+				const spu_opcode_t op = { *spu._ptr<const be_t<u32>>(teb->dr[0]) };
 				const s64 result = spu.get_ch_value(op.ra);
 				spu.gpr[op.rt]._u32[3] = result;
 				spu.gpr[op.rt]._u32[2] = 0;
@@ -397,7 +401,31 @@ namespace spv
 
 		void do_cache_sync(const vk::command_buffer& cmd, spu_thread& spu)
 		{
-			std::memcpy(ls + flush_cache_region.first, spu._ptr<u8>(flush_cache_region.first), flush_cache_region.second);
+			// NOTE: We're coming in from a CPU sync, so no need for source barriers
+			{
+				const auto [offset, length] = flush_cache_region;
+
+				if (length > 8192)
+				{
+					const VkBufferCopy region =
+					{
+						.srcOffset = offset,
+						.dstOffset = offset,
+						.size = length
+					};
+
+					std::memcpy(ls + offset, spu._ptr<u8>(offset), length);
+					vkCmdCopyBuffer(cmd, ls_mirror_block->value, ls_block->value, 1, &region);
+				}
+				else
+				{
+					vkCmdUpdateBuffer(cmd, ls_block->value, offset, length, spu._ptr<u8>(offset));
+				}
+
+				// vk::insert_buffer_memory_barrier(cmd, ls_block->value, offset, length,
+					// VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+					// VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+			}
 
 			// Update MFC registers
 			MFC_registers_t reg_upd;
@@ -413,17 +441,11 @@ namespace spv
 			reg_upd.MFC_cmd = spu.ch_mfc_cmd.cmd;
 			reg_upd.MFC_fence = spu.mfc_fence;
 
-			vk::insert_buffer_memory_barrier(cmd, gpr_block->value, 144 * 16, 48,
-				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-				VK_ACCESS_TRANSFER_WRITE_BIT);
-
 			vkCmdUpdateBuffer(cmd, gpr_block->value, 144 * 16, sizeof(MFC_registers_t), &reg_upd);
 
-			vk::insert_buffer_memory_barrier(cmd, gpr_block->value, 144 * 16, 48,
-				VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-				VK_ACCESS_TRANSFER_WRITE_BIT,
-				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
+			// vk::insert_buffer_memory_barrier(cmd, gpr_block->value, 144 * 16, 48,
+				// VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+				// VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT);
 		}
 
 		void do_init_constants(const vk::command_buffer& cmd)
@@ -546,8 +568,15 @@ namespace spv
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
 				.pImmutableSamplers = nullptr
 			},
-						{
+			{
 				.binding = 3,
+				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+				.descriptorCount = 1,
+				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+				.pImmutableSamplers = nullptr
+			},
+			{
+				.binding = 4,
 				.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
 				.descriptorCount = 1,
 				.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,

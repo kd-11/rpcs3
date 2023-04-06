@@ -3,7 +3,9 @@ R"(
 layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
 
 layout(set=0, binding=0, std430) restrict buffer local_storage { ivec4 ls[16384]; };
-layout(set=0, binding=1, std430) restrict buffer register_file
+layout(set=0, binding=1, std430) writeonly restrict buffer local_storage_mirror { ivec4 ls_mirror[16384]; };
+
+layout(set=0, binding=2, std430) restrict buffer register_file
 {
 	// GPR file
 	ivec4 vgpr[144];
@@ -24,7 +26,7 @@ layout(set=0, binding=1, std430) restrict buffer register_file
 	int MFC_fence;
 };
 
-layout(set=0, binding=2, std430) writeonly restrict buffer control_block
+layout(set=0, binding=3, std430) writeonly restrict buffer control_block
 {
 	// Thread control and debugging/inspection
 	uint pc;
@@ -34,7 +36,7 @@ layout(set=0, binding=2, std430) writeonly restrict buffer control_block
 	int dr[16];
 };
 
-layout(set=0, binding=3, std430) readonly restrict buffer constants_block
+layout(set=0, binding=4, std430) readonly restrict buffer constants_block
 {
 	// Static constants
 	ivec4 qshr_mask_lookup[128];
@@ -52,6 +54,9 @@ int sgpr[4];
 #define SPU_MFC_CMD         2
 #define SPU_RDCH_SigNotify1 3
 #define SPU_STOP_AND_SIGNAL 4
+
+#define ALIGN_DOWN(value, align) ((value) & ~(align - 1))
+#define ALIGN_UP(value, align) ALIGN_DOWN(value + align - 1, align)
 
 // Standard wrappers
 ivec4 _bswap(const in ivec4 reg)
@@ -71,6 +76,18 @@ vec4 xfloat(const in ivec4 reg)
 	const ivec4 mag = reg & ivec4(0x7fffffff);
 	const ivec4 bits = min(mag, ivec4(0x7f7fffff));
 	return intBitsToFloat(bits | sign_);
+}
+
+void flush_LS(const in int offset, const in int length)
+{
+	const int start = ALIGN_DOWN(offset, 16);
+	const int end = ALIGN_UP(offset + length, 16);
+	const int word_offset = start >> 4;
+	const int word_count = (end - start) >> 4;
+	for (int i = word_offset; i < (word_offset + word_count); ++i)
+	{
+		ls_mirror[i] = ls[i];
+	}
 }
 
 // Workaround for signed bfe being fucked

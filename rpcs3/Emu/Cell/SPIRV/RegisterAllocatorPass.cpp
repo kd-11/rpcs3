@@ -47,6 +47,11 @@ namespace spv
 		{
 			return was_written_to() && was_read_from() && last_write < last_read;
 		}
+
+		bool is_const() const
+		{
+			return !was_written_to();
+		}
 	};
 
 	std::pair<std::string, std::size_t> parse_reg(const std::string& token, std::size_t offset)
@@ -179,6 +184,7 @@ namespace spv
 			register_initializer_t reg_init;
 			reg_init.require_load = ref.requires_load();
 			reg_init.require_sync = ref.requires_sync();
+			reg_init.is_const = ref.is_const();
 			reg_init.old_name = name;
 			reg_init.new_name = get_temp_reg_name(name);
 			result.temp_regs[name] = reg_init;
@@ -212,6 +218,8 @@ namespace spv
 		};
 
 		int loop_depth = 0;
+		int last_exit = -1;
+
 		for (std::size_t idx = 0; idx < function.instructions.size(); ++idx)
 		{
 			auto& inst = function.instructions[idx];
@@ -229,6 +237,11 @@ namespace spv
 			else if (inst.flags.loop_exit)
 			{
 				loop_depth--;
+			}
+
+			if (inst.expression == "return;") // TODO: Flags
+			{
+				last_exit = idx;
 			}
 
 			reg_set.clear();
@@ -264,6 +277,17 @@ namespace spv
 					if (to_replace)
 					{
 						lhs = do_replacements(lhs, { decoded.output_reg });
+
+						if (reg_info->second.requires_sync() &&
+							last_exit < reg_info->second.first_write &&
+							loop_depth == 0 &&
+							reg_info->second.is_last_write(idx) &&
+							decoded.lhs == decoded.output_reg &&
+							!rhs.starts_with('='))
+						{
+							result.temp_regs[decoded.output_reg].require_sync = false; // No need for exit sync
+							lhs = decoded.output_reg + " = " + lhs;
+						}
 					}
 				}
 			}
@@ -274,7 +298,7 @@ namespace spv
 			}
 
 			// Take care, special expressions like == >= <= exist
-			const std::string concat = rhs.starts_with("=") ? " =" : " = ";
+			const std::string concat = rhs.starts_with('=') ? " = " : " = ";
 			inst.expression = lhs + concat + rhs;
 		}
 

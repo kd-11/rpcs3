@@ -10,6 +10,7 @@ namespace spv
 		std::string new_name;
 		bool require_load = false;
 		bool require_sync = false;
+		bool is_const = false;
 	};
 
 	struct register_allocator_output

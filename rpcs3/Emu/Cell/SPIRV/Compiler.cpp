@@ -357,10 +357,28 @@ namespace spv
 
 		// Shadow registers
 		const spv::register_allocator_output allocator_output = run_allocator_pass(m_block);
+		std::vector<spv::register_initializer_t> shadow_registers;
+		std::vector<spv::register_initializer_t> scratch_registers;
+
 		for (const auto& reg_data : allocator_output.temp_regs)
 		{
-			// TODO: Allocator can give type hints
-			const auto& reg = reg_data.second;
+			if (reg_data.second.require_sync)
+			{
+				shadow_registers.push_back(reg_data.second);
+			}
+			else
+			{
+				scratch_registers.push_back(reg_data.second);
+			}
+		}
+
+		// Lexographically sort the names
+		std::sort(shadow_registers.begin(), shadow_registers.end(), FN(x.new_name < y.new_name));
+		std::sort(scratch_registers.begin(), scratch_registers.end(), FN(x.new_name < y.new_name));
+
+		// TODO: Allocator can give type hints
+		for (const auto& reg : shadow_registers)
+		{
 			shaderbuf << "ivec4 " << reg.new_name << (reg.require_load ? " = "s + reg.old_name : ""s) << ";\n";
 		}
 
@@ -368,8 +386,19 @@ namespace spv
 		shaderbuf <<
 			"\n"
 			"void execute()\n"
-			"{\n" <<
-			m_block.compile() <<
+			"{\n";
+
+		if (!scratch_registers.empty())
+		{
+			for (const auto& reg : scratch_registers)
+			{
+				shaderbuf << (reg.is_const ? "const " : "") << "  ivec4 " << reg.new_name << (reg.require_load ? " = "s + reg.old_name : ""s) << ";\n";
+			}
+
+			shaderbuf << "\n";
+		}
+
+		shaderbuf << m_block.compile() <<
 			"}\n\n";
 
 		// Entry
@@ -380,18 +409,12 @@ namespace spv
 			"	exit_code = 0;\n"
 			"	execute();\n";
 
-		if (!allocator_output.temp_regs.empty())
+		if (!shadow_registers.empty())
 		{
 			shaderbuf << "\n";
 
-			for (const auto& reg_data : allocator_output.temp_regs)
+			for (const auto& reg : shadow_registers)
 			{
-				const auto& reg = reg_data.second;
-				if (!reg.require_sync)
-				{
-					continue;
-				}
-
 				shaderbuf << "\t" << reg.old_name << " = " << reg.new_name << ";\n";
 			}
 		}

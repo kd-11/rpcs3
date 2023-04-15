@@ -181,9 +181,11 @@ namespace spv
 				continue;
 			}
 
+			const bool is_scratch_reg = "vgpr[128] vgpr[129] vgpr[130] vgpr[131]"s.find(name) != std::string::npos;
+
 			register_initializer_t reg_init;
-			reg_init.require_load = ref.requires_load();
-			reg_init.require_sync = ref.requires_sync();
+			reg_init.require_load = is_scratch_reg ? false : ref.requires_load();
+			reg_init.require_sync = is_scratch_reg ? false : ref.requires_sync();
 			reg_init.is_const = ref.is_const();
 			reg_init.old_name = name;
 			reg_init.new_name = get_temp_reg_name(name);

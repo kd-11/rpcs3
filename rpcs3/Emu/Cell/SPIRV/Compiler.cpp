@@ -392,7 +392,7 @@ namespace spv
 		{
 			for (const auto& reg : scratch_registers)
 			{
-				shaderbuf << (reg.is_const ? "const " : "") << "  ivec4 " << reg.new_name << (reg.require_load ? " = "s + reg.old_name : ""s) << ";\n";
+				shaderbuf << (reg.is_const ? "  const " : "  ") << "ivec4 " << reg.new_name << (reg.require_load ? " = "s + reg.old_name : ""s) << ";\n";
 			}
 
 			shaderbuf << "\n";
@@ -434,7 +434,10 @@ namespace spv
 		shaderbuf <<
 			"}\n\n"; //qshl_mask_lookup
 
-		const auto glsl_src = shaderbuf.str();
+		const auto raw_src = shaderbuf.str();
+		const auto glsl_src = fmt::replace_all(raw_src, {
+			{ "//// Preprocessor", g_cfg.core.spu_accurate_xfloat ? "#define XFLOAT_PRECISE 1" : "#define XFLOAT_PRECISE 0" }
+		});
 		const spv::build_info exec_info = {
 			.layout = runtime_layout,
 			.source = glsl_src
@@ -1087,6 +1090,78 @@ namespace spv
 			dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
 
 		m_compiler_config.enable_qshr();
+	}
+
+	void assembler::q_rotl32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qrotl32(vgpr[%d], sgpr[%d]);",
+			dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
+
+		m_compiler_config.enable_qrotl32();
+	}
+
+	void assembler::q_rotr32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qrotr32(vgpr[%d], sgpr[%d]);",
+			dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
+
+		m_compiler_config.enable_qrotr32();
+	}
+
+	void assembler::q_shl32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qshl32(vgpr[%d], sgpr[%d]);",
+			dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
+
+		m_compiler_config.enable_qshl32();
+	}
+
+	void assembler::q_shr32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qshr32(vgpr[%d], sgpr[%d]);",
+			dst.vgpr_index, op0.vgpr_index, op1.sgpr_index);
+
+		m_compiler_config.enable_qshr32();
+	}
+
+	void assembler::q_rotl32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qrotl32(vgpr[%d], %s);",
+			dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
+
+		m_compiler_config.enable_qrotl32();
+	}
+
+	void assembler::q_rotr32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qrotr32(vgpr[%d], %s);",
+			dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
+
+		m_compiler_config.enable_qrotr32();
+	}
+
+	void assembler::q_shl32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qshl32(vgpr[%d], %s);",
+			dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
+
+		m_compiler_config.enable_qshl32();
+	}
+
+	void assembler::q_shr32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1)
+	{
+		m_block += fmt::format(
+			"vgpr[%d] = _qshr32(vgpr[%d], %s);",
+			dst.vgpr_index, op0.vgpr_index, get_const_name(op1));
+
+		m_compiler_config.enable_qshr32();
 	}
 
 	void assembler::unimplemented(const std::string_view& name)

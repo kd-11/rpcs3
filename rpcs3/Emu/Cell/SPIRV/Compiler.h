@@ -475,6 +475,14 @@ namespace spv
 		void q_rotr(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
 		void q_shl(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
 		void q_shr(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+		void q_rotl32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+		void q_rotr32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+		void q_shl32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+		void q_shr32(spv::vector_register_t dst, spv::vector_register_t op0, spv::scalar_register_t op1);
+		void q_rotl32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1);
+		void q_rotr32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1);
+		void q_shl32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1);
+		void q_shr32i(spv::vector_register_t dst, spv::vector_register_t op0, const spv::scalar_const_t& op1);
 
 		// Flow control
 		void s_bri(const spv::scalar_const_t& target);
@@ -519,6 +527,8 @@ namespace spv
 			void enable_shufb() { uses_shufb = true; }
 			void enable_qrotl() { uses_qrotl = uses_qrotl32 = true; }
 			void enable_qrotr() { uses_qrotr = uses_qrotr32 = true; }
+			void enable_qrotl32() { uses_qrotl32 = true; }
+			void enable_qrotr32() { uses_qrotr32 = true; }
 			void enable_qshl() { uses_qshl = uses_qrotl = uses_qrotl32 = true; }
 			void enable_qshr() { uses_qshr = uses_qrotr = uses_qrotr32 = true; }
 			void enable_qshl32() { uses_qshl32 = uses_qrotl32 = true; }

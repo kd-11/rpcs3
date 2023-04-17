@@ -1407,25 +1407,48 @@ void spv_recompiler::SHLQBII(spu_opcode_t op)
 
 void spv_recompiler::ROTQBYI(spu_opcode_t op)
 {
-	// TODO: Ellide mov
 	const auto shift_distance = (op.i7 & 0xf) << 3;
-	c.s_movsi(c.s_tmp0, spv::constants::make_si(shift_distance));
-	c.q_rotr(op.rt, op.ra, c.s_tmp0);
+	if (shift_distance < 32)
+	{
+		c.q_rotr32i(op.rt, op.ra, spv::constants::make_si(shift_distance));
+	}
+	else
+	{
+		// TODO: Ellide mov
+		c.s_movsi(c.s_tmp0, spv::constants::make_si(shift_distance));
+		c.q_rotr(op.rt, op.ra, c.s_tmp0);
+	}
 }
 
 void spv_recompiler::ROTQMBYI(spu_opcode_t op)
 {
-	// TODO: Ellide mov
 	const auto shift_distance = ((0 - int(op.i7)) & 0xf) << 3;
-	c.s_movsi(c.s_tmp0, spv::constants::make_si(shift_distance));
-	c.q_shl(op.rt, op.ra, c.s_tmp0);
+	if (shift_distance < 32)
+	{
+		c.q_shl32i(op.rt, op.ra, spv::constants::make_si(shift_distance));
+	}
+	else
+	{
+		// TODO: Ellide mov
+		c.s_movsi(c.s_tmp0, spv::constants::make_si(shift_distance));
+		c.q_shl(op.rt, op.ra, c.s_tmp0);
+	}
 }
 
 void spv_recompiler::SHLQBYI(spu_opcode_t op)
 {
+	// TODO: Verify shift direction
 	const auto shift_distance = (op.i7 & 0xf) << 3;
-	c.s_movsi(c.s_tmp0, spv::constants::make_si(shift_distance));
-	c.q_shr(op.rt, op.ra, c.s_tmp0);
+	if (shift_distance < 32)
+	{
+		c.q_shr32i(op.rt, op.ra, spv::constants::make_si(shift_distance));
+	}
+	else
+	{
+		// TODO: Ellide mov
+		c.s_movsi(c.s_tmp0, spv::constants::make_si(shift_distance));
+		c.q_shr(op.rt, op.ra, c.s_tmp0);
+	}
 }
 
 void spv_recompiler::NOP(spu_opcode_t op)

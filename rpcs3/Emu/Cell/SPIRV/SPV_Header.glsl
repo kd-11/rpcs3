@@ -43,6 +43,8 @@ layout(set=0, binding=4, std430) readonly restrict buffer constants_block
 	ivec4 qshl_mask_lookup[128];
 };
 
+//// Preprocessor
+
 // Temp registers
 vec4 vgprf[2];
 uvec4 vgpru[2];
@@ -70,6 +72,7 @@ ivec4 _bswap(const in ivec4 reg)
 	return ivec4(e.wzyx);
 }
 
+#if XFLOAT_PRECISE
 vec4 xfloat(const in ivec4 reg)
 {
 	const ivec4 sign_ = reg & ivec4(0x80000000);
@@ -77,6 +80,9 @@ vec4 xfloat(const in ivec4 reg)
 	const ivec4 bits = min(mag, ivec4(0x7f7fffff));
 	return intBitsToFloat(bits | sign_);
 }
+#else
+#define xfloat(x) intBitsToFloat(x)
+#endif
 
 // Workaround for signed bfe being fucked
 #define _vbfe(v, o, c) ivec4(bitfieldExtract(uvec4(v), o, c))

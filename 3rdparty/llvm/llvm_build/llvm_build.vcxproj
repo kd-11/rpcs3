@@ -1,9 +1,17 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
       <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|x64">
       <Configuration>Release</Configuration>
@@ -21,7 +29,15 @@
     <ConfigurationType>Makefile</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Makefile</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'" Label="Configuration">
     <ConfigurationType>Makefile</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
   </PropertyGroup>
@@ -34,7 +50,13 @@
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros">
@@ -42,6 +64,10 @@
       cmake -G Ninja -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE="Release" -DCMAKE_INSTALL_PREFIX="./Release" -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_DEFAULT_TARGET_TRIPLE:STRING=x86_64-pc-windows-msvc -DLLVM_HOST_TRIPLE:STRING=x86_64-pc-windows-msvc -DLLVM_BUILD_RUNTIME=OFF -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_DOCS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_UTILS=OFF -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=$(WindowsTargetPlatformVersion) -DLLVM_USE_CRT_DEBUG=MDd -DLLVM_USE_CRT_RELEASE=MT -DLLVM_USE_INTEL_JITEVENTS=ON ../llvm/llvm</CmakeReleaseCLI>
     <CmakeDebugCLI>call vsdevcmd.bat -arch=amd64
       cmake -G Ninja -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE="Debug" -DCMAKE_INSTALL_PREFIX="./Debug" -DLLVM_TARGETS_TO_BUILD=X86 -DLLVM_DEFAULT_TARGET_TRIPLE:STRING=x86_64-pc-windows-msvc -DLLVM_HOST_TRIPLE:STRING=x86_64-pc-windows-msvc -DLLVM_BUILD_RUNTIME=OFF -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_DOCS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_UTILS=OFF -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=$(WindowsTargetPlatformVersion) -DLLVM_USE_CRT_DEBUG=MDd -DLLVM_USE_CRT_RELEASE=MT -DLLVM_USE_INTEL_JITEVENTS=ON ../llvm/llvm</CmakeDebugCLI>
+    <CmakeReleaseARM64CLI>call vsdevcmd.bat -arch=arm64
+      cmake -G Ninja -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE="Release" -DCMAKE_INSTALL_PREFIX="./Release" -DLLVM_TARGETS_TO_BUILD=AArch64 -DLLVM_DEFAULT_TARGET_TRIPLE:STRING=aarch64-pc-windows-msvc -DLLVM_HOST_TRIPLE:STRING=aarch64-pc-windows-msvc -DLLVM_BUILD_RUNTIME=OFF -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_DOCS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_UTILS=OFF -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=$(WindowsTargetPlatformVersion) -DLLVM_USE_CRT_DEBUG=MDd -DLLVM_USE_CRT_RELEASE=MT -DLLVM_USE_INTEL_JITEVENTS=ON ../llvm/llvm</CmakeReleaseARM64CLI>
+    <CmakeDebugARM64CLI>call vsdevcmd.bat -arch=arm64
+      cmake -G Ninja -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE="Debug" -DCMAKE_INSTALL_PREFIX="./Debug" -DLLVM_TARGETS_TO_BUILD=AArch64 -DLLVM_DEFAULT_TARGET_TRIPLE:STRING=aarch64-pc-windows-msvc -DLLVM_HOST_TRIPLE:STRING=aarch64-pc-windows-msvc -DLLVM_BUILD_RUNTIME=OFF -DLLVM_BUILD_TOOLS=OFF -DLLVM_INCLUDE_DOCS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_UTILS=OFF -DCMAKE_SYSTEM_VERSION=6.1 -DCMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION=$(WindowsTargetPlatformVersion) -DLLVM_USE_CRT_DEBUG=MDd -DLLVM_USE_CRT_RELEASE=MT -DLLVM_USE_INTEL_JITEVENTS=ON ../llvm/llvm</CmakeDebugARM64CLI>
     <CmakeCleanCLI>echo Cleaning..
       for /F "delims= eol=|" %%f in ('
       dir /b ^| findstr /V "[^.]*\build[^.]*\.vcxproj"') do (
@@ -70,6 +96,21 @@
       $(CmakeCleanCLI)
     </NMakeCleanCommandLine>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+    <NMakePreprocessorDefinitions />
+    <NMakeBuildCommandLine>$(CmakeDebugARM64CLI)
+      ninja
+      ninja install
+    </NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>del CMakeCache.txt
+      $(CmakeDebugARM64CLI)
+      ninja
+      ninja install
+    </NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>
+      $(CmakeCleanCLI)
+    </NMakeCleanCommandLine>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <NMakePreprocessorDefinitions />
     <NMakeBuildCommandLine>$(CmakeReleaseCLI)
@@ -78,6 +119,21 @@
     </NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>del CMakeCache.txt
       $(CmakeReleaseCLI)
+      ninja
+      ninja install
+    </NMakeReBuildCommandLine>
+    <NMakeCleanCommandLine>
+      $(CmakeCleanCLI)
+    </NMakeCleanCommandLine>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+    <NMakePreprocessorDefinitions />
+    <NMakeBuildCommandLine>$(CmakeReleaseARM64CLI)
+      ninja
+      ninja install
+    </NMakeBuildCommandLine>
+    <NMakeReBuildCommandLine>del CMakeCache.txt
+      $(CmakeReleaseARM64CLI)
       ninja
       ninja install
     </NMakeReBuildCommandLine>

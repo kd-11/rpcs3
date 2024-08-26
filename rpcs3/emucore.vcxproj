@@ -1,9 +1,17 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
       <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
     </ProjectConfiguration>
     <ProjectConfiguration Include="Release|x64">
       <Configuration>Release</Configuration>
@@ -34,7 +42,13 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <Import Project="$(SolutionDir)\buildfiles\msvc\rpcs3_debug.props" />
   </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'" Label="PropertySheets">
+    <Import Project="$(SolutionDir)\buildfiles\msvc\rpcs3_debug.props" />
+  </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(SolutionDir)\buildfiles\msvc\rpcs3_release.props" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'" Label="PropertySheets">
     <Import Project="$(SolutionDir)\buildfiles\msvc\rpcs3_release.props" />
   </ImportGroup>
   <ItemDefinitionGroup>
@@ -42,10 +56,15 @@
       <PrecompiledHeader>Use</PrecompiledHeader>
       <AdditionalIncludeDirectories>..\3rdparty\miniupnp\miniupnp\miniupnpc\include;..\3rdparty\wolfssl\wolfssl;..\3rdparty\flatbuffers\include;..\3rdparty\libusb\libusb\libusb;..\3rdparty\yaml-cpp\yaml-cpp\include;..\3rdparty\SoundTouch\soundtouch\include;..\3rdparty\rtmidi\rtmidi;..\3rdparty\zlib\zlib;..\3rdparty\llvm\llvm\include;..\3rdparty\llvm\llvm\llvm\include;..\3rdparty\llvm\llvm_build\include;$(VULKAN_SDK)\Include;..\3rdparty\zstd\zstd\lib</AdditionalIncludeDirectories>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MaxSpeed</Optimization>
+      <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">MaxSpeed</Optimization>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">AL_LIBTYPE_STATIC;MINIUPNP_STATICLIB;HAVE_VULKAN;HAVE_SDL2;ZLIB_CONST;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
+      <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
       <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
+      <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
     </ClCompile>
     <PreBuildEvent>
       <Command>cmd.exe /c "$(SolutionDir)\Utilities\git-version-gen.cmd"</Command>
@@ -70,6 +89,10 @@
     <ClCompile Include="Emu\Cell\Modules\libfs_utility_init.cpp" />
     <ClCompile Include="Emu\Cell\Modules\sys_crashdump.cpp" />
     <ClCompile Include="Emu\Cell\Modules\HLE_PATCHES.cpp" />
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64ASM.cpp" />
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64Common.cpp" />
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64JIT.cpp" />
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64Signal.cpp" />
     <ClCompile Include="Emu\games_config.cpp" />
     <ClCompile Include="Emu\Io\Buzz.cpp" />
     <ClCompile Include="Emu\Io\camera_config.cpp" />
@@ -537,6 +560,10 @@
     <ClInclude Include="Emu\Cell\Modules\libfs_utility_init.h" />
     <ClInclude Include="Emu\Cell\Modules\sys_crashdump.h" />
     <ClInclude Include="Emu\config_mode.h" />
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64ASM.h" />
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64Common.h" />
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64JIT.h" />
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64Signal.h" />
     <ClInclude Include="Emu\CPU\Hypervisor.h" />
     <ClInclude Include="Emu\CPU\sse2neon.h" />
     <ClInclude Include="Emu\games_config.h" />

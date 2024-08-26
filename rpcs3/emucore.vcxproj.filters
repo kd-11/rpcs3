@@ -106,6 +106,12 @@
     <Filter Include="Emu\GPU\RSX\NV47\FW">
       <UniqueIdentifier>{fdb8ff8f-5a03-45a2-8c0a-16a89b7a574b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Emu\CPU\Backends">
+      <UniqueIdentifier>{af5e1a9d-1002-4b15-86b4-76a18961cf01}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Emu\CPU\Backends\ARM64">
+      <UniqueIdentifier>{2fa8f27a-4596-45d9-a7a4-cfa357ef1f86}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Crypto\aes.cpp">
@@ -1266,6 +1272,18 @@
     </ClCompile>
     <ClCompile Include="Emu\NP\rpcn_countries.cpp">
       <Filter>Emu\NP</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64ASM.cpp">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64Common.cpp">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64JIT.cpp">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
+    </ClCompile>
+    <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64Signal.cpp">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -2574,6 +2592,18 @@
     </ClInclude>
     <ClInclude Include="Emu\NP\rpcn_countries.h">
       <Filter>Emu\NP</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64ASM.h">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64Common.h">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64JIT.h">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\CPU\Backends\AArch64\AArch64Signal.h">
+      <Filter>Emu\CPU\Backends\ARM64</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

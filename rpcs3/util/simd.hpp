@@ -570,6 +570,10 @@ inline void gv_set_zeroing_denormals()
 	cr = (cr & ~_MM_DENORMALS_ZERO_MASK) | _MM_DENORMALS_ZERO_ON;
 	cr = (cr | _MM_MASK_INVALID);
 	_mm_setcsr(cr);
+#elif defined (_M_ARM64)
+	u64 cr = _ReadStatusReg(ARM64_FPCR);
+	cr |= 0x1000000ull;
+	_WriteStatusReg(ARM64_FPCR, cr);
 #elif defined(ARCH_ARM64)
 	u64 cr;
 	__asm__ volatile("mrs %0, FPCR" : "=r"(cr));
@@ -588,6 +592,10 @@ inline void gv_unset_zeroing_denormals()
 	cr = (cr & ~_MM_DENORMALS_ZERO_MASK) | _MM_DENORMALS_ZERO_OFF;
 	cr = (cr | _MM_MASK_INVALID);
 	_mm_setcsr(cr);
+#elif defined(_M_ARM64)
+	u64 cr = _ReadStatusReg(ARM64_FPCR);
+	cr &= ~0x1000000ull;
+	_WriteStatusReg(ARM64_FPCR, cr);
 #elif defined(ARCH_ARM64)
 	u64 cr;
 	__asm__ volatile("mrs %0, FPCR" : "=r"(cr));
@@ -1575,7 +1583,7 @@ inline v128 gv_neqfs(const v128& a, const v128& b)
 #if defined(ARCH_X64)
 	return _mm_cmpneq_ps(a, b);
 #elif defined(ARCH_ARM64)
-	return ~vceqq_f32(a, b);
+	return ~v128(vceqq_f32(a, b));
 #endif
 }
 
@@ -1643,7 +1651,7 @@ inline v128 gv_ngtfs(const v128& a, const v128& b)
 #if defined(ARCH_X64)
 	return _mm_cmpngt_ps(a, b);
 #elif defined(ARCH_ARM64)
-	return ~vcgtq_f32(a, b);
+	return ~v128(vcgtq_f32(a, b));
 #endif
 }
 
@@ -1653,7 +1661,7 @@ inline v128 gv_nlefs(const v128& a, const v128& b)
 #if defined(ARCH_X64)
 	return _mm_cmpnle_ps(a, b);
 #elif defined(ARCH_ARM64)
-	return ~vcleq_f32(a, b);
+	return ~v128(vcleq_f32(a, b));
 #endif
 }
 
@@ -1705,7 +1713,7 @@ inline v128 gv_ngefs(const v128& a, const v128& b)
 #if defined(ARCH_X64)
 	return _mm_cmpnge_ps(a, b);
 #elif defined(ARCH_ARM64)
-	return ~vcgeq_f32(a, b);
+	return ~v128(vcgeq_f32(a, b));
 #endif
 }
 

@@ -1285,6 +1285,9 @@
     <ClCompile Include="Emu\CPU\Backends\AArch64\AArch64Signal.cpp">
       <Filter>Emu\CPU\Backends\ARM64</Filter>
     </ClCompile>
+    <ClCompile Include="util\asm.cpp">
+      <Filter>Utilities</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">

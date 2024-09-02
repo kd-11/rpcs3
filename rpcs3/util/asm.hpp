@@ -33,6 +33,22 @@ extern "C"
 #else
 #include <immintrin.h>
 #endif
+#elif defined(_MSC_VER)
+#include <arm64intr.h>
+#define PFRM_POL_KEEP 0
+#define PFRM_POL_STRM 1 // prefetch_nt
+#define PFRM_L1  0
+#define PFRM_L2  1
+#define PFRM_L3  2
+#define PFRM_SLC 3
+#define PFRM_LD   0  // prefetch_read
+#define PFRM_INST 1  // prefetch_exec
+#define PFRM_ST   2  // prefetch_write
+#define PFRM_OP(type, target, policy)\
+	((policy & 0x1) | ((target & 0x3) << 1) | ((type & 0xF) << 3))
+
+	s64 _div128(s64, s64, s64, s64*);
+	u64 _udiv128(u64, u64, u64, u64*);
 #endif
 
 namespace utils
@@ -115,6 +131,8 @@ namespace utils
 
 #ifdef _M_X64
 		return _mm_prefetch(static_cast<const char*>(ptr), _MM_HINT_T1);
+#elif defined(_MSC_VER)
+		return __prefetch2(ptr, PFRM_OP(PFRM_INST, PFRM_L1, PFRM_POL_KEEP));
 #else
 		return __builtin_prefetch(ptr, 0, 2);
 #endif
@@ -130,6 +148,8 @@ namespace utils
 
 #ifdef _M_X64
 		return _mm_prefetch(static_cast<const char*>(ptr), _MM_HINT_T0);
+#elif defined(_MSC_VER)
+		return __prefetch2(ptr, PFRM_OP(PFRM_LD, PFRM_L1, PFRM_POL_KEEP));
 #else
 		return __builtin_prefetch(ptr, 0, 3);
 #endif
@@ -144,6 +164,8 @@ namespace utils
 
 #if defined(_M_X64) && !defined(__clang__)
 		return _m_prefetchw(ptr);
+#elif defined(_MSC_VER)
+		return __prefetch2(ptr, PFRM_OP(PFRM_ST, PFRM_L1, PFRM_POL_KEEP));
 #else
 		return __builtin_prefetch(ptr, 1, 0);
 #endif
@@ -274,7 +296,6 @@ namespace utils
 
 	inline s64 div128(s64 high, s64 low, s64 divisor, s64* remainder = nullptr)
 	{
-#ifdef _MSC_VER
 		s64 rem = 0;
 		s64 r = _div128(high, low, divisor, &rem);
 
@@ -282,21 +303,11 @@ namespace utils
 		{
 			*remainder = rem;
 		}
-#else
-		const s128 x = (u128{static_cast<u64>(high)} << 64) | u64(low);
-		const s128 r = x / divisor;
-
-		if (remainder)
-		{
-			*remainder = x % divisor;
-		}
-#endif
 		return r;
 	}
 
 	inline u64 udiv128(u64 high, u64 low, u64 divisor, u64* remainder = nullptr)
 	{
-#ifdef _MSC_VER
 		u64 rem = 0;
 		u64 r = _udiv128(high, low, divisor, &rem);
 
@@ -304,25 +315,15 @@ namespace utils
 		{
 			*remainder = rem;
 		}
-#else
-		const u128 x = (u128{high} << 64) | low;
-		const u128 r = x / divisor;
 
-		if (remainder)
-		{
-			*remainder = x % divisor;
-		}
-#endif
 		return r;
 	}
 
-#ifdef _MSC_VER
 	inline u128 operator/(u128 lhs, u64 rhs)
 	{
 		u64 rem = 0;
 		return _udiv128(lhs.hi, lhs.lo, rhs, &rem);
 	}
-#endif
 
 	constexpr u32 ctz128(u128 arg)
 	{
@@ -356,12 +357,14 @@ namespace utils
 
 	inline void pause()
 	{
-#if defined(ARCH_ARM64)
-		__asm__ volatile("yield");
+#if defined(_M_ARM64)
+		__yield();
 #elif defined(_M_X64)
 		_mm_pause();
 #elif defined(ARCH_X64)
 		__builtin_ia32_pause();
+#elif defined(ARCH_ARM64)
+		__asm__ volatile("yield");
 #else
 #error "Missing utils::pause() implementation"
 #endif
@@ -438,14 +441,16 @@ namespace utils
 
 	inline void trigger_write_page_fault(void* ptr)
 	{
-#if defined(ARCH_X64) && !defined(_MSC_VER)
-		__asm__ volatile("lock orl $0, 0(%0)" :: "r" (ptr));
+#if defined(_MSC_VER)
+		*static_cast<atomic_t<u32>*>(ptr) += 0;
+#elif defined(ARCH_X64)
+		__asm__ volatile("lock orl $0, 0(%0)" ::"r"(ptr));
 #elif defined(ARCH_ARM64)
 		u32 value = 0;
 		u32* u32_ptr = static_cast<u32*>(ptr);
 		__asm__ volatile("ldset %w0, %w0, %1" : "+r"(value), "=Q"(*u32_ptr) : "r"(value));
 #else
-		*static_cast<atomic_t<u32> *>(ptr) += 0;
+#error "Missing trigger_write_fault implementation"
 #endif
 	}
 
@@ -453,6 +458,8 @@ namespace utils
 	{
 #ifdef _M_X64
 		__debugbreak();
+#elif defined(_M_ARM64)
+		__break(0x42);
 #elif defined(ARCH_X64)
 		__asm__ volatile("int3");
 #elif defined(ARCH_ARM64)

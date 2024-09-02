@@ -75,6 +75,12 @@
     <CmakeDebugCLI>call vsdevcmd.bat -arch=amd64
       cd ./openal-soft/build
       cmake -G Ninja -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE="Debug" -DCMAKE_INSTALL_PREFIX="./Debug" -DCMAKE_SYSTEM_VERSION=6.1 -DLIBTYPE=STATIC -DALSOFT_UTILS=false -DALSOFT_EXAMPLES=false -DALSOFT_INSTALL=false -DALSOFT_INSTALL_CONFIG=false -DALSOFT_INSTALL_HRTF_DATA=false -DALSOFT_INSTALL_AMBDEC_PRESETS=false -DALSOFT_INSTALL_EXAMPLES=false -DALSOFT_INSTALL_UTILS=false ..</CmakeDebugCLI>
+    <CmakeReleaseARM64CLI>call vsdevcmd.bat -arch=arm64
+      cd ./openal-soft/build
+      cmake -G Ninja -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE="Release" -DCMAKE_INSTALL_PREFIX="./Release" -DCMAKE_SYSTEM_VERSION=6.1 -DLIBTYPE=STATIC -DFORCE_STATIC_VCRT=true -DALSOFT_UTILS=false -DALSOFT_EXAMPLES=false -DALSOFT_INSTALL=false -DALSOFT_INSTALL_CONFIG=false -DALSOFT_INSTALL_HRTF_DATA=false -DALSOFT_INSTALL_AMBDEC_PRESETS=false -DALSOFT_INSTALL_EXAMPLES=false -DALSOFT_INSTALL_UTILS=false ..</CmakeReleaseARM64CLI>
+    <CmakeDebugARM64CLI>call vsdevcmd.bat -arch=arm64
+      cd ./openal-soft/build
+      cmake -G Ninja -DCMAKE_CXX_COMPILER="cl.exe" -DCMAKE_C_COMPILER="cl.exe" -DCMAKE_BUILD_TYPE="Debug" -DCMAKE_INSTALL_PREFIX="./Debug" -DCMAKE_SYSTEM_VERSION=6.1 -DLIBTYPE=STATIC -DALSOFT_UTILS=false -DALSOFT_EXAMPLES=false -DALSOFT_INSTALL=false -DALSOFT_INSTALL_CONFIG=false -DALSOFT_INSTALL_HRTF_DATA=false -DALSOFT_INSTALL_AMBDEC_PRESETS=false -DALSOFT_INSTALL_EXAMPLES=false -DALSOFT_INSTALL_UTILS=false ..</CmakeDebugARM64CLI>
     <CmakeCleanCLI>echo Cleaning..
       cd ./openal-soft/build
     </CmakeCleanCLI>
@@ -92,11 +98,11 @@
     </NMakeCleanCommandLine>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
-    <NMakeBuildCommandLine>$(CmakeDebugCLI)
+    <NMakeBuildCommandLine>$(CmakeDebugARM64CLI)
       ninja
     </NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>del CMakeCache.txt
-      $(CmakeDebugCLI)
+      $(CmakeDebugARM64CLI)
       ninja
     </NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>
@@ -116,11 +122,11 @@
     </NMakeCleanCommandLine>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
-    <NMakeBuildCommandLine>$(CmakeReleaseCLI)
+    <NMakeBuildCommandLine>$(CmakeReleaseARM64CLI)
       ninja
     </NMakeBuildCommandLine>
     <NMakeReBuildCommandLine>del CMakeCache.txt
-      $(CmakeReleaseCLI)
+      $(CmakeReleaseARM64CLI)
       ninja
     </NMakeReBuildCommandLine>
     <NMakeCleanCommandLine>

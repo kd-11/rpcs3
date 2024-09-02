@@ -254,9 +254,11 @@ using s128 = __int128_t;
 
 extern "C"
 {
+#ifdef _M_X64
 	union __m128;
 	union __m128i;
 	struct __m128d;
+#endif
 
 	uchar _addcarry_u64(uchar, u64, u64, u64*);
 	uchar _subborrow_u64(uchar, u64, u64, u64*);
@@ -530,6 +532,13 @@ struct alignas(16) u128
 struct s128 : u128
 {
 	using u128::u128;
+
+	s128() noexcept = default;
+
+	s128(const u128& other)
+	{
+		std::memcpy(this, &other, sizeof(other));
+	}
 
 	constexpr s128 operator>>(u128 shift_value) const
 	{

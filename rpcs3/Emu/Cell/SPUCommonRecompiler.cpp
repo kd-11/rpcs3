@@ -1399,7 +1399,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 		{
 			// 36 bytes
 			// Fallback to dispatch if no target
-			const u64 taddr = target ? reinterpret_cast<u64>(target) : reinterpret_cast<u64>(tr_dispatch);
+			const u64 taddr = target ? static_cast<u64>(target) : reinterpret_cast<u64>(tr_dispatch);
 
 			// ldr x9, #16 -> ldr x9, taddr
 			*raw++ = 0x89;
@@ -1439,7 +1439,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 					*raw++ = 0x48;
 					break;
 				default:
-					asm("brk 0x42");
+					utils::trap();
 				}
 
 				*raw++ = 0x00;
@@ -1744,7 +1744,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 				make_jump(0x82, w.beg->second); // jb rel32
 #elif defined(ARCH_ARM64)
-				u64 branch_target = reinterpret_cast<u64>(w.beg->second);
+				const u64 branch_target = reinterpret_cast<u64>(w.beg->second);
 				make_jump(asmjit::arm::CondCode::kUnsignedLT, branch_target);
 #else
 #error "Unimplemented"
@@ -1755,7 +1755,8 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 				make_jump(0x82, raw); // jb rel32 (stub)
 #elif defined(ARCH_ARM64)
-				make_jump(asmjit::arm::CondCode::kUnsignedLT, raw);
+				const u64 branch_target = reinterpret_cast<u64>(raw);
+				make_jump(asmjit::arm::CondCode::kUnsignedLT, branch_target);
 #else
 #error "Unimplemented"
 #endif
@@ -1772,7 +1773,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 				make_jump(0xe9, it->second); // jmp rel32
 #elif defined(ARCH_ARM64)
-				u64 branch_target = reinterpret_cast<u64>(it->second);
+				const u64 branch_target = reinterpret_cast<u64>(it->second);
 				make_jump(asmjit::arm::CondCode::kAlways, branch_target);
 #else
 #error "Unimplemented"
@@ -1797,7 +1798,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 						make_jump(0x87, it2->second); // ja rel32
 #elif defined(ARCH_ARM64)
-						u64 branch_target = reinterpret_cast<u64>(it2->second);
+						const u64 branch_target = reinterpret_cast<u64>(it2->second);
 						make_jump(asmjit::arm::CondCode::kUnsignedGT, branch_target);
 #else
 #throw "Unimplemented"
@@ -1808,7 +1809,8 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 						make_jump(0x87, raw); // ja rel32 (stub)
 #elif defined(ARCH_ARM64)
-						make_jump(asmjit::arm::CondCode::kUnsignedGT, raw);
+						const u64 branch_target = reinterpret_cast<u64>(raw);
+						make_jump(asmjit::arm::CondCode::kUnsignedGT, branch_target);
 #else
 #error "Unimplemented"
 #endif
@@ -1826,7 +1828,7 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 						make_jump(0xe9, it->second); // jmp rel32
 #elif defined(ARCH_ARM64)
-						u64 branch_target = reinterpret_cast<u64>(it->second);
+						const u64 branch_target = reinterpret_cast<u64>(it->second);
 						make_jump(asmjit::arm::CondCode::kAlways, branch_target);
 #else
 #error "Unimplemented"
@@ -1837,7 +1839,8 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 						make_jump(0xe9, raw); // jmp rel32 (stub)
 #elif defined(ARCH_ARM64)
-						make_jump(asmjit::arm::CondCode::kAlways, raw);
+						const u64 branch_target = reinterpret_cast<u64>(raw);
+						make_jump(asmjit::arm::CondCode::kAlways, branch_target);
 #else
 #error "Unimplemented"
 #endif
@@ -1854,7 +1857,8 @@ spu_function_t spu_runtime::rebuild_ubertrampoline(u32 id_inst)
 #if defined(ARCH_X64)
 					make_jump(0xe9, raw); // jmp rel32 (stub)
 #elif defined(ARCH_ARM64)
-					make_jump(asmjit::arm::CondCode::kAlways, raw);
+					const u64 branch_target = reinterpret_cast<u64>(raw);
+					make_jump(asmjit::arm::CondCode::kAlways, branch_target);
 #else
 #error "Unimplemented"
 #endif
@@ -2015,8 +2019,7 @@ spu_function_t spu_runtime::make_branch_patchpoint(u16 data) const
 #endif
 
 	// Flush all cache lines after potentially writing executable code
-	asm("ISB");
-	asm("DSB ISH");
+	_aarch64_flush_jit();
 
 	return reinterpret_cast<spu_function_t>(patch_fn);
 #else
@@ -2083,8 +2086,7 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 #endif
 
 		// Flush all cache lines after potentially writing executable code
-		asm("ISB");
-		asm("DSB ISH");
+		_aarch64_flush_jit();
 #else
 #error "Unimplemented"
 #endif
@@ -2130,8 +2132,7 @@ void spu_recompiler_base::dispatch(spu_thread& spu, void*, u8* rip)
 
 #if defined(ARCH_ARM64)
 	// Flush all cache lines after potentially writing executable code
-	asm("ISB");
-	asm("DSB ISH");
+	_aarch64_flush_jit();
 #endif
 	spu_runtime::g_tail_escape(&spu, func, nullptr);
 }
@@ -2223,8 +2224,7 @@ void spu_recompiler_base::branch(spu_thread& spu, void*, u8* rip)
 #endif
 
 	// Flush all cache lines after potentially writing executable code
-	asm("ISB");
-	asm("DSB ISH");
+	_aarch64_flush_jit();
 #else
 #error "Unimplemented"
 #endif

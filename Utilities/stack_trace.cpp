@@ -52,6 +52,8 @@ namespace utils
 		stack.AddrPC.Offset = context.Pc;
 		stack.AddrStack.Offset = context.Sp;
 		stack.AddrFrame.Offset = context.Fp;
+#else
+#error "Stack walk unimplemented for this architecture"
 #endif
 
 		while (max_depth--)

@@ -181,6 +181,7 @@
     <ClCompile Include="Emu\NP\rpcn_client.cpp" />
     <ClCompile Include="Emu\vfs_config.cpp" />
     <ClCompile Include="Loader\disc.cpp" />
+    <ClCompile Include="util\asm.cpp" />
     <ClCompile Include="util\serialization_ext.cpp">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
     </ClCompile>

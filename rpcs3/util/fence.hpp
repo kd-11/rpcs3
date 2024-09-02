@@ -18,9 +18,12 @@ namespace utils
 		_mm_lfence();
 #elif defined(ARCH_X64)
 		__builtin_ia32_lfence();
+#elif defined(_M_ARM64)
+		__dmb(_ARM64_BARRIER_ISHLD);
+		__dsb(_ARM64_BARRIER_ISHLD);
 #elif defined(ARCH_ARM64)
-		// TODO
-		__asm__ volatile("isb");
+		__asm__ volatile("dmb ishld");
+		__asm__ volatile("dsb ishld");
 #else
 #error "Missing lfence() implementation"
 #endif

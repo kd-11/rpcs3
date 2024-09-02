@@ -12,6 +12,9 @@
 #ifdef _MSC_VER
 #pragma warning(push, 0)
 #include <asmjit/asmjit.h>
+#if defined(ARCH_ARM64)
+#include <asmjit/a64.h>
+#endif
 #pragma warning(pop)
 #else
 #pragma GCC diagnostic push
@@ -51,6 +54,19 @@ using native_args = std::array<asmjit::x86::Gp, 4>;
 #elif defined(ARCH_ARM64)
 using native_asm = asmjit::a64::Assembler;
 using native_args = std::array<asmjit::a64::Gp, 4>;
+#ifdef _MSC_VER
+#define _aarch64_flush_jit()\
+	do {\
+		__isb(_ARM64_BARRIER_SY);\
+		__dsb(_ARM64_BARRIER_ISH);\
+	} while (0)
+#else
+#define _aarch64_flush_jit()\
+	do {\
+		asm("isb");\
+		asm("dsb ish");\
+	} while (0)
+#endif
 #endif
 
 void jit_announce(uptr func, usz size, std::string_view name);

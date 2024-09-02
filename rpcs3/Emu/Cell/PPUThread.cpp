@@ -2176,8 +2176,7 @@ void ppu_thread::cpu_task()
 #endif
 #ifdef ARCH_ARM64
 			// Flush all cache lines after potentially writing executable code
-			asm("ISB");
-			asm("DSB ISH");
+			_aarch64_flush_jit();
 #endif
 
 			// Wait until the progress dialog is closed.
@@ -2386,8 +2385,7 @@ ppu_thread::ppu_thread(const ppu_thread_params& param, std::string_view name, u3
 #endif
 #ifdef ARCH_ARM64
 	// Flush all cache lines after potentially writing executable code
-	asm("ISB");
-	asm("DSB ISH");
+	_aarch64_flush_jit();
 #endif
 }
 

@@ -81,7 +81,10 @@
     <ClCompile>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>SOUNDTOUCH_ALLOW_SSE;ST_NO_EXCEPTION_HANDLING;USE_MULTICH_ALWAYS;SOUNDTOUCH_FLOAT_SAMPLES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">SOUNDTOUCH_ALLOW_SSE;ST_NO_EXCEPTION_HANDLING;USE_MULTICH_ALWAYS;SOUNDTOUCH_FLOAT_SAMPLES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">SOUNDTOUCH_ALLOW_SSE;ST_NO_EXCEPTION_HANDLING;USE_MULTICH_ALWAYS;SOUNDTOUCH_FLOAT_SAMPLES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">ST_NO_EXCEPTION_HANDLING;USE_MULTICH_ALWAYS;SOUNDTOUCH_FLOAT_SAMPLES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">ST_NO_EXCEPTION_HANDLING;USE_MULTICH_ALWAYS;SOUNDTOUCH_FLOAT_SAMPLES;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>./soundtouch/source/SoundTouch;./soundtouch/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ProgramDatabase</DebugInformationFormat>
       <DebugInformationFormat Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">ProgramDatabase</DebugInformationFormat>

@@ -6731,7 +6731,9 @@ auto FCTIDZ()
 		const auto res = _mm_xor_si128(_mm_set1_epi64x(_mm_cvttsd_si64(val)), _mm_castpd_si128(_mm_cmpge_pd(val, _mm_set1_pd(f64(1ull << 63)))));
 		d = std::bit_cast<f64>(_mm_cvtsi128_si64(res));
 	#elif defined(ARCH_ARM64)
-		d = std::bit_cast<f64>(!(b == b) ? int64x1_t{INT64_MIN} : vcvt_s64_f64(std::bit_cast<float64x1_t>(b)));
+		const auto fallback = std::bit_cast<u64>(INT64_MIN);
+		const auto expr = vcvt_s64_f64(std::bit_cast<float64x1_t>(b));
+		d = std::bit_cast<f64>(!(b == b) ? fallback : std::bit_cast<u64>(expr));
 	#endif
 		ppu_set_fpcc<Flags...>(ppu, 0., 0.); // undefined (TODO)
 	};

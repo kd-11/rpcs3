@@ -669,7 +669,9 @@ ullong utils::get_tsc_freq()
 {
 	static const ullong cal_tsc = []() -> ullong
 	{
-#ifdef ARCH_ARM64
+#if defined(_M_ARM64)
+		u64 r = _ReadStatusReg(_ARM64_CNTFRQ_EL0);
+#elif defined(ARCH_ARM64)
 		u64 r = 0;
 		__asm__ volatile("mrs %0, cntfrq_el0" : "=r" (r));
 		return r;

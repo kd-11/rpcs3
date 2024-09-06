@@ -2719,8 +2719,7 @@ public:
 #endif
 #if defined(ARCH_ARM64)
 		// Flush all cache lines after potentially writing executable code
-		asm("ISB");
-		asm("DSB ISH");
+		_aarch64_flush_jit();
 #endif
 
 		if (auto& cache = g_fxo->get<spu_cache>())

@@ -65,6 +65,8 @@
       <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
       <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
       <AdditionalModuleDependencies Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">%(AdditionalModuleDependencies)</AdditionalModuleDependencies>
+      <UseStandardPreprocessor Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">true</UseStandardPreprocessor>
+      <UseStandardPreprocessor Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">true</UseStandardPreprocessor>
     </ClCompile>
     <PreBuildEvent>
       <Command>cmd.exe /c "$(SolutionDir)\Utilities\git-version-gen.cmd"</Command>

@@ -10,9 +10,8 @@ extern "C" u64 __rdtsc();
 #endif
 #elif defined(_MSC_VER)
 #include <arm64intr.h>
-#ifndef ARM64_CNTVCT
-#define ARM64_CNTVCT ARM64_SYSREG(3, 3, 14, 0, 2)
-#endif
+#define _ARM64_CNTVCT ARM64_SYSREG(3, 3, 14, 0, 2)
+#define _ARM64_CNTFRQ_EL0 ARM64_SYSREG(3, 3, 14, 0, 0)
 #endif
 
 
@@ -24,8 +23,8 @@ namespace utils
 		u64 r = 0;
 		__asm__ volatile("mrs %0, cntvct_el0" : "=r" (r));
 		return r;
-#elif defined(_MSC_VER)
-		return _ReadStatusReg(ARM64_CNTVCT);
+#elif defined(_M_ARM64)
+		return _ReadStatusReg(_ARM64_CNTVCT);
 #elif defined(_M_X64)
 		return __rdtsc();
 #elif defined(ARCH_X64)

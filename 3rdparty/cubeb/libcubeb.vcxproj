@@ -91,7 +91,10 @@
     <ClCompile>
       <WarningLevel>TurnOffAllWarnings</WarningLevel>
       <SDLCheck>false</SDLCheck>
-      <PreprocessorDefinitions>OUTSIDE_SPEEX;RANDOM_PREFIX=speex;FLOATING_POINT;_USE_SSE;_USE_SSE2;EXPORT=;USE_WASAPI;USE_WINMM;CUBEB_WASAPI_USE_IAUDIOSTREAMVOLUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|x64'">OUTSIDE_SPEEX;RANDOM_PREFIX=speex;FLOATING_POINT;_USE_SSE;_USE_SSE2;EXPORT=;USE_WASAPI;USE_WINMM;CUBEB_WASAPI_USE_IAUDIOSTREAMVOLUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">OUTSIDE_SPEEX;RANDOM_PREFIX=speex;FLOATING_POINT;_USE_SSE;_USE_SSE2;EXPORT=;USE_WASAPI;USE_WINMM;CUBEB_WASAPI_USE_IAUDIOSTREAMVOLUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">OUTSIDE_SPEEX;RANDOM_PREFIX=speex;FLOATING_POINT;EXPORT=;USE_WASAPI;USE_WINMM;CUBEB_WASAPI_USE_IAUDIOSTREAMVOLUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">OUTSIDE_SPEEX;RANDOM_PREFIX=speex;FLOATING_POINT;EXPORT=;USE_WASAPI;USE_WINMM;CUBEB_WASAPI_USE_IAUDIOSTREAMVOLUME;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>./cubeb/subprojects/;./extra/;./cubeb/src/;./cubeb/include/;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|x64'">MaxSpeed</Optimization>
       <Optimization Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">MaxSpeed</Optimization>

@@ -122,7 +122,7 @@ class thread_base
 {
 public:
 	// Native thread entry point function type
-#if defined(_WIN32) && defined(ARCH_X64)
+#if defined(_WIN32)
 	using native_entry = uint(__stdcall*)(void* arg);
 #else
 	using native_entry = void*(*)(void* arg);

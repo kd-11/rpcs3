@@ -5,7 +5,7 @@ if [ -z "$CIRRUS_CI" ]; then
 fi
 
 apt -y update && \
-apt -y install clang cmake ninja-build ffmpeg llvm libasound2-dev libpulse-dev libopenal-dev libglew-dev zlib1g-dev libedit-dev libvulkan-dev libudev-dev git libevdev-dev libsdl2-dev libjack-dev libsndio-dev
+apt -y install clang cmake ninja-build llvm libasound2-dev libpulse-dev libopenal-dev libglew-dev zlib1g-dev libedit-dev libvulkan-dev libudev-dev git libevdev-dev libsdl2-dev libjack-dev libsndio-dev
 apt -y install qt6-base-dev qt6-declarative-dev qt6-multimedia-dev qt6-svg-dev
 
 git config --global --add safe.directory '*'
@@ -28,7 +28,7 @@ cmake ..                                               \
     -DUSE_SYSTEM_CURL=ON                               \
     -DUSE_SDL=ON                                       \
     -DUSE_SYSTEM_SDL=ON                                \
-    -DUSE_SYSTEM_FFMPEG=ON                             \
+    -DUSE_SYSTEM_FFMPEG=OFF                            \
     -DUSE_DISCORD_RPC=ON                               \
     -DOpenGL_GL_PREFERENCE=LEGACY                      \
     -DSTATIC_LINK_LLVM=ON                              \

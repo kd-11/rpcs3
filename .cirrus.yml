@@ -99,20 +99,20 @@ env:
 #       .ci/github-upload.sh
 #     fi;
 
-freebsd_task:
-  matrix:
-    - name: Cirrus FreeBSD
-      freebsd_instance:
-        image_family: freebsd-13-3
-        cpu: 8
-        memory: 8G
-  env:
-    CCACHE_MAXSIZE: 300M # 3x clean build, rounded
-    CCACHE_DIR: /tmp/ccache_dir
-  ccache_cache:
-    folder: /tmp/ccache_dir
-  install_script: "sh -ex ./.ci/install-freebsd.sh"
-  script: "./.ci/build-freebsd.sh"
+# freebsd_task:
+#   matrix:
+#     - name: Cirrus FreeBSD
+#       freebsd_instance:
+#         image_family: freebsd-13-3
+#         cpu: 8
+#         memory: 8G
+#   env:
+#     CCACHE_MAXSIZE: 300M # 3x clean build, rounded
+#     CCACHE_DIR: /tmp/ccache_dir
+#   ccache_cache:
+#     folder: /tmp/ccache_dir
+#   install_script: "sh -ex ./.ci/install-freebsd.sh"
+#   script: "./.ci/build-freebsd.sh"
 
 # macos_task:
 #   timeout_in: 12000m

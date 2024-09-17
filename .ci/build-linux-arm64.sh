@@ -5,7 +5,52 @@ if [ -z "$CIRRUS_CI" ]; then
 fi
 
 apt -y update && \
-apt -y install clang build-essential libasound2-dev libpulse-dev libopenal-dev libglew-dev zlib1g-dev libedit-dev libvulkan-dev libudev-dev git libevdev-dev libsdl2-dev libjack-dev libsndio-dev
+apt -y install clang ffmpeg llvm libllvm-dev libasound2-dev libpulse-dev libopenal-dev libglew-dev zlib1g-dev libedit-dev libvulkan-dev libudev-dev git libevdev-dev libsdl2-dev libjack-dev libsndio-dev
 apt -y install qt6-base-dev qt6-declarative-dev qt6-multimedia-dev qt6-svg-dev
 
 sh -ex .ci/build-linux.sh
+
+git config --global --add safe.directory '*'
+
+# Pull all the submodules except llvm
+# Note: Tried to use git submodule status, but it takes over 20 seconds
+# shellcheck disable=SC2046
+git submodule -q update --init $(awk '/path/ && !/llvm/ && !/SPIRV/ { print $3 }' .gitmodules)
+
+mkdir build && cd build || exit 1
+
+export CC=clang
+export CXX=clang++
+export LINKER=lld
+export CFLAGS="$CFLAGS -fuse-ld=${LINKER}"
+
+cmake ..                                               \
+    -DCMAKE_INSTALL_PREFIX=/usr                        \
+    -DUSE_NATIVE_INSTRUCTIONS=OFF                      \
+    -DUSE_PRECOMPILED_HEADERS=OFF                      \
+    -DCMAKE_C_FLAGS="$CFLAGS"                          \
+    -DCMAKE_CXX_FLAGS="$CFLAGS"                        \
+    -DUSE_SYSTEM_CURL=ON                               \
+    -DUSE_SDL=ON                                       \
+    -DUSE_SYSTEM_SDL=ON                                \
+    -DUSE_SYSTEM_FFMPEG=ON                             \
+    -DUSE_DISCORD_RPC=ON                               \
+    -DOpenGL_GL_PREFERENCE=LEGACY                      \
+    -DSTATIC_LINK_LLVM=ON                              \
+    -DBUILD_LLVM=OFF                                   \
+    -G Ninja
+
+ninja; build_status=$?;
+
+cd ..
+
+shellcheck .ci/*.sh
+
+# If it compiled succesfully let's deploy.
+# Azure and Cirrus publish PRs as artifacts only.
+{   [ "$CI_HAS_ARTIFACTS" = "true" ];
+} && SHOULD_DEPLOY="true" || SHOULD_DEPLOY="false"
+
+if [ "$build_status" -eq 0 ] && [ "$SHOULD_DEPLOY" = "true" ]; then
+    .ci/deploy-linux.sh
+fi

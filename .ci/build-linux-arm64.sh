@@ -18,8 +18,6 @@ mkdir build && cd build || exit 1
 
 export CC=clang
 export CXX=clang++
-export LINKER=lld
-export CFLAGS="$CFLAGS -fuse-ld=${LINKER}"
 
 cmake ..                                               \
     -DCMAKE_INSTALL_PREFIX=/usr                        \

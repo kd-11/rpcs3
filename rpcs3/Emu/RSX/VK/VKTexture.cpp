@@ -650,7 +650,7 @@ namespace vk
 				const u32 typeless_h = src_rect.height() + dst_rect.height();
 
 				const auto gpu_family = vk::get_chip_family();
-				const bool use_unsafe_transport = !g_cfg.video.strict_rendering_mode && (gpu_family != chip_class::NV_generic && gpu_family < chip_class::NV_turing);
+				const bool use_unsafe_transport = !g_cfg.video.strict_rendering_mode && !vk::is_NVIDIA(gpu_family); // (gpu_family != chip_class::NV_generic && gpu_family < chip_class::NV_turing);
 
 				switch (src->format())
 				{

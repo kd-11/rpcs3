@@ -134,6 +134,16 @@ namespace vk
 			// So far only AMD is known to remap image view and border color together. Mark as not required.
 			custom_border_color_support.require_border_color_remap = get_driver_vendor() != driver_vendor::AMD;
 		}
+
+		if (descriptor_indexing_support)
+		{
+			// DEBUG: Disable descriptor indexing on NV to test for crash fix.
+			if (get_driver_vendor() == driver_vendor::NVIDIA)
+			{
+				descriptor_indexing_support.supported = false;
+				descriptor_indexing_support.update_after_bind_mask = 0;
+			}
+		}
 	}
 
 	void physical_device::get_physical_device_properties(bool allow_extensions)

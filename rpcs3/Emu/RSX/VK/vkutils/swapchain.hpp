@@ -449,6 +449,7 @@ namespace vk
 
 		VkImage get_image(u32 index) override
 		{
+			ensure(index < ::size32(swapchain_images));
 			return swapchain_images[index].second->value;
 		}
 
@@ -498,7 +499,7 @@ namespace vk
 			swapchain_images.resize(nb_swap_images);
 			for (u32 i = 0; i < nb_swap_images; ++i)
 			{
-				swapchain_images[i].value = vk_images[i];
+				swapchain_images[i].value = ensure(vk_images[i]);
 			}
 		}
 
@@ -775,6 +776,7 @@ namespace vk
 
 		VkImage get_image(u32 index) override
 		{
+			ensure(index < ::size32(swapchain_images));
 			return swapchain_images[index].value;
 		}
 

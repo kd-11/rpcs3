@@ -24,7 +24,7 @@ namespace vk
 		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		barrier.newLayout = new_layout;
 		barrier.oldLayout = current_layout;
-		barrier.image = image;
+		barrier.image = ensure(image);
 		barrier.srcAccessMask = src_mask;
 		barrier.dstAccessMask = dst_mask;
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -111,7 +111,7 @@ namespace vk
 		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		barrier.newLayout = new_layout;
 		barrier.oldLayout = current_layout;
-		barrier.image = image;
+		barrier.image = ensure(image);
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 		barrier.subresourceRange = range;

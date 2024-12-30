@@ -620,6 +620,8 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 	VkImage target_image = m_swapchain->get_image(m_current_frame->present_image);
 	const auto present_layout = m_swapchain->get_optimal_present_layout();
 
+	ensure(target_image);
+
 	const VkImageSubresourceRange subresource_range = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
 	VkImageLayout target_layout = present_layout;
 
@@ -776,7 +778,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 			barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 			barrier.oldLayout = target_layout;
-			barrier.image = target_image;
+			barrier.image = ensure(target_image);
 			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 			barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 			barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;

@@ -196,6 +196,7 @@ namespace rsx
 			image_view_type image_handle = 0;
 			deferred_subresource external_subresource_desc = {};
 			bool flag = false;
+			bool simplified = false;
 
 			sampled_image_descriptor() = default;
 
@@ -294,6 +295,7 @@ namespace rsx
 						external_subresource_desc.width = cpy.src_w;
 						external_subresource_desc.height = cpy.src_h;
 						external_subresource_desc.op = deferred_request_command::copy_image_static;
+						simplified = true;
 					}
 					else
 					{
@@ -384,6 +386,17 @@ namespace rsx
 					if (!(surface = surface_cache.get_surface_at(ref_address)))
 					{
 						// Compositing op. Just ignore expiry for now
+						if (ref_image)
+						{
+							rsx_log.error("A crash is imminent. Ref_addr=0x%x, image_handle=%p, external_handle=%p, op=%d, simplified=%s",
+								ref_address,
+								image_handle,
+								external_subresource_desc.external_handle,
+								static_cast<int>(external_subresource_desc.op),
+								(simplified ? "Yes" : "No")
+							);
+						}
+
 						ensure(!ref_image);
 						return {};
 					}

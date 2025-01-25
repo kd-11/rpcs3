@@ -4848,40 +4848,54 @@ bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_s
 				ppu_log.error("JIT symbol trampoline failed.");
 			}
 		}
-#elif 0
+#elif 0 // defined(ARCH_ARM64)
 		// Try to make the code fit in 16 bytes, may fail and fallback
-		if (*full_sample && abs_diff(*full_sample, reinterpret_cast<u64>(jit_runtime::peek(true) + 3 * 4)) < (128u << 20))
+		constexpr u32 _1M = 0x100'000;
+		constexpr u32 aarch64_max_jump_offset = 128u * _1M;
+		constexpr u32 aarch64_trampoline_block_size = 16; // 4 instructions
+
+		if (*full_sample && abs_diff(*full_sample, reinterpret_cast<u64>(jit_runtime::peek(true) + aarch64_trampoline_block_size)) < aarch64_max_jump_offset)
 		{
 #ifdef __APPLE__
 			pthread_jit_write_protect_np(false);
 #endif
-			u8* code = jit_runtime::alloc(12, 4, true);
+			u8* code = jit_runtime::alloc(aarch64_trampoline_block_size, 4, true);
 			code_ptr = reinterpret_cast<u64>(code);
 
 			union arm_op
 			{
 				u32 op;
+				bf_t<u32, 0, 1> b_link;
 				bf_t<u32, 0, 26> b_target;
 				bf_t<u32, 5, 16> mov_imm16;
+				bf_t<u32, 10, 12> str_imm12;
 			};
 
-			const u64 diff_for_jump = abs_diff(reinterpret_cast<u64>(code + 3 * 4), *full_sample);
+			const u64 branch_address = reinterpret_cast<u64>(code + aarch64_trampoline_block_size - 4);
+			const u64 diff_for_jump = abs_diff(branch_address, *full_sample);
 
-			if (diff_for_jump < (128u << 20))
+			if (diff_for_jump < aarch64_max_jump_offset)
 			{
 				// MOVZ w15, func_addr
 				arm_op mov_pcl{0x5280000F};
 				mov_pcl.mov_imm16 = func_addr & 0xffff;
-
 				write_le(code, mov_pcl.op);
 
 				// MOVK w15, func_addr >> 16, LSL #16
 				arm_op mov_pch{0x72A0000F};
 				mov_pch.mov_imm16 = func_addr >> 16;
-
 				write_le(code, mov_pch.op);
 
-				const s64 branch_offset = (*full_sample - reinterpret_cast<u64>(code + 4));
+				// BRK 0x48
+				// arm_op trap(0xD4200900);
+				// write_le(code, trap.op);
+
+				arm_op nop(0xD503201F);
+				write_le(code, nop.op);
+
+				const s64 branch_offset = (*full_sample - branch_address);
+				ensure(std::abs(branch_offset) < aarch64_max_jump_offset);
+				ensure(branch_address == reinterpret_cast<u64>(code));
 
 				// B full_sample
 				arm_op b_sample{0x14000000};
@@ -4925,49 +4939,39 @@ bool ppu_initialize(const ppu_module<lv2_obj>& info, bool check_only, u64 file_s
 			c.jmp(x86::rax);
 #else
 			// Load REG_Base - use absolute jump target to bypass rel jmp range limits
-			// X19 contains vm::g_exec_addr
-			const arm::GpX exec_addr = a64::x19;
-
-			// X20 contains ppu_thread*
-			const arm::GpX ppu_t_base = a64::x20;
-
-			// Load PC
-			const arm::GpX pc = a64::x15;
-			const arm::GpX cia_addr_reg = a64::x11;
-
-			// Load CIA
-			c.mov(pc.w(), func_addr);
-
 			const auto buf_start = reinterpret_cast<const u8*>(c.bufferData());
 			const auto buf_end = reinterpret_cast<const u8*>(c.bufferPtr());
 
 			code_size_until_jump = buf_end - buf_start;
 
-			// Load offset value
-			c.mov(cia_addr_reg, static_cast<u64>(::offset32(&ppu_thread::cia)));
+			// [in]
+			// x19 = m_exec
+			// x20 = m_thread
+
+			// [out]
+			// x21 = seg0
+
+			// [clobbers]
+			// x15, x13 (both volatile)
+
+			// func_addr = next PC
 
 			// Update CIA
-			c.str(pc.w(), arm::Mem(ppu_t_base, cia_addr_reg));
-
-			// Multiply by 2 to index into ptr table
-			c.add(pc, pc, pc);
-
+			c.mov(a64::w15, func_addr);
+			c.str(a64::w15, arm::Mem(a64::x20, ::offset32(&ppu_thread::cia)));
+			// Multiply PC by 2 to index into ptr table
+			c.add(a64::x15, a64::x15, a64::x15);
 			// Load call target
-			const arm::GpX call_target = a64::x13;
-			c.ldr(call_target, arm::Mem(exec_addr, pc));
-
+			c.ldr(a64::x13, arm::Mem(a64::x19, a64::x15));
 			// Compute REG_Hp
-			const arm::GpX reg_hp = a64::x21;
-			c.mov(reg_hp, call_target);
-			c.lsr(reg_hp, reg_hp, 48);
-			c.lsl(reg_hp.w(), reg_hp.w(), 13);
-
+			c.mov(a64::x21, a64::x13);
+			c.lsr(a64::x21, a64::x21, 48);
+			c.lsl(a64::w21, a64::w21, 13);
 			// Zero top 16 bits of call target
-			c.lsl(call_target, call_target, 16);
-			c.lsr(call_target, call_target, 16);
-
+			c.lsl(a64::x13, a64::x13, 16);
+			c.lsr(a64::x13, a64::x13, 16);
 			// Execute LLE call
-			c.br(call_target);
+			c.br(a64::x13);
 #endif
 		}, runtime.get(), true);
 

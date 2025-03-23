@@ -607,24 +607,26 @@ namespace rsx
 				if (draw_count) [[unlikely]]
 				{
 					const auto flags = m_register_properties[reg];
-					const bool should_skip = (flags & register_props::always_ignore) ||                        // Always ignore
-						((flags & register_props::skip_on_match) && command.value == register_shadow[reg]);    // Ignore if no change
+					if (flags & register_props::continue_draw)
+					{
+						return NOTHING;
+					}
 
-					if (should_skip) [[unlikely]]
+					if (flags & register_props::force_nop)
 					{
-						// Always ignore
 						command.reg = FIFO_DISABLED_COMMAND;
+						return NOTHING;
 					}
-					else
+
+					if ((flags & register_props::deduplicate) &&
+						command.value == register_shadow[reg])
 					{
-						// Flush
-						flush_cmd = (in_begin_end) ? deferred_primitive : 0u;
+						command.reg = FIFO_DISABLED_COMMAND;
+						return NOTHING;
 					}
-				}
-				else
-				{
-					// Nothing to do
-					return NOTHING;
+
+					// Flush
+					flush_cmd = (in_begin_end) ? deferred_primitive : 0u;
 				}
 
 				break;

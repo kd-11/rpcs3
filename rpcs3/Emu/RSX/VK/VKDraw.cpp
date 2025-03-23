@@ -1159,6 +1159,8 @@ void VKGSRender::end()
 		if (draw_call.is_trivial_instanced_draw)
 		{
 			// We already completed. End the draw.
+			m_frame_stats.instanced_draws += draw_call.pass_count();
+			m_frame_stats.instanced_groups++;
 			draw_call.end();
 		}
 	}

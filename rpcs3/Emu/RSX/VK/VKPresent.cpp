@@ -794,7 +794,7 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 			rsx::overlays::set_debug_overlay_text(fmt::format(
 				"Internal Resolution:      %s\n"
 				"RSX Load:                 %3d%%\n"
-				"draw calls: %17d\n"
+				"draw calls: %17d (%u instanced in %u groups)\n"
 				"submits: %20d\n"
 				"draw call setup: %12dus\n"
 				"vertex upload time: %9dus\n"
@@ -809,7 +809,8 @@ void VKGSRender::flip(const rsx::display_flip_info_t& info)
 				"Vertex cache hits: %10u/%u (%u%%)\n"
 				"Program cache lookup ellision: %u/%u (%u%%)",
 				info.stats.framebuffer_stats.to_string(!backend_config.supports_hw_msaa),
-				get_load(), info.stats.draw_calls, info.stats.submit_count, info.stats.setup_time, info.stats.vertex_upload_time,
+				get_load(), info.stats.draw_calls, info.stats.instanced_draws, info.stats.instanced_groups, info.stats.submit_count,
+				info.stats.setup_time, info.stats.vertex_upload_time,
 				info.stats.textures_upload_time, info.stats.draw_exec_time, info.stats.flip_time,
 				num_dirty_textures, texture_memory_size, tmp_texture_memory_size,
 				num_flushes, num_misses, cache_miss_ratio, num_unavoidable, num_mispredict, num_speculate,

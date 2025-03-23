@@ -47,22 +47,24 @@ namespace rsx
 
 	struct frame_statistics_t
 	{
-		u32 draw_calls;
-		u32 submit_count;
+		u32 draw_calls;                      // Total number of draw groups requested by RSX
+		u32 submit_count;                    // Total number of CPU -> GPU submits for recording APIs (e.g vulkan, d3d12)
+		u32 instanced_draws;                 // Total number of draws that were compiled into instanced emits
+		u32 instanced_groups;                // Number of instance groups encountered.
 
-		s64 setup_time;
-		s64 vertex_upload_time;
-		s64 textures_upload_time;
-		s64 draw_exec_time;
-		s64 flip_time;
+		s64 setup_time;                      // Time to prepare for a draw. Includes time used to load shaders and prepare render targets.
+		s64 vertex_upload_time;              // Time spent uploading vertex and index data.
+		s64 textures_upload_time;            // Time spend uploading textures
+		s64 draw_exec_time;                  // Time spent in draw call execution logic. Includes emitting the draw command, setting up renderpasses, etc
+		s64 flip_time;                       // Time spent in the flip logic
 
-		u32 vertex_cache_request_count;
-		u32 vertex_cache_miss_count;
+		u32 vertex_cache_request_count;      // Vertex cache lookups total.
+		u32 vertex_cache_miss_count;         // Vertex cache misses.
 
-		u32 program_cache_lookups_total;
-		u32 program_cache_lookups_ellided;
+		u32 program_cache_lookups_total;     // Number of times the program caches were queried for a shader. Counts vertex and fragment lookup separately and does not include queries to the linked program cache.
+		u32 program_cache_lookups_ellided;   // Number of times a lookup was skipped because we already knew the previous shader was being reused. Higher number means better cache usage and leads to more performance.
 
-		framebuffer_statistics_t framebuffer_stats;
+		framebuffer_statistics_t framebuffer_stats; // Summarized framebuffer stats, used to guess the internal rendering resolution.
 	};
 
 	struct frame_time_t

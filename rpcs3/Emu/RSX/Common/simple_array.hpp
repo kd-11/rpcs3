@@ -468,5 +468,36 @@ namespace rsx
 			}
 			return accumulate;
 		}
+
+		iterator find(std::predicate<const Ty&> auto predicate)
+		{
+			for (auto it = begin(); it != end(); ++it)
+			{
+				if (std::invoke(predicate, *it))
+				{
+					return it;
+				}
+			}
+
+			return end();
+		}
+
+		iterator rfind(std::predicate<const Ty&> auto predicate)
+		{
+			if (empty())
+			{
+				return end();
+			}
+
+			for (auto it = end() - 1; it != begin(); it--)
+			{
+				if (std::invoke(predicate, *it))
+				{
+					return it;
+				}
+			}
+
+			return end();
+		}
 	};
 }

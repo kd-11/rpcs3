@@ -37,11 +37,11 @@ namespace rsx
 
 		void set_array_element32(context* ctx, u32, u32 arg);
 
-		void draw_arrays(context* /*rsx*/, u32 reg, u32 arg);
+		void draw_arrays(context* ctx, u32 reg, u32 arg);
 
-		void draw_index_array(context* /*rsx*/, u32 reg, u32 arg);
+		void draw_index_array(context* ctx, u32 reg, u32 arg);
 
-		void draw_inline_array(context* /*rsx*/, u32 reg, u32 arg);
+		void draw_inline_array(context* ctx, u32 reg, u32 arg);
 
 		void set_transform_program_start(context* ctx, u32 reg, u32);
 

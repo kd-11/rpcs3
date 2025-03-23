@@ -13,12 +13,61 @@
 
 #include <util/serialization.hpp>
 
-
 namespace rsx
 {
 	void draw_clause::operator()(utils::serial& ar)
 	{
 		ar(draw_command_ranges, draw_command_barriers, current_range_index, primitive, command, is_immediate_draw, is_disjoint_primitive, primitive_barrier_enable, inline_vertex_array);
+	}
+
+	void draw_clause::append(u32 first, u32 count)
+	{
+		const bool barrier_enable_flag = primitive_barrier_enable;
+		primitive_barrier_enable = false;
+
+		if (!draw_command_ranges.empty())
+		{
+			auto& last = draw_command_ranges[current_range_index];
+
+			if (last.count == 0)
+			{
+				// Special case, usually indicates an execution barrier
+				last.first = first;
+				last.count = count;
+				return;
+			}
+
+			if (last.first + last.count == first)
+			{
+				if (!is_disjoint_primitive && barrier_enable_flag)
+				{
+					// Insert barrier
+					insert_command_barrier(primitive_restart_barrier, 0);
+				}
+
+				last.count += count;
+				return;
+			}
+
+			for (auto index = last_execution_barrier_index; index < draw_command_ranges.size(); ++index)
+			{
+				if (draw_command_ranges[index].first == first &&
+					draw_command_ranges[index].count == count)
+				{
+					// Duplicate entry. Usually this indicates a botched instancing setup.
+					rsx_log.error("Duplicate draw request. Start=%u, Count=%u", first, count);
+					return;
+				}
+
+				if (draw_command_ranges[index].first > first)
+				{
+					insert_draw_command(index, { 0, first, count });
+					return;
+				}
+			}
+		}
+
+		append_draw_command({ 0, first, count });
 	}
 
 	void draw_clause::insert_command_barrier(command_barrier_type type, u32 arg0, u32 arg1, u32 index)
@@ -233,7 +282,7 @@ namespace rsx
 			case transform_constant_load_modifier_barrier:
 			{
 				// Change the transform load target. Does not change result mask.
-				REGS(ctx)->decode(NV4097_SET_TRANSFORM_PROGRAM_LOAD, barrier.arg0);
+				REGS(ctx)->decode(NV4097_SET_TRANSFORM_CONSTANT_LOAD, barrier.arg0);
 				break;
 			}
 			case transform_constant_update_barrier:
@@ -243,6 +292,13 @@ namespace rsx
 				auto buffer = std::span<const u32>(static_cast<const u32*>(vm::base(ptr)), barrier.arg1);
 				auto notify = [&](rsx::context*, u32 load, u32 count)
 				{
+					if (draw_command_ranges[barrier.draw_id].count == 0)
+					{
+						// Dangling barrier. No not hot-patch.
+						RSX(ctx)->m_graphics_state |= rsx::pipeline_state::transform_constants_dirty;
+						return true;
+					}
+
 					if (!instance_config)
 					{
 						return false;

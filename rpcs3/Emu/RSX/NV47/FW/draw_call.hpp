@@ -98,55 +98,7 @@ namespace rsx
 		 * Insert one command range
 		 */
 
-		void append(u32 first, u32 count)
-		{
-			const bool barrier_enable_flag = primitive_barrier_enable;
-			primitive_barrier_enable = false;
-
-			if (!draw_command_ranges.empty())
-			{
-				auto& last = draw_command_ranges[current_range_index];
-
-				if (last.count == 0)
-				{
-					// Special case, usually indicates an execution barrier
-					last.first = first;
-					last.count = count;
-					return;
-				}
-
-				if (last.first + last.count == first)
-				{
-					if (!is_disjoint_primitive && barrier_enable_flag)
-					{
-						// Insert barrier
-						insert_command_barrier(primitive_restart_barrier, 0);
-					}
-
-					last.count += count;
-					return;
-				}
-
-				for (auto index = last_execution_barrier_index; index < draw_command_ranges.size(); ++index)
-				{
-					if (draw_command_ranges[index].first == first &&
-						draw_command_ranges[index].count == count)
-					{
-						// Duplicate entry. Usually this indicates a botched instancing setup.
-						rsx_log.error("Duplicate draw request. Start=%u, Count=%u", first, count);
-						return;
-					}
-
-					if (draw_command_ranges[index].first > first)
-					{
-						insert_draw_command(index, { 0, first, count });
-						return;
-					}
-				}
-			}
-
-			append_draw_command({ 0, first, count });
-		}
+		void append(u32 first, u32 count);
 
 		/**
 		 * Returns how many vertex or index will be consumed by the draw clause.

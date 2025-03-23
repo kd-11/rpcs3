@@ -64,9 +64,10 @@ namespace rsx
 		{
 			enum register_props : u8
 			{
-				none = 0,
-				skip_on_match = 1,
-				always_ignore = 2
+				none          = 0,
+				continue_draw = 1, // Do not break current draw call
+				force_nop     = 2, // Rewrite command with NOP
+				deduplicate   = 4, // Skip command if it is a duplicate
 			};
 
 			enum optimization_hint : u8
@@ -76,9 +77,6 @@ namespace rsx
 				load_unoptimizable,
 				application_not_compatible
 			};
-
-			// Workaround for MSVC, C2248
-			static constexpr u8 register_props_always_ignore = register_props::always_ignore;
 
 			static constexpr std::array<u8, 0x10000 / 4> m_register_properties = []
 			{
@@ -93,16 +91,29 @@ namespace rsx
 
 				std::array<u8, 0x10000 / 4> register_properties{};
 
-				for (const auto& method : ignorable_ranges)
+				const auto fill_range = [&register_properties](u32 index, u32 count, u8 flags) -> void
 				{
-					for (u32 i = 0; i < method.second; ++i)
+					for (u32 i = 0; i < count; ++i)
 					{
-						register_properties[method.first + i] |= register_props_always_ignore;
+						register_properties[index + i] |= flags;
 					}
+				};
+
+				for (const auto &method : ignorable_ranges)
+				{
+					fill_range(method.first, method.second, register_props::force_nop);
 				}
 
-				register_properties[NV4097_SET_INDEX_ARRAY_ADDRESS] = register_props::skip_on_match;
-				register_properties[NV4097_SET_INDEX_ARRAY_DMA] = register_props::skip_on_match;
+				// Instancing detection helpers
+				register_properties[NV4097_SET_TRANSFORM_CONSTANT_LOAD] = register_props::continue_draw; // No break
+				fill_range(NV4097_SET_TRANSFORM_CONSTANT, 32, register_props::continue_draw);
+				register_properties[NV4097_SET_INDEX_ARRAY_ADDRESS] = register_props::deduplicate;
+				register_properties[NV4097_SET_INDEX_ARRAY_DMA] = register_props::deduplicate;
+
+				// Vertex config
+				register_properties[NV4097_SET_VERTEX_DATA_BASE_INDEX] = register_props::deduplicate;
+				register_properties[NV4097_SET_VERTEX_DATA_BASE_OFFSET] = register_props::deduplicate;
+				fill_range(NV4097_SET_VERTEX_DATA_ARRAY_FORMAT, 16, register_props::deduplicate);
 
 				return register_properties;
 			}();

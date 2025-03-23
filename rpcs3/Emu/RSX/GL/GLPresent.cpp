@@ -409,7 +409,7 @@ void GLGSRender::flip(const rsx::display_flip_info_t& info)
 		rsx::overlays::set_debug_overlay_text(fmt::format(
 			"Internal Resolution:     %s\n"
 			"RSX Load:                %3d%%\n"
-			"draw calls: %16d\n"
+			"draw calls: %16d (%u instanced in %u groups)\n"
 			"draw call setup: %11dus\n"
 			"vertex upload time: %8dus\n"
 			"textures upload time: %6dus\n"
@@ -421,7 +421,8 @@ void GLGSRender::flip(const rsx::display_flip_info_t& info)
 			"Vertex cache hits: %9u/%u (%u%%)\n"
 			"Program cache lookup ellision: %u/%u (%u%%)",
 			info.stats.framebuffer_stats.to_string(!backend_config.supports_hw_msaa),
-			get_load(), info.stats.draw_calls, info.stats.setup_time, info.stats.vertex_upload_time,
+			get_load(), info.stats.draw_calls, info.stats.instanced_draws, info.stats.instanced_groups,
+			info.stats.setup_time, info.stats.vertex_upload_time,
 			info.stats.textures_upload_time, info.stats.draw_exec_time, num_dirty_textures, texture_memory_size,
 			num_flushes, num_misses, cache_miss_ratio, num_unavoidable, num_mispredict, num_speculate,
 			num_texture_upload, num_texture_upload_miss, texture_upload_miss_ratio, texture_copies_ellided,

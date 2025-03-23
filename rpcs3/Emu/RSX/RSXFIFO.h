@@ -101,6 +101,9 @@ namespace rsx
 					}
 				}
 
+				register_properties[NV4097_SET_INDEX_ARRAY_ADDRESS] = register_props::skip_on_match;
+				register_properties[NV4097_SET_INDEX_ARRAY_DMA] = register_props::skip_on_match;
+
 				return register_properties;
 			}();
 
@@ -123,7 +126,7 @@ namespace rsx
 
 			void force_disable();
 			void evaluate_performance(u32 total_draw_count);
-			inline flatten_op test(register_pair& command);
+			flatten_op test(register_pair& command, const std::array<u32, 0x10000 / 4>& register_shadow);
 		};
 
 		class FIFO_control

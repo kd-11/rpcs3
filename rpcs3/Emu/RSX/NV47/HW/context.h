@@ -24,8 +24,14 @@ namespace rsx
 
 	struct context
 	{
-		thread* rsxthr;
+		thread* rsxthr = nullptr;
+
 		// GRAPH_context* graph;
-		rsx_state* register_state;
+		rsx_state* register_state = nullptr;
+
+		// FIXME: FW state, not HW
+		std::array<u32, 0x10000 / 4> register_state_shadow;
+
+		void reset();
 	};
 }

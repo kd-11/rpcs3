@@ -553,7 +553,7 @@ namespace rsx
 			}
 		}
 
-		flatten_op flattening_helper::test(register_pair& command)
+		flatten_op flattening_helper::test(register_pair& command, const std::array<u32, 0x10000 / 4>& register_shadow)
 		{
 			u32 flush_cmd = ~0u;
 			switch (const u32 reg = (command.reg >> 2))
@@ -606,7 +606,11 @@ namespace rsx
 			{
 				if (draw_count) [[unlikely]]
 				{
-					if (m_register_properties[reg] & register_props::always_ignore) [[unlikely]]
+					const auto flags = m_register_properties[reg];
+					const bool should_skip = (flags & register_props::always_ignore) ||                        // Always ignore
+						((flags & register_props::skip_on_match) && command.value == register_shadow[reg]);    // Ignore if no change
+
+					if (should_skip) [[unlikely]]
 					{
 						// Always ignore
 						command.reg = FIFO_DISABLED_COMMAND;
@@ -849,7 +853,7 @@ namespace rsx
 
 			if (m_flattener.is_enabled()) [[unlikely]]
 			{
-				switch(m_flattener.test(command))
+				switch(m_flattener.test(command, m_ctx->register_state_shadow))
 				{
 				case FIFO::NOTHING:
 				{
@@ -886,6 +890,7 @@ namespace rsx
 			const u32 value = command.value;
 
 			m_ctx->register_state->decode(reg, value);
+			m_ctx->register_state_shadow[reg] = value;
 
 			if (auto method = methods[reg])
 			{

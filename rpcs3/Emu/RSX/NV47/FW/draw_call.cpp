@@ -13,6 +13,7 @@
 
 #include <util/serialization.hpp>
 
+
 namespace rsx
 {
 	void draw_clause::operator()(utils::serial& ar)
@@ -66,6 +67,19 @@ namespace rsx
 		else
 		{
 			// Execution dependency barrier. Requires breaking the current draw call sequence and start another.
+			// There is a chance for repetition here (same value set multiple timnes. Deduplicate
+			const auto previous = draw_command_barriers.rfind(FN(x.type == type));
+			if (previous != draw_command_barriers.end())
+			{
+				if (previous->index == index &&
+					previous->arg0 == arg0 &&
+					previous->arg1 == arg1)
+				{
+					// NOP
+					return;
+				}
+			}
+
 			if (draw_command_ranges.back().count > 0)
 			{
 				append_draw_command({});
@@ -101,6 +115,7 @@ namespace rsx
 
 		if (draw_command_barriers.empty())
 		{
+			// No barriers, definitely not instanced
 			return false;
 		}
 

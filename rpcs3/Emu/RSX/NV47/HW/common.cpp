@@ -98,4 +98,11 @@ namespace rsx
 			}
 		}
 	}
+
+	// FIXME: Move elsewhere
+	void context::reset()
+	{
+		ensure(register_state);
+		std::memcpy(register_state_shadow.data(), register_state->registers.data(), 0x10000);
+	}
 }

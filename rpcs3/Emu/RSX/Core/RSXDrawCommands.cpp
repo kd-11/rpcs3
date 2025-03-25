@@ -805,47 +805,50 @@ namespace rsx
 				continue;
 			}
 
-			const int translated_offset = full_reupload
-				? instance_config.patch_load_offset
-				: prog->translate_constants_range(instance_config.patch_load_offset, instance_config.patch_load_count);
-
-			if (translated_offset >= 0)
+			for (const auto& [patch_load_offset, patch_load_count] : instance_config.patch_offset_data)
 			{
-				// Trivially patchable in bulk
-				const u32 redirection_loc = ::size32(constants_data);
-				constants_data.resize(::size32(constants_data) + instance_config.patch_load_count);
-				std::memcpy(constants_data.data() + redirection_loc, &REGS(m_ctx)->transform_constants[instance_config.patch_load_offset], instance_config.patch_load_count * sizeof(u128));
+				const int translated_offset = full_reupload
+					? patch_load_offset
+					: prog->translate_constants_range(patch_load_offset, patch_load_count);
 
-				// Update indirection table
-				for (auto i = translated_offset, count = 0;
-					 static_cast<u32>(count) < instance_config.patch_load_count;
-					 ++i, ++count)
+				if (translated_offset >= 0)
 				{
-					instancing_indirection_table[i] = redirection_loc + count;
-				}
+					// Trivially patchable in bulk
+					const u32 redirection_loc = ::size32(constants_data);
+					constants_data.resize(::size32(constants_data) + patch_load_count);
+					std::memcpy(constants_data.data() + redirection_loc, &REGS(m_ctx)->transform_constants[patch_load_offset], patch_load_count * sizeof(u128));
 
-				continue;
-			}
+					// Update indirection table
+					for (auto i = translated_offset, count = 0;
+						static_cast<u32>(count) < patch_load_count;
+						++i, ++count)
+					{
+						instancing_indirection_table[i] = redirection_loc + count;
+					}
 
-			ensure(!full_reupload);
-
-			// Sparse update. Update records individually instead of bulk
-			// FIXME: Range batching optimization
-			const auto load_end = instance_config.patch_load_offset + instance_config.patch_load_count;
-			for (u32 i = 0; i < redirection_table_size; ++i)
-			{
-				const auto read_index = prog->constant_ids[i];
-				if (read_index < instance_config.patch_load_offset || read_index >= load_end)
-				{
-					// Reading outside "hot" range.
 					continue;
 				}
 
-				const u32 redirection_loc = ::size32(constants_data);
-				constants_data.resize(::size32(constants_data) + 1);
-				std::memcpy(constants_data.data() + redirection_loc, &REGS(m_ctx)->transform_constants[read_index], sizeof(u128));
+				ensure(!full_reupload);
 
-				instancing_indirection_table[i] = redirection_loc;
+				// Sparse update. Update records individually instead of bulk
+				// FIXME: Range batching optimization
+				const auto load_end = patch_load_offset + patch_load_count;
+				for (u32 i = 0; i < redirection_table_size; ++i)
+				{
+					const auto read_index = prog->constant_ids[i];
+					if (read_index < patch_load_offset || read_index >= load_end)
+					{
+						// Reading outside "hot" range.
+						continue;
+					}
+
+					const u32 redirection_loc = ::size32(constants_data);
+					constants_data.resize(::size32(constants_data) + 1);
+					std::memcpy(constants_data.data() + redirection_loc, &REGS(m_ctx)->transform_constants[read_index], sizeof(u128));
+
+					instancing_indirection_table[i] = redirection_loc;
+				}
 			}
 
 		} while (draw_call.next());

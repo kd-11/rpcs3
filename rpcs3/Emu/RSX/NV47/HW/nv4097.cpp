@@ -66,7 +66,8 @@ namespace rsx
 
 			const u32 count = std::min<u32>({ fifo_args_cnt, fifo_read_limit, method_range });
 
-			const u32 load = REGS(ctx)->transform_constant_load();
+			// NOTE: Transform constant load register writes are deferrable. Read from shadow instead (write-ahead log)
+			const u32 load = ctx->register_state_shadow[NV4097_SET_TRANSFORM_CONSTANT_LOAD];
 
 			u32 rcount = count;
 			if (const u32 max = (load + constant_id) * 4 + count + subreg, limit = 468 * 4; max > limit)

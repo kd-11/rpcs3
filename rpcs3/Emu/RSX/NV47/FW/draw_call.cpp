@@ -305,8 +305,7 @@ namespace rsx
 					}
 
 					instance_config->transform_constants_data_changed = true;
-					instance_config->patch_load_offset = load;
-					instance_config->patch_load_count = count;
+					instance_config->patch_offset_data.push_back({ load, count });
 					return true;
 				};
 

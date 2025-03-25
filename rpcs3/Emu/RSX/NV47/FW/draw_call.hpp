@@ -10,9 +10,7 @@ namespace rsx
 	struct instanced_draw_config_t
 	{
 		bool transform_constants_data_changed;
-
-		u32 patch_load_offset;
-		u32 patch_load_count;
+		std::vector<std::pair<u32, u32>> patch_offset_data;
 	};
 
 	class draw_clause

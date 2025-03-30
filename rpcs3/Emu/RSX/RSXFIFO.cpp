@@ -487,49 +487,30 @@ namespace rsx
 		{
 			if (enabled)
 			{
-				rsx_log.warning("FIFO optimizations have been disabled as the application is not compatible with per-frame analysis");
+				rsx_log.error("FIFO optimizations have been disabled as the application is not compatible with per-frame analysis");
 
 				reset(false);
 				fifo_hint = optimization_hint::application_not_compatible;
 			}
 		}
 
-		void flattening_helper::evaluate_performance(u32 total_draw_count)
+		void flattening_helper::evaluate_performance(const rsx::frame_statistics_t& frame_stats)
 		{
-			if (!enabled)
-			{
-				if (fifo_hint == optimization_hint::application_not_compatible)
-				{
-					// Not compatible, do nothing
-					return;
-				}
+			const auto total_draw_count = frame_stats.draw_calls - frame_stats.instanced_groups + frame_stats.instanced_draws;
+			const auto emitted_draw_count = frame_stats.draw_calls;
+			const auto savings = num_collapsed + (total_draw_count - emitted_draw_count);
 
-				if (total_draw_count <= 2000)
-				{
-					// Low draw call pressure
-					fifo_hint = optimization_hint::load_low;
-					return;
-				}
-
-				if (fifo_hint == optimization_hint::load_unoptimizable)
-				{
-					// Nope, wait for stats to change
-					return;
-				}
-			}
+			// Low and high watermark limits. Values are guessed based on expected performance on recommended PC.
+			constexpr u32 optimizer_draw_call_watermark_high = 3500;
+			constexpr u32 optimizer_draw_call_watermark_low = 2000;
 
 			if (enabled)
 			{
-				// Currently activated. Check if there is any benefit
-				if (num_collapsed < 500)
-				{
-					// Not worth it, disable
-					enabled = false;
-					fifo_hint = load_unoptimizable;
-				}
+				// The only reason to disable the optimizer is if the load is low.
+				// If the number of draw calls is very high, keep it enabled.
+				// The performance hit of it searching for batching opportunities is very low compared to the cost of emitting draws.
 
-				u32 real_total = total_draw_count + num_collapsed;
-				if (real_total <= 2000)
+				if (total_draw_count <= optimizer_draw_call_watermark_low)
 				{
 					// Low total number of draws submitted, no need to keep trying for now
 					enabled = false;
@@ -537,20 +518,25 @@ namespace rsx
 				}
 
 				reset(enabled);
+				return;
 			}
-			else
+
+			if (fifo_hint == optimization_hint::application_not_compatible)
 			{
-				// Not enabled, check if we should try enabling
-				ensure(total_draw_count > 2000);
-				if (fifo_hint != load_unoptimizable)
-				{
-					// If its set to unoptimizable, we already tried and it did not work
-					// If it resets to load low (usually after some kind of loading screen) we can try again
-					ensure(in_begin_end == false); // "Incorrect initial state"
-					ensure(num_collapsed == 0);
-					enabled = true;
-				}
+				// Not compatible, do nothing
+				return;
 			}
+
+			if (total_draw_count <= optimizer_draw_call_watermark_high)
+			{
+				// Low draw call pressure
+				fifo_hint = optimization_hint::load_low;
+				return;
+			}
+
+			enabled = true;
+			fifo_hint = optimization_hint::unknown;
+			reset(enabled);
 		}
 
 		flatten_op flattening_helper::test(register_pair& command, const std::array<u32, 0x10000 / 4>& register_shadow)

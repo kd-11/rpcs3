@@ -11,6 +11,7 @@ namespace rsx
 {
 	class thread;
 	struct rsx_iomap_table;
+	struct frame_statistics_t;
 
 	namespace FIFO
 	{
@@ -136,7 +137,7 @@ namespace rsx
 			bool is_enabled() const { return enabled; }
 
 			void force_disable();
-			void evaluate_performance(u32 total_draw_count);
+			void evaluate_performance(const rsx::frame_statistics_t& frame_stats);
 			flatten_op test(register_pair& command, const std::array<u32, 0x10000 / 4>& register_shadow);
 		};
 

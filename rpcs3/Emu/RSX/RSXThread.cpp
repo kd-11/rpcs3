@@ -3123,7 +3123,7 @@ namespace rsx
 			{
 				// Try to enable FIFO optimizations
 				// Only rarely useful for some games like RE4
-				m_flattener.evaluate_performance(m_frame_stats.draw_calls);
+				m_flattener.evaluate_performance(m_frame_stats);
 			}
 
 			if (g_cfg.video.frame_skip_enabled)

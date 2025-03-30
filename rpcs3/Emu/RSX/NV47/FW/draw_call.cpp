@@ -55,7 +55,7 @@ namespace rsx
 					draw_command_ranges[index].count == count)
 				{
 					// Duplicate entry. Usually this indicates a botched instancing setup.
-					rsx_log.error("Duplicate draw request. Start=%u, Count=%u", first, count);
+					// rsx_log.error("Duplicate draw request. Start=%u, Count=%u", first, count);
 					return;
 				}
 
@@ -242,6 +242,23 @@ namespace rsx
 		ret.push_back({ 0, vertex_counter, limit - previous_barrier });
 
 		return ret;
+	}
+
+	void draw_clause::post_execute_cleanup(context* ctx)
+	{
+		ensure(current_range_index == 0);
+
+		if (draw_command_ranges.size() > 1)
+		{
+			if (draw_command_ranges.back().count == 0)
+			{
+				// Dangling execution barrier
+				current_range_index = draw_command_ranges.size() - 1;
+				current_barrier_it = draw_command_barriers.find(FN(x.draw_id == current_range_index));
+				execute_pipeline_dependencies(ctx);
+				current_range_index = 0;
+			}
+		}
 	}
 
 	u32 draw_clause::execute_pipeline_dependencies(context* ctx, instanced_draw_config_t* instance_config) const

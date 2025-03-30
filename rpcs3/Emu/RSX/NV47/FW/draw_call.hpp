@@ -81,6 +81,11 @@ namespace rsx
 
 		void insert_command_barrier(command_barrier_type type, u32 arg0, u32 arg1 = 0, u32 register_index = 0);
 
+		const simple_array<draw_range_t>& peek_subranges() const
+		{
+			return draw_command_ranges;
+		}
+
 		/**
 		 * Optimize commands for rendering
 		 */
@@ -223,21 +228,7 @@ namespace rsx
 		/**
 		 * Only call this once after the draw clause has been fully consumed to reconcile any conflicts
 		 */
-		void post_execute_cleanup(struct context* ctx)
-		{
-			ensure(current_range_index == 0);
-
-			if (draw_command_ranges.size() > 1)
-			{
-				if (draw_command_ranges.back().count == 0)
-				{
-					// Dangling execution barrier
-					current_range_index = draw_command_ranges.size() - 1;
-					execute_pipeline_dependencies(ctx);
-					current_range_index = 0;
-				}
-			}
-		}
+		void post_execute_cleanup(struct context* ctx);
 
 		/**
 		 * Executes commands reqiured to make the current draw state valid

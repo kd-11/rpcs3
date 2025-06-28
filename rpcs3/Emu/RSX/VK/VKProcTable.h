@@ -37,6 +37,15 @@ VK_FUNC(vkCmdDrawMultiIndexedEXT);
 // EXT_external_memory_host
 VK_FUNC(vkGetMemoryHostPointerPropertiesEXT);
 
+// EXT_descriptor_buffer
+VK_FUNC(vkCmdBindDescriptorBufferEmbeddedSamplersEXT);
+VK_FUNC(vkCmdBindDescriptorBuffersEXT);
+VK_FUNC(vkCmdSetDescriptorBufferOffsetsEXT);
+VK_FUNC(vkGetDescriptorEXT);
+VK_FUNC(vkGetDescriptorSetLayoutBindingOffsetEXT);
+VK_FUNC(vkGetDescriptorSetLayoutSizeEXT);
+
+
 #undef VK_FUNC
 #undef DECLARE_VK_FUNCTION_HEADER
 #undef DECLARE_VK_FUNCTION_BODY

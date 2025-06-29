@@ -104,12 +104,12 @@ namespace vk
 		VkPipelineShaderStageCreateInfo shader_stages[2] = {};
 		shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		shader_stages[0].module = m_vertex_shader.get_handle();
+		shader_stages[0].module = m_vertex_shader.handle();
 		shader_stages[0].pName = "main";
 
 		shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 		shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		shader_stages[1].module = m_fragment_shader.get_handle();
+		shader_stages[1].module = m_fragment_shader.handle();
 		shader_stages[1].pName = "main";
 
 		std::vector<VkDynamicState> dynamic_state_descriptors;

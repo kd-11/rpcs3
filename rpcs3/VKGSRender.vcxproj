@@ -64,6 +64,7 @@
     <ClInclude Include="Emu\RSX\VK\vkutils\pipeline_binding_table.h" />
     <ClInclude Include="Emu\RSX\VK\vkutils\query_pool.hpp" />
     <ClInclude Include="Emu\RSX\VK\vkutils\sampler.h" />
+    <ClInclude Include="Emu\RSX\VK\vkutils\shader_program.h" />
     <ClInclude Include="Emu\RSX\VK\vkutils\shared.h" />
     <ClInclude Include="Emu\RSX\VK\vkutils\instance.h" />
     <ClInclude Include="Emu\RSX\VK\VKVertexProgram.h" />
@@ -110,6 +111,7 @@
     <ClCompile Include="Emu\RSX\VK\vkutils\descriptors.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\device.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\sampler.cpp" />
+    <ClCompile Include="Emu\RSX\VK\vkutils\shader_program.cpp" />
     <ClCompile Include="Emu\RSX\VK\vkutils\shared.cpp" />
     <ClCompile Include="Emu\RSX\VK\VKVertexBuffers.cpp" />
     <ClCompile Include="Emu\RSX\VK\VKVertexProgram.cpp" />

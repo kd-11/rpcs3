@@ -81,6 +81,9 @@
     <ClCompile Include="Emu\RSX\VK\vkutils\swapchain.cpp">
       <Filter>vkutils</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\VK\vkutils\shader_program.cpp">
+      <Filter>vkutils</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Emu\RSX\VK\VKCommonDecompiler.h" />
@@ -197,6 +200,9 @@
       <Filter>vkutils</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\VK\vkutils\swapchain_core.h">
+      <Filter>vkutils</Filter>
+    </ClInclude>
+    <ClInclude Include="Emu\RSX\VK\vkutils\shader_program.h">
       <Filter>vkutils</Filter>
     </ClInclude>
     <ClInclude Include="Emu\RSX\VK\VKProcTable.h" />

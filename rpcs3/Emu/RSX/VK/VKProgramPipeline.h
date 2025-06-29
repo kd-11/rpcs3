@@ -4,6 +4,7 @@
 #include "Emu/RSX/Program/GLSLTypes.h"
 
 #include "vkutils/descriptors.h"
+#include "vkutils/shader_program.h"
 
 #include <string>
 #include <vector>
@@ -86,27 +87,20 @@ namespace vk
 			}
 		};
 
-		class shader
+		class shader : public vk::shader
 		{
-			::glsl::program_domain type = ::glsl::program_domain::glsl_vertex_program;
-			VkShaderModule m_handle = VK_NULL_HANDLE;
-			std::string m_source;
-			std::vector<u32> m_compiled;
-
 		public:
 			shader() = default;
 			~shader() = default;
 
 			void create(::glsl::program_domain domain, const std::string& source);
-
 			VkShaderModule compile();
 
-			void destroy();
+			const std::string& get_source() const { return m_source; }
 
-			const std::string& get_source() const;
-			const std::vector<u32> get_compiled() const;
-
-			VkShaderModule get_handle() const;
+		protected:
+			::glsl::program_domain type = ::glsl::program_domain::glsl_vertex_program;
+			std::string m_source;
 		};
 
 		struct descriptor_array_ref_t
@@ -170,21 +164,7 @@ namespace vk
 
 		class program
 		{
-			VkDevice m_device = VK_NULL_HANDLE;
-			VkPipeline m_pipeline = VK_NULL_HANDLE;
-			VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
-
-			std::variant<VkGraphicsPipelineCreateInfo, VkComputePipelineCreateInfo> m_info;
-			std::array<descriptor_table_t, binding_set_index_max_enum> m_sets;
-			bool m_linked = false;
-
-			void init();
-			void create_pipeline_layout();
-
-			program& load_uniforms(const std::vector<program_input>& inputs);
-
 		public:
-
 			program(VkDevice dev, const VkGraphicsPipelineCreateInfo& create_info, const std::vector<program_input> &vertex_inputs, const std::vector<program_input>& fragment_inputs);
 			program(VkDevice dev, const VkComputePipelineCreateInfo& create_info, const std::vector<program_input>& compute_inputs);
 			program(const program&) = delete;
@@ -205,7 +185,21 @@ namespace vk
 			void bind_uniform_array(const VkDescriptorImageInfo* image_descriptors, int count, u32 set_id, u32 binding_point);
 
 			inline VkPipelineLayout layout() const { return m_pipeline_layout; }
-			inline VkPipeline value() const { return m_pipeline; }
+			inline VkPipeline handle() const { return ensure(m_pipeline)->handle(); }
+
+		protected:
+			VkDevice m_device = VK_NULL_HANDLE;
+			VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
+			std::unique_ptr<vk::pipeline> m_pipeline;
+			std::variant<VkGraphicsPipelineCreateInfo, VkComputePipelineCreateInfo> m_info;
+
+			std::array<descriptor_table_t, binding_set_index_max_enum> m_sets;
+			bool m_linked = false;
+
+			void init();
+			void create_pipeline_layout();
+
+			program& load_uniforms(const std::vector<program_input>& inputs);
 		};
 	}
 }

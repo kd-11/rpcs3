@@ -588,6 +588,7 @@ if(TARGET 3rdparty_vulkan)
         RSX/VK/vkutils/memory.cpp
         RSX/VK/vkutils/device.cpp
         RSX/VK/vkutils/sampler.cpp
+        RSX/VK/vkutils/shader_program.cpp
         RSX/VK/vkutils/shared.cpp
         RSX/VK/VKAsyncScheduler.cpp
         RSX/VK/VKCommandStream.cpp

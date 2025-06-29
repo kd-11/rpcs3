@@ -111,33 +111,21 @@ namespace vk
 
 		using descriptor_slot_t = std::variant<VkDescriptorImageInfo, VkDescriptorBufferInfo, VkBufferView, descriptor_array_ref_t>;
 
-		struct descriptor_table_t
+		class descriptor_table_t
 		{
-			VkDevice m_device = VK_NULL_HANDLE;
-			std::array<std::vector<program_input>, input_type_max_enum> m_inputs;
+		public:
+			using inputs_array_t = std::array<std::vector<program_input>, input_type_max_enum>;
 
-			std::unique_ptr<vk::descriptor_pool> m_descriptor_pool;
-			VkDescriptorSetLayout m_descriptor_set_layout = VK_NULL_HANDLE;
-			vk::descriptor_set m_descriptor_set{};
-			rsx::simple_array<VkDescriptorPoolSize> m_descriptor_pool_sizes;
-			rsx::simple_array<VkDescriptorType> m_descriptor_types;
-
-			std::vector<descriptor_slot_t> m_descriptor_slots;
-			std::vector<bool> m_descriptors_dirty;
-			bool m_any_descriptors_dirty = false;
-
-			rsx::simple_array< VkDescriptorImageInfo> m_scratch_images_array;
+			descriptor_table_t() = default;
+			virtual ~descriptor_table_t() = default;
 
 			void init(VkDevice dev);
-			void destroy();
-
 			void validate() const;
+			virtual void destroy();
 
 			void create_descriptor_set_layout();
-			void create_descriptor_pool();
 
-			VkDescriptorSet allocate_descriptor_set();
-			VkDescriptorSet commit();
+			virtual VkDescriptorSet commit(const vk::command_buffer& cmd) = 0;
 
 			template <typename T>
 			inline void notify_descriptor_slot_updated(u32 slot, const T& data)
@@ -146,6 +134,77 @@ namespace vk
 				m_descriptor_slots[slot] = data;
 				m_any_descriptors_dirty = true;
 			}
+
+			template <typename T>
+			std::pair<descriptor_array_ref_t, T*> allocate_scratch(u32 count)
+			{
+				// Only implemented for images
+				descriptor_array_ref_t ref{};
+				ref.first = m_scratch_images_array.size();
+				ref.count = count;
+
+				m_scratch_images_array.resize(ref.first + ref.count);
+				return { ref, m_scratch_images_array.data() + ref.first };
+			}
+
+			operator bool() const { return !!m_device; }
+
+			inline inputs_array_t& inputs() { return m_inputs; }
+			inline const inputs_array_t& inputs() const { return m_inputs; }
+
+			inline std::vector<program_input>&
+			inputs(program_input_type type) { return m_inputs[type]; }
+
+			inline const std::vector<program_input>&
+			inputs(program_input_type type) const { return m_inputs[type]; }
+
+			inline descriptor_slot_t&
+			bind_slots(int index) { return m_descriptor_slots[index]; }
+
+			inline const descriptor_slot_t&
+			bind_slots(int index) const { return m_descriptor_slots[index]; }
+
+			inline VkDescriptorSetLayout layout() const { return m_descriptor_set_layout; }
+
+		protected:
+			VkDevice m_device = VK_NULL_HANDLE;
+			inputs_array_t m_inputs;
+			VkDescriptorSetLayout m_descriptor_set_layout = VK_NULL_HANDLE;
+			rsx::simple_array<VkDescriptorPoolSize> m_descriptor_pool_sizes;
+			rsx::simple_array<VkDescriptorType> m_descriptor_types;
+
+			std::vector<descriptor_slot_t> m_descriptor_slots;
+			std::vector<bool> m_descriptors_dirty;
+			bool m_any_descriptors_dirty = false;
+
+			rsx::simple_array< VkDescriptorImageInfo> m_scratch_images_array;
+		};
+
+		class descriptor_table_legacy_t : public descriptor_table_t
+		{
+		public:
+			VkDescriptorSet commit(const vk::command_buffer& cmd) override;
+			void destroy() override;
+
+		protected:
+			std::unique_ptr<vk::descriptor_pool> m_descriptor_pool;
+			vk::descriptor_set m_descriptor_set{};
+
+			void create_descriptor_pool();
+			VkDescriptorSet allocate_descriptor_set();
+		};
+
+		class descriptor_table_buffer_t : public descriptor_table_t
+		{
+		public:
+			VkDescriptorSet commit(const vk::command_buffer& cmd) override;
+			void destroy() override;
+
+		protected:
+			std::unique_ptr<vk::buffer> m_bo;
+			rsx::simple_array<u32> m_descriptor_offsets;
+
+			void initialize_bo();
 		};
 
 		enum binding_set_index : u32
@@ -193,7 +252,7 @@ namespace vk
 			std::unique_ptr<vk::pipeline> m_pipeline;
 			std::variant<VkGraphicsPipelineCreateInfo, VkComputePipelineCreateInfo> m_info;
 
-			std::array<descriptor_table_t, binding_set_index_max_enum> m_sets;
+			std::array<std::unique_ptr<descriptor_table_t>, binding_set_index_max_enum> m_sets;
 			bool m_linked = false;
 
 			void init();

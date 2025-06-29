@@ -109,9 +109,19 @@ namespace vk::glsl
 	void program::init()
 	{
 		m_linked = false;
+
+		// Initialize all sets with legacy binding table for now
+		for (auto& set : m_sets)
+		{
+			set = std::make_unique<descriptor_table_legacy_t>();
+		}
 	}
 
-	program::program(VkDevice dev, const VkGraphicsPipelineCreateInfo& create_info, const std::vector<program_input> &vertex_inputs, const std::vector<program_input>& fragment_inputs)
+	program::program(
+		VkDevice dev,
+		const VkGraphicsPipelineCreateInfo& create_info,
+		const std::vector<program_input> &vertex_inputs,
+		const std::vector<program_input>& fragment_inputs)
 		: m_device(dev), m_info(create_info)
 	{
 		init();
@@ -120,7 +130,10 @@ namespace vk::glsl
 		load_uniforms(fragment_inputs);
 	}
 
-	program::program(VkDevice dev, const VkComputePipelineCreateInfo& create_info, const std::vector<program_input>& compute_inputs)
+	program::program(
+		VkDevice dev,
+		const VkComputePipelineCreateInfo& create_info,
+		const std::vector<program_input>& compute_inputs)
 		: m_device(dev), m_info(create_info)
 	{
 		init();
@@ -135,11 +148,12 @@ namespace vk::glsl
 		if (m_pipeline_layout)
 		{
 			vkDestroyPipelineLayout(m_device, m_pipeline_layout, nullptr);
+		}
 
-			for (auto& set : m_sets)
-			{
-				set.destroy();
-			}
+		for (auto& set : m_sets)
+		{
+			set->destroy();
+			set.reset();
 		}
 	}
 
@@ -151,7 +165,7 @@ namespace vk::glsl
 		{
 			ensure(item.set < binding_set_index_max_enum);                         // Ensure we have a valid set id
 			ensure(item.location < 128u || item.type == input_type_push_constant); // Arbitrary limit but useful to catch possibly uninitialized values
-			m_sets[item.set].m_inputs[item.type].push_back(item);
+			m_sets[item.set]->inputs(item.type).push_back(item);
 		}
 
 		return *this;
@@ -180,7 +194,7 @@ namespace vk::glsl
 					continue;
 				}
 
-				for (auto& type_arr : set.m_inputs)
+				for (auto& type_arr : set->inputs())
 				{
 					if (type_arr.empty())
 					{
@@ -188,7 +202,7 @@ namespace vk::glsl
 					}
 
 					auto type = type_arr.front().type;
-					auto& dst = sink.m_inputs[type];
+					auto& dst = sink->inputs(type);
 					dst.insert(dst.end(), type_arr.begin(), type_arr.end());
 
 					// Clear
@@ -196,14 +210,14 @@ namespace vk::glsl
 				}
 			}
 
-			sink.validate();
-			sink.init(m_device);
+			sink->validate();
+			sink->init(m_device);
 		}
 		else
 		{
 			for (auto& set : m_sets)
 			{
-				for (auto& type_arr : set.m_inputs)
+				for (auto& type_arr : set->inputs())
 				{
 					if (type_arr.empty())
 					{
@@ -211,8 +225,8 @@ namespace vk::glsl
 					}
 
 					// Real set
-					set.validate();
-					set.init(m_device);
+					set->validate();
+					set->init(m_device);
 					break;
 				}
 			}
@@ -242,7 +256,7 @@ namespace vk::glsl
 	{
 		for (auto& set : m_sets)
 		{
-			const auto& uniform = set.m_inputs[type];
+			const auto& uniform = set->inputs(type);
 			return std::any_of(uniform.cbegin(), uniform.cend(), [&uniform_name](const auto& u)
 			{
 				return u.name == uniform_name;
@@ -256,7 +270,7 @@ namespace vk::glsl
 	{
 		for (unsigned i = 0; i < ::size32(m_sets); ++i)
 		{
-			const auto& type_arr = m_sets[i].m_inputs[type];
+			const auto& type_arr = m_sets[i]->inputs(type);
 			const auto result = std::find_if(type_arr.cbegin(), type_arr.cend(), [&](const auto& u)
 			{
 				return u.domain == domain && u.name == uniform_name;
@@ -273,52 +287,41 @@ namespace vk::glsl
 
 	void program::bind_uniform(const VkDescriptorImageInfo& image_descriptor, u32 set_id, u32 binding_point)
 	{
-		if (m_sets[set_id].m_descriptor_slots[binding_point] == image_descriptor)
+		if (m_sets[set_id]->bind_slots(binding_point) == image_descriptor)
 		{
 			return;
 		}
 
-		m_sets[set_id].notify_descriptor_slot_updated(binding_point, image_descriptor);
+		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, image_descriptor);
 	}
 
 	void program::bind_uniform(const VkDescriptorBufferInfo &buffer_descriptor, u32 set_id, u32 binding_point)
 	{
-		if (m_sets[set_id].m_descriptor_slots[binding_point] == buffer_descriptor)
+		if (m_sets[set_id]->bind_slots(binding_point) == buffer_descriptor)
 		{
 			return;
 		}
 
-		m_sets[set_id].notify_descriptor_slot_updated(binding_point, buffer_descriptor);
+		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, buffer_descriptor);
 	}
 
 	void program::bind_uniform(const VkBufferView &buffer_view, u32 set_id, u32 binding_point)
 	{
-		if (m_sets[set_id].m_descriptor_slots[binding_point] == buffer_view)
+		if (m_sets[set_id]->bind_slots(binding_point) == buffer_view)
 		{
 			return;
 		}
 
-		m_sets[set_id].notify_descriptor_slot_updated(binding_point, buffer_view);
+		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, buffer_view);
 	}
 
 	void program::bind_uniform_array(const VkDescriptorImageInfo* image_descriptors, int count, u32 set_id, u32 binding_point)
 	{
 		// Non-caching write
-		auto& set = m_sets[set_id];
-		auto& arr = set.m_scratch_images_array;
+		auto& set = *m_sets[set_id];
+		auto [data, ptr] = set.allocate_scratch<VkDescriptorImageInfo>(count);
 
-		descriptor_array_ref_t data
-		{
-			.first = arr.size(),
-			.count = static_cast<u32>(count)
-		};
-
-		arr.reserve(arr.size() + static_cast<u32>(count));
-		for (int i = 0; i < count; ++i)
-		{
-			arr.push_back(image_descriptors[i]);
-		}
-
+		std::memcpy(ptr, image_descriptors, sizeof(VkDescriptorImageInfo) * count);
 		set.notify_descriptor_slot_updated(binding_point, data);
 	}
 
@@ -332,15 +335,15 @@ namespace vk::glsl
 
 		for (auto& set : m_sets)
 		{
-			if (!set.m_device)
+			if (!*set)
 			{
 				continue;
 			}
 
-			set.create_descriptor_set_layout();
-			set_layouts.push_back(set.m_descriptor_set_layout);
+			set->create_descriptor_set_layout();
+			set_layouts.push_back(set->layout());
 
-			for (const auto& input : set.m_inputs[input_type_push_constant])
+			for (const auto& input : set->inputs(input_type_push_constant))
 			{
 				const auto& range = input.as_push_constant();
 				push_constants.push_back({
@@ -370,12 +373,12 @@ namespace vk::glsl
 
 		for (auto& set : m_sets)
 		{
-			if (!set.m_device)
+			if (!*set)
 			{
 				continue;
 			}
 
-			bind_sets[count++] = set.commit();   // Commit variable changes and return handle to the new set
+			bind_sets[count++] = set->commit(cmd);   // Commit variable changes and return handle to the new set
 		}
 
 		vkCmdBindPipeline(cmd, bind_point, m_pipeline->handle());
@@ -395,13 +398,24 @@ namespace vk::glsl
 			vkDestroyDescriptorSetLayout(m_device, m_descriptor_set_layout, nullptr);
 		}
 
+		m_device = VK_NULL_HANDLE;
+	}
+
+	void descriptor_table_legacy_t::destroy()
+	{
 		if (m_descriptor_pool)
 		{
 			m_descriptor_pool->destroy();
 			m_descriptor_pool.reset();
 		}
 
-		m_device = VK_NULL_HANDLE;
+		descriptor_table_t::destroy();
+	}
+
+	void descriptor_table_buffer_t::destroy()
+	{
+		m_bo.reset();
+		descriptor_table_t::destroy();
 	}
 
 	void descriptor_table_t::init(VkDevice dev)
@@ -426,7 +440,7 @@ namespace vk::glsl
 		std::fill(m_descriptors_dirty.begin(), m_descriptors_dirty.end(), false);
 	}
 
-	VkDescriptorSet descriptor_table_t::allocate_descriptor_set()
+	VkDescriptorSet descriptor_table_legacy_t::allocate_descriptor_set()
 	{
 		if (!m_descriptor_pool)
 		{
@@ -436,7 +450,7 @@ namespace vk::glsl
 		return m_descriptor_pool->allocate(m_descriptor_set_layout);
 	}
 
-	VkDescriptorSet descriptor_table_t::commit()
+	VkDescriptorSet descriptor_table_legacy_t::commit(const vk::command_buffer&)
 	{
 		if (!m_descriptor_set)
 		{
@@ -580,7 +594,7 @@ namespace vk::glsl
 		m_descriptor_set_layout = vk::descriptors::create_layout(bindings);
 	}
 
-	void descriptor_table_t::create_descriptor_pool()
+	void descriptor_table_legacy_t::create_descriptor_pool()
 	{
 		m_descriptor_pool = std::make_unique<descriptor_pool>();
 		m_descriptor_pool->create(*vk::get_current_renderer(), m_descriptor_pool_sizes);

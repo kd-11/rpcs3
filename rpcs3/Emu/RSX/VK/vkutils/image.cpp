@@ -127,7 +127,7 @@ namespace vk
 			fmt::throw_exception("No compatible memory type was found!");
 		}
 
-		memory = std::make_shared<vk::memory_block>(m_device, memory_req.size, memory_req.alignment, allocation_type_info, allocation_pool, nullable);
+		memory = std::make_shared<vk::memory_block>(m_device, memory_req.size, memory_req.alignment, allocation_type_info, allocation_pool, 0, nullable);
 		if (auto device_mem = memory->get_vk_device_memory();
 			device_mem != VK_NULL_HANDLE) [[likely]]
 		{

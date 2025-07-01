@@ -68,7 +68,7 @@ namespace vk
 
 		virtual void destroy() = 0;
 
-		virtual mem_handle_t alloc(u64 block_sz, u64 alignment, const memory_type_info& memory_type, vmm_allocation_pool pool, bool throw_on_fail) = 0;
+		virtual mem_handle_t alloc(u64 block_sz, u64 alignment, const memory_type_info& memory_type, VkFlags flags, vmm_allocation_pool pool, bool throw_on_fail) = 0;
 		virtual void free(mem_handle_t mem_handle) = 0;
 		virtual void* map(mem_handle_t mem_handle, u64 offset, u64 size) = 0;
 		virtual void unmap(mem_handle_t mem_handle) = 0;
@@ -96,7 +96,7 @@ namespace vk
 
 		void destroy() override;
 
-		mem_handle_t alloc(u64 block_sz, u64 alignment, const memory_type_info& memory_type, vmm_allocation_pool pool, bool throw_on_fail) override;
+		mem_handle_t alloc(u64 block_sz, u64 alignment, const memory_type_info& memory_type, VkFlags flags, vmm_allocation_pool pool, bool throw_on_fail) override;
 
 		void free(mem_handle_t mem_handle) override;
 		void* map(mem_handle_t mem_handle, u64 offset, u64 /*size*/) override;
@@ -125,7 +125,7 @@ namespace vk
 
 		void destroy() override {}
 
-		mem_handle_t alloc(u64 block_sz, u64 /*alignment*/, const memory_type_info& memory_type, vmm_allocation_pool pool, bool throw_on_fail) override;
+		mem_handle_t alloc(u64 block_sz, u64 /*alignment*/, const memory_type_info& memory_type, VkFlags flags, vmm_allocation_pool pool, bool throw_on_fail) override;
 
 		void free(mem_handle_t mem_handle) override;
 		void* map(mem_handle_t mem_handle, u64 offset, u64 size) override;
@@ -138,7 +138,7 @@ namespace vk
 
 	struct memory_block
 	{
-		memory_block(VkDevice dev, u64 block_sz, u64 alignment, const memory_type_info& memory_type, vmm_allocation_pool pool, bool nullable = false);
+		memory_block(VkDevice dev, u64 block_sz, u64 alignment, const memory_type_info& memory_type, vmm_allocation_pool pool, VkFlags flags, bool nullable = false);
 		virtual ~memory_block();
 
 		virtual VkDeviceMemory get_vk_device_memory();
@@ -164,7 +164,7 @@ namespace vk
 
 	struct memory_block_host : public memory_block
 	{
-		memory_block_host(VkDevice dev, void* host_pointer, u64 size, const memory_type_info& memory_type);
+		memory_block_host(VkDevice dev, void* host_pointer, u64 size, const memory_type_info& memory_type, VkFlags flags);
 		~memory_block_host();
 
 		VkDeviceMemory get_vk_device_memory() override;

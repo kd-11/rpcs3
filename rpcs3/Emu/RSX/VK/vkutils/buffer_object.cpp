@@ -69,9 +69,11 @@ namespace vk
 		info.usage = usage;
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+		VkFlags mm_flags = 0;
 		if (usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS)
 		{
 			info.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+			mm_flags |= VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 		}
 
 		CHECK_RESULT(vkCreateBuffer(m_device, &info, nullptr, &value));
@@ -86,7 +88,7 @@ namespace vk
 			fmt::throw_exception("No compatible memory type was found!");
 		}
 
-		memory = std::make_unique<memory_block>(m_device, memory_reqs.size, memory_reqs.alignment, allocation_type_info, allocation_pool);
+		memory = std::make_unique<memory_block>(m_device, memory_reqs.size, memory_reqs.alignment, allocation_type_info, allocation_pool, mm_flags);
 		vkBindBufferMemory(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset());
 
 		init_va();
@@ -105,9 +107,11 @@ namespace vk
 		info.usage = usage;
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+		VkFlags mm_flags = 0;
 		if (usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS)
 		{
 			info.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+			mm_flags |= VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
 		}
 
 		VkExternalMemoryBufferCreateInfoKHR ex_info;
@@ -145,7 +149,7 @@ namespace vk
 			fmt::throw_exception("No compatible memory type was found!");
 		}
 
-		memory = std::make_unique<memory_block_host>(m_device, host_pointer, size, allocation_type_info);
+		memory = std::make_unique<memory_block_host>(m_device, host_pointer, size, allocation_type_info, mm_flags);
 		CHECK_RESULT(vkBindBufferMemory(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset()));
 
 		init_va();

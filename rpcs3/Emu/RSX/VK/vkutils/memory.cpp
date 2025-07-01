@@ -197,7 +197,7 @@ namespace vk
 		vmaDestroyAllocator(m_allocator);
 	}
 
-	mem_allocator_vk::mem_handle_t mem_allocator_vma::alloc(u64 block_sz, u64 alignment, const memory_type_info& memory_type, vmm_allocation_pool pool, bool throw_on_fail)
+	mem_allocator_vk::mem_handle_t mem_allocator_vma::alloc(u64 block_sz, u64 alignment, const memory_type_info& memory_type, VkFlags flags, vmm_allocation_pool pool, bool throw_on_fail)
 	{
 		VmaAllocation vma_alloc;
 		VkMemoryRequirements mem_req = {};
@@ -328,7 +328,7 @@ namespace vk
 		m_allocation_flags = VMA_ALLOCATION_CREATE_STRATEGY_MIN_TIME_BIT;
 	}
 
-	mem_allocator_vk::mem_handle_t mem_allocator_vk::alloc(u64 block_sz, u64 /*alignment*/, const memory_type_info& memory_type, vmm_allocation_pool pool, bool throw_on_fail)
+	mem_allocator_vk::mem_handle_t mem_allocator_vk::alloc(u64 block_sz, u64 /*alignment*/, const memory_type_info& memory_type, VkFlags flags, vmm_allocation_pool pool, bool throw_on_fail)
 	{
 		VkResult error_code = VK_ERROR_UNKNOWN;
 		VkDeviceMemory memory;
@@ -336,6 +336,14 @@ namespace vk
 		VkMemoryAllocateInfo info = {};
 		info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		info.allocationSize = block_sz;
+
+		VkMemoryAllocateFlagsInfo flags_info{};
+		if (flags)
+		{
+			flags_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_FLAGS_INFO;
+			flags_info.flags = flags;
+			info.pNext = &flags_info;
+		}
 
 		auto do_vk_alloc = [&]() -> std::tuple<VkResult, u32>
 		{
@@ -422,11 +430,11 @@ namespace vk
 		return g_render_device->get_allocator();
 	}
 
-	memory_block::memory_block(VkDevice dev, u64 block_sz, u64 alignment, const memory_type_info& memory_type, vmm_allocation_pool pool, bool nullable)
+	memory_block::memory_block(VkDevice dev, u64 block_sz, u64 alignment, const memory_type_info& memory_type, vmm_allocation_pool pool, VkFlags flags, bool nullable)
 		: m_device(dev), m_size(block_sz)
 	{
 		m_mem_allocator = get_current_mem_allocator();
-		m_mem_handle    = m_mem_allocator->alloc(block_sz, alignment, memory_type, pool, !nullable);
+		m_mem_handle    = m_mem_allocator->alloc(block_sz, alignment, memory_type, flags, pool, !nullable);
 	}
 
 	memory_block::~memory_block()
@@ -437,7 +445,7 @@ namespace vk
 		}
 	}
 
-	memory_block_host::memory_block_host(VkDevice dev, void* host_pointer, u64 size, const memory_type_info& memory_type) :
+	memory_block_host::memory_block_host(VkDevice dev, void* host_pointer, u64 size, const memory_type_info& memory_type, VkFlags flags) :
 		m_device(dev), m_mem_handle(VK_NULL_HANDLE), m_host_pointer(host_pointer)
 	{
 		VkMemoryAllocateInfo alloc_info{};

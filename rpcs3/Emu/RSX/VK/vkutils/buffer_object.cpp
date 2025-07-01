@@ -4,6 +4,11 @@
 
 namespace vk
 {
+	const VkFlags BUFFER_RESOURCE_BINDING_USAGE_FLAGS =
+		VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
+		VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT |
+		VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+
 	buffer_view::buffer_view(
 		const vk::render_device& device,
 		const vk::buffer& buffer,
@@ -64,6 +69,11 @@ namespace vk
 		info.usage = usage;
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
+		if (usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS)
+		{
+			info.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		}
+
 		CHECK_RESULT(vkCreateBuffer(m_device, &info, nullptr, &value));
 
 		// Allocate vram for this buffer
@@ -94,6 +104,11 @@ namespace vk
 		info.size = size;
 		info.usage = usage;
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+		if (usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS)
+		{
+			info.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+		}
 
 		VkExternalMemoryBufferCreateInfoKHR ex_info;
 		ex_info.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_BUFFER_CREATE_INFO_KHR;
@@ -143,13 +158,18 @@ namespace vk
 
 	void buffer::init_va()
 	{
-		VkBufferDeviceAddressInfo info
+		if (!(info.usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS))
+		{
+			return;
+		}
+
+		VkBufferDeviceAddressInfo bda_info
 		{
 			.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
 			.pNext = nullptr,
 			.buffer = value
 		};
-		va = vkGetBufferDeviceAddress(m_device, &info);
+		va = vkGetBufferDeviceAddress(m_device, &bda_info);
 	}
 
 	void* buffer::map(u64 offset, u64 size)

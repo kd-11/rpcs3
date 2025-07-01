@@ -1,9 +1,11 @@
 #include "stdafx.h"
 #include "VKProgramPipeline.h"
+
 #include "vkutils/descriptors.h"
 #include "vkutils/device.h"
 
 #include "Emu/RSX/Program/SPIRVCommon.h"
+#include <util/asm.hpp>
 
 namespace vk::glsl
 {

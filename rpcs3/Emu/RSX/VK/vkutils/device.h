@@ -81,6 +81,7 @@ namespace vk
 		VkPhysicalDevice dev = VK_NULL_HANDLE;
 		VkPhysicalDeviceProperties props;
 		VkPhysicalDeviceFeatures features;
+		VkPhysicalDeviceVulkan12Features features12;
 		VkPhysicalDeviceMemoryProperties memory_properties;
 		std::vector<VkQueueFamilyProperties> queue_props;
 

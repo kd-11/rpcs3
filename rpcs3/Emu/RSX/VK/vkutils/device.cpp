@@ -20,28 +20,21 @@ namespace vk
 		supported_extensions instance_extensions(supported_extensions::instance);
 		supported_extensions device_extensions(supported_extensions::device, nullptr, dev);
 
-		VkPhysicalDeviceFeatures2KHR features2;
+		VkPhysicalDeviceFeatures2KHR features2{};
 		features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-		features2.pNext = nullptr;
+		features2.pNext = &features12;
 
-		VkPhysicalDeviceFloat16Int8FeaturesKHR shader_support_info{};
-		VkPhysicalDeviceDescriptorIndexingFeatures descriptor_indexing_info{};
+		features12 =
+		{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+		};
+
 		VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loops_info{};
 		VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
 		VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_info{};
 		VkPhysicalDeviceBorderColorSwizzleFeaturesEXT border_color_swizzle_info{};
 		VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
 		VkPhysicalDeviceMultiDrawFeaturesEXT multidraw_info{};
-		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_info{};
-
-		// Core features
-		shader_support_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_FLOAT16_INT8_FEATURES;
-		features2.pNext           = &shader_support_info;
-
-		descriptor_indexing_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-		descriptor_indexing_info.pNext = features2.pNext;
-		features2.pNext                = &descriptor_indexing_info;
-		descriptor_indexing_support    = true;
 
 		// Optional features
 		if (device_extensions.is_supported(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME))
@@ -86,18 +79,11 @@ namespace vk
 			features2.pNext      = &multidraw_info;
 		}
 
-		if (device_extensions.is_supported(VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME))
-		{
-			descriptor_buffer_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
-			descriptor_buffer_info.pNext = features2.pNext;
-			features2.pNext              = &descriptor_buffer_info;
-		}
-
 		vkGetPhysicalDeviceFeatures2(dev, &features2);
 
 		shader_types_support.allow_float64 = !!features2.features.shaderFloat64;
-		shader_types_support.allow_float16 = !!shader_support_info.shaderFloat16;
-		shader_types_support.allow_int8    = !!shader_support_info.shaderInt8;
+		shader_types_support.allow_float16 = !!features12.shaderFloat16;
+		shader_types_support.allow_int8    = !!features12.shaderInt8;
 
 		custom_border_color_support.supported = !!custom_border_color_info.customBorderColors && !!custom_border_color_info.customBorderColorWithoutFormat;
 		custom_border_color_support.swizzle_extension_supported = border_color_swizzle_info.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
@@ -106,7 +92,7 @@ namespace vk
 		multidraw_support.supported = !!multidraw_info.multiDraw;
 		multidraw_support.max_batch_size = 65536;
 
-		descriptor_buffer_support.supported = !!descriptor_buffer_info.descriptorBuffer;
+		descriptor_buffer_support.supported = !!features12.bufferDeviceAddress;
 
 		optional_features_support.barycentric_coords  = !!shader_barycentric_info.fragmentShaderBarycentric;
 		optional_features_support.framebuffer_loops   = !!fbo_loops_info.attachmentFeedbackLoopLayout;
@@ -115,7 +101,7 @@ namespace vk
 		features = features2.features;
 
 		descriptor_indexing_support.supported = true; // VK_API_VERSION_1_2
-#define SET_DESCRIPTOR_BITFLAG(field, bit) if (descriptor_indexing_info.field) descriptor_indexing_support.update_after_bind_mask |= (1ull << bit)
+#define SET_DESCRIPTOR_BITFLAG(field, bit) if (features12.field) descriptor_indexing_support.update_after_bind_mask |= (1ull << bit)
 		SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 		SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 		SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
@@ -718,15 +704,16 @@ namespace vk
 		device.ppEnabledExtensionNames = requested_extensions.data();
 		device.pEnabledFeatures = &enabled_features;
 
-		VkPhysicalDeviceFloat16Int8FeaturesKHR shader_support_info{};
+		VkPhysicalDeviceVulkan12Features features12
+		{
+			.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES
+		};
+		device.pNext = &features12;
+
 		if (pgpu->shader_types_support.allow_float16)
 		{
 			// Allow use of f16 type in shaders if possible
-			shader_support_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FLOAT16_INT8_FEATURES_KHR;
-			shader_support_info.shaderFloat16 = VK_TRUE;
-			shader_support_info.pNext = const_cast<void*>(device.pNext);
-			device.pNext = &shader_support_info;
-
+			features12.shaderFloat16 = VK_TRUE;
 			rsx_log.notice("GPU/driver supports float16 data types natively. Using native float16_t variables if possible.");
 		}
 		else
@@ -734,10 +721,9 @@ namespace vk
 			rsx_log.notice("GPU/driver lacks support for float16 data types. All float16_t arithmetic will be emulated with float32_t.");
 		}
 
-		VkPhysicalDeviceDescriptorIndexingFeatures indexing_features{};
 		if (pgpu->descriptor_indexing_support)
 		{
-#define SET_DESCRIPTOR_BITFLAG(field, bit) if (pgpu->descriptor_indexing_support.update_after_bind_mask & (1ull << bit)) indexing_features.field = VK_TRUE
+#define SET_DESCRIPTOR_BITFLAG(field, bit) if (pgpu->descriptor_indexing_support.update_after_bind_mask & (1ull << bit)) features12.field = VK_TRUE
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingSampledImageUpdateAfterBind, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
@@ -746,10 +732,11 @@ namespace vk
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingUniformTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
 			SET_DESCRIPTOR_BITFLAG(descriptorBindingStorageTexelBufferUpdateAfterBind, VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
 #undef SET_DESCRIPTOR_BITFLAG
+		}
 
-			indexing_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES_EXT;
-			indexing_features.pNext = const_cast<void*>(device.pNext);
-			device.pNext = &indexing_features;
+		if (pgpu->descriptor_buffer_support)
+		{
+			features12.bufferDeviceAddress = VK_TRUE;
 		}
 
 		VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_features{};
@@ -815,15 +802,6 @@ namespace vk
 			shader_barycentric_info.pNext = const_cast<void*>(device.pNext);
 			shader_barycentric_info.fragmentShaderBarycentric = VK_TRUE;
 			device.pNext = &shader_barycentric_info;
-		}
-
-		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_info{};
-		if (pgpu->descriptor_buffer_support)
-		{
-			descriptor_buffer_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
-			descriptor_buffer_info.pNext = const_cast<void*>(device.pNext);
-			descriptor_buffer_info.descriptorBuffer = VK_TRUE;
-			device.pNext = &descriptor_buffer_info;
 		}
 
 		if (auto error = vkCreateDevice(*pgpu, &device, nullptr, &dev))

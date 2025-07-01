@@ -106,11 +106,11 @@ namespace vk
 		multidraw_support.supported = !!multidraw_info.multiDraw;
 		multidraw_support.max_batch_size = 65536;
 
+		descriptor_buffer_support.supported = !!descriptor_buffer_info.descriptorBuffer;
+
 		optional_features_support.barycentric_coords  = !!shader_barycentric_info.fragmentShaderBarycentric;
 		optional_features_support.framebuffer_loops   = !!fbo_loops_info.attachmentFeedbackLoopLayout;
 		optional_features_support.extended_device_fault = !!device_fault_info.deviceFault;
-
-		optional_features_support.descriptor_buffer = !!descriptor_buffer_info.descriptorBuffer;
 
 		features = features2.features;
 
@@ -204,6 +204,14 @@ namespace vk
 			properties2.pNext = &multidraw_props;
 		}
 
+		if (descriptor_buffer_support)
+		{
+			auto& descriptor_buffer_props = descriptor_buffer_support.properties;
+			descriptor_buffer_props.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_PROPERTIES_EXT;
+			descriptor_buffer_props.pNext = properties2.pNext;
+			properties2.pNext = &descriptor_buffer_props;
+		}
+
 		vkGetPhysicalDeviceProperties2(dev, &properties2);
 		props = properties2.properties;
 
@@ -229,6 +237,16 @@ namespace vk
 			{
 				rsx_log.error("Physical device reports 0 support maxMultiDraw count. Multidraw support will be disabled.");
 				multidraw_support.supported = false;
+			}
+		}
+
+		if (descriptor_buffer_support)
+		{
+			// We don't handle complex separate layouts for now
+			if (descriptor_buffer_support.properties.combinedImageSamplerDescriptorSingleArray == VK_FALSE)
+			{
+				rsx_log.warning("VK_EXT_descriptor_buffer is supported by this GPU but requires separate image and sampler arrays. The feature is disabled.");
+				descriptor_buffer_support.supported = false;
 			}
 		}
 	}
@@ -800,7 +818,7 @@ namespace vk
 		}
 
 		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_info{};
-		if (pgpu->optional_features_support.descriptor_buffer)
+		if (pgpu->descriptor_buffer_support)
 		{
 			descriptor_buffer_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
 			descriptor_buffer_info.pNext = const_cast<void*>(device.pNext);

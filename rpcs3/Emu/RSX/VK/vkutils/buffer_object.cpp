@@ -4,10 +4,20 @@
 
 namespace vk
 {
-	buffer_view::buffer_view(VkDevice dev, VkBuffer buffer, VkFormat format, VkDeviceSize offset, VkDeviceSize size)
-		: m_device(dev)
+	buffer_view::buffer_view(
+		const vk::render_device& device,
+		const vk::buffer& buffer,
+		VkFormat format,
+		VkDeviceSize offset,
+		VkDeviceSize size)
+		: m_device(device)
 	{
-		info.buffer = buffer;
+		if (buffer.va != 0)
+		{
+			va = buffer.va + offset;
+		}
+
+		info.buffer = buffer.value;
 		info.format = format;
 		info.offset = offset;
 		info.range  = size;
@@ -39,7 +49,13 @@ namespace vk
 		return false;
 	}
 
-	buffer::buffer(const vk::render_device& dev, u64 size, const memory_type_info& memory_type, u32 access_flags, VkBufferUsageFlags usage, VkBufferCreateFlags flags, vmm_allocation_pool allocation_pool)
+	buffer::buffer(
+		const vk::render_device& dev,
+		u64 size, const memory_type_info& memory_type,
+		u32 access_flags,
+		VkBufferUsageFlags usage,
+		VkBufferCreateFlags flags,
+		vmm_allocation_pool allocation_pool)
 		: m_device(dev)
 	{
 		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -62,9 +78,15 @@ namespace vk
 
 		memory = std::make_unique<memory_block>(m_device, memory_reqs.size, memory_reqs.alignment, allocation_type_info, allocation_pool);
 		vkBindBufferMemory(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset());
+
+		init_va();
 	}
 
-	buffer::buffer(const vk::render_device& dev, VkBufferUsageFlags usage, void* host_pointer, u64 size)
+	buffer::buffer(
+		const vk::render_device& dev,
+		VkBufferUsageFlags usage,
+		void* host_pointer,
+		u64 size)
 		: m_device(dev)
 	{
 		info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -110,11 +132,24 @@ namespace vk
 
 		memory = std::make_unique<memory_block_host>(m_device, host_pointer, size, allocation_type_info);
 		CHECK_RESULT(vkBindBufferMemory(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset()));
+
+		init_va();
 	}
 
 	buffer::~buffer()
 	{
 		vkDestroyBuffer(m_device, value, nullptr);
+	}
+
+	void buffer::init_va()
+	{
+		VkBufferDeviceAddressInfo info
+		{
+			.sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+			.pNext = nullptr,
+			.buffer = value
+		};
+		va = vkGetBufferDeviceAddress(m_device, &info);
 	}
 
 	void* buffer::map(u64 offset, u64 size)

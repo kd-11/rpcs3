@@ -574,7 +574,7 @@ VKGSRender::VKGSRender(utils::serial* ar) noexcept : GSRender(ar)
 
 	const auto& memory_map = m_device->get_memory_mapping();
 	null_buffer = std::make_unique<vk::buffer>(*m_device, 32, memory_map.device_local, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_BUFFER_USAGE_UNIFORM_TEXEL_BUFFER_BIT, 0, VMM_ALLOCATION_POOL_UNDEFINED);
-	null_buffer_view = std::make_unique<vk::buffer_view>(*m_device, null_buffer->value, VK_FORMAT_R8_UINT, 0, 32);
+	null_buffer_view = std::make_unique<vk::buffer_view>(*m_device, *null_buffer, VK_FORMAT_R8_UINT, 0, 32);
 
 	spirv::initialize_compiler_context();
 	vk::initialize_pipe_compiler(g_cfg.video.shader_compiler_threads_count);
@@ -2198,7 +2198,7 @@ void VKGSRender::update_vertex_env(u32 id, const vk::vertex_upload_info& vertex_
 
 		const usz alloc_addr = m_vertex_layout_stream_info.offset;
 		const usz view_size = (alloc_addr + m_texbuffer_view_size) > m_vertex_layout_ring_info.size() ? m_vertex_layout_ring_info.size() - alloc_addr : m_texbuffer_view_size;
-		m_vertex_layout_storage = std::make_unique<vk::buffer_view>(*m_device, m_vertex_layout_ring_info.heap->value, VK_FORMAT_R32G32_UINT, alloc_addr, view_size);
+		m_vertex_layout_storage = std::make_unique<vk::buffer_view>(*m_device, *m_vertex_layout_ring_info.heap, VK_FORMAT_R32G32_UINT, alloc_addr, view_size);
 		base_offset = 0;
 	}
 

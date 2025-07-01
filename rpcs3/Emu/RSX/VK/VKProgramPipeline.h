@@ -109,7 +109,30 @@ namespace vk
 			u32 count = 0;
 		};
 
-		using descriptor_slot_t = std::variant<VkDescriptorImageInfo, VkDescriptorBufferInfo, VkBufferView, descriptor_array_ref_t>;
+		struct descriptor_buffer_view_t
+		{
+			VkBufferView view;
+			VkDeviceAddress va;
+			VkDeviceSize length;
+			VkFormat format;
+
+			static inline
+			descriptor_buffer_view_t make(const vk::buffer_view& buffer_view)
+			{
+				return descriptor_buffer_view_t {
+					.view = buffer_view.value,
+					.va = buffer_view.va,
+					.length = buffer_view.info.range,
+					.format = buffer_view.info.format
+				};
+			}
+		};
+
+		using descriptor_slot_t = std::variant<
+			VkDescriptorImageInfo,
+			VkDescriptorBufferInfo,
+			descriptor_buffer_view_t,
+			descriptor_array_ref_t>;
 
 		class descriptor_table_t
 		{
@@ -119,7 +142,7 @@ namespace vk
 			descriptor_table_t() = default;
 			virtual ~descriptor_table_t() = default;
 
-			void init(VkDevice dev);
+			void init(const vk::render_device& dev);
 			void validate() const;
 			virtual void destroy();
 
@@ -167,7 +190,7 @@ namespace vk
 			inline VkDescriptorSetLayout layout() const { return m_descriptor_set_layout; }
 
 		protected:
-			VkDevice m_device = VK_NULL_HANDLE;
+			const vk::render_device* m_device = nullptr;
 			inputs_array_t m_inputs;
 			VkDescriptorSetLayout m_descriptor_set_layout = VK_NULL_HANDLE;
 			rsx::simple_array<VkDescriptorPoolSize> m_descriptor_pool_sizes;
@@ -224,8 +247,8 @@ namespace vk
 		class program
 		{
 		public:
-			program(VkDevice dev, const VkGraphicsPipelineCreateInfo& create_info, const std::vector<program_input> &vertex_inputs, const std::vector<program_input>& fragment_inputs);
-			program(VkDevice dev, const VkComputePipelineCreateInfo& create_info, const std::vector<program_input>& compute_inputs);
+			program(const vk::render_device& dev, const VkGraphicsPipelineCreateInfo& create_info, const std::vector<program_input> &vertex_inputs, const std::vector<program_input>& fragment_inputs);
+			program(const vk::render_device& dev, const VkComputePipelineCreateInfo& create_info, const std::vector<program_input>& compute_inputs);
 			program(const program&) = delete;
 			program(program&& other) = delete;
 			~program();
@@ -238,8 +261,7 @@ namespace vk
 
 			void bind_uniform(const VkDescriptorImageInfo &image_descriptor, u32 set_id, u32 binding_point);
 			void bind_uniform(const VkDescriptorBufferInfo &buffer_descriptor, u32 set_id, u32 binding_point);
-			void bind_uniform(const VkBufferView &buffer_view, u32 set_id, u32 binding_point);
-			void bind_uniform(const VkBufferView &buffer_view, ::glsl::program_domain domain, program_input_type type, const std::string &binding_name);
+			void bind_uniform(const vk::buffer_view& buffer_view, u32 set_id, u32 binding_point);
 
 			void bind_uniform_array(const VkDescriptorImageInfo* image_descriptors, int count, u32 set_id, u32 binding_point);
 
@@ -247,13 +269,14 @@ namespace vk
 			inline VkPipeline handle() const { return ensure(m_pipeline)->handle(); }
 
 		protected:
-			VkDevice m_device = VK_NULL_HANDLE;
+			const vk::render_device &m_device;
 			VkPipelineLayout m_pipeline_layout = VK_NULL_HANDLE;
 			std::unique_ptr<vk::pipeline> m_pipeline;
 			std::variant<VkGraphicsPipelineCreateInfo, VkComputePipelineCreateInfo> m_info;
 
 			std::array<std::unique_ptr<descriptor_table_t>, binding_set_index_max_enum> m_sets;
 			bool m_linked = false;
+			bool m_use_descriptor_buffers = false;
 
 			void init();
 			void create_pipeline_layout();

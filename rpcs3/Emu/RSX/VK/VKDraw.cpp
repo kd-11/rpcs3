@@ -811,8 +811,8 @@ void VKGSRender::emit_geometry(u32 sub_index)
 		m_current_command_buffer->flags |= (vk::command_buffer::cb_has_occlusion_task | vk::command_buffer::cb_has_open_query);
 	}
 
-	auto persistent_buffer = m_persistent_attribute_storage ? m_persistent_attribute_storage->value : null_buffer_view->value;
-	auto volatile_buffer = m_volatile_attribute_storage ? m_volatile_attribute_storage->value : null_buffer_view->value;
+	auto& persistent_buffer = m_persistent_attribute_storage ? m_persistent_attribute_storage : null_buffer_view;
+	auto& volatile_buffer = m_volatile_attribute_storage ? m_volatile_attribute_storage : null_buffer_view;
 	bool update_descriptors = false;
 
 	if (m_current_draw.subdraw_id == 0)
@@ -841,9 +841,9 @@ void VKGSRender::emit_geometry(u32 sub_index)
 	ensure(m_vertex_layout_storage);
 	if (update_descriptors)
 	{
-		m_program->bind_uniform(persistent_buffer, vk::glsl::binding_set_index_vertex, m_vs_binding_table->vertex_buffers_location);
-		m_program->bind_uniform(volatile_buffer, vk::glsl::binding_set_index_vertex, m_vs_binding_table->vertex_buffers_location + 1);
-		m_program->bind_uniform(m_vertex_layout_storage->value, vk::glsl::binding_set_index_vertex, m_vs_binding_table->vertex_buffers_location + 2);
+		m_program->bind_uniform(*persistent_buffer, vk::glsl::binding_set_index_vertex, m_vs_binding_table->vertex_buffers_location);
+		m_program->bind_uniform(*volatile_buffer, vk::glsl::binding_set_index_vertex, m_vs_binding_table->vertex_buffers_location + 1);
+		m_program->bind_uniform(*m_vertex_layout_storage, vk::glsl::binding_set_index_vertex, m_vs_binding_table->vertex_buffers_location + 2);
 	}
 
 	bool reload_state = (!m_current_draw.subdraw_id++);

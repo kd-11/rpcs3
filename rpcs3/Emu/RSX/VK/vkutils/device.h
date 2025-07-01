@@ -67,6 +67,14 @@ namespace vk
 		operator bool() const { return supported; }
 	};
 
+	struct descriptor_buffer_features
+	{
+		bool supported;
+		VkPhysicalDeviceDescriptorBufferPropertiesEXT properties;
+
+		operator bool() const { return supported; }
+	};
+
 	class physical_device
 	{
 		VkInstance parent = VK_NULL_HANDLE;
@@ -82,6 +90,7 @@ namespace vk
 
 		u32 descriptor_max_draw_calls = DESCRIPTOR_MAX_DRAW_CALLS;
 		descriptor_indexing_features descriptor_indexing_support{};
+		descriptor_buffer_features descriptor_buffer_support{};
 
 		custom_border_color_features custom_border_color_support{};
 
@@ -100,7 +109,6 @@ namespace vk
 			bool unrestricted_depth_range = false;
 			bool extended_device_fault = false;
 			bool texture_compression_bc = false;
-			bool descriptor_buffer = false;
 		} optional_features_support;
 
 		friend class render_device;
@@ -170,7 +178,8 @@ namespace vk
 		const gpu_formats_support& get_formats_support() const { return m_formats_support; }
 		const gpu_shader_types_support& get_shader_types_support() const { return pgpu->shader_types_support; }
 		const custom_border_color_features& get_custom_border_color_support() const { return pgpu->custom_border_color_support; }
-		const multidraw_features get_multidraw_support() const { return pgpu->multidraw_support; }
+		const multidraw_features& get_multidraw_support() const { return pgpu->multidraw_support; }
+		const descriptor_buffer_features& get_descriptor_buffer_support() const { return pgpu->descriptor_buffer_support; }
 
 		bool get_shader_stencil_export_support() const { return pgpu->optional_features_support.shader_stencil_export; }
 		bool get_depth_bounds_support() const { return pgpu->features.depthBounds != VK_FALSE; }
@@ -187,7 +196,6 @@ namespace vk
 		bool get_synchronization2_support() const { return pgpu->optional_features_support.synchronization_2; }
 		bool get_extended_device_fault_support() const { return pgpu->optional_features_support.extended_device_fault; }
 		bool get_texture_compression_bc_support() const { return pgpu->optional_features_support.texture_compression_bc; }
-		bool get_descriptor_buffer_support() const { return pgpu->optional_features_support.descriptor_buffer; }
 
 		u64 get_descriptor_update_after_bind_support() const { return pgpu->descriptor_indexing_support.update_after_bind_mask; }
 		u32 get_descriptor_max_draw_calls() const { return pgpu->descriptor_max_draw_calls; }

@@ -5,11 +5,6 @@
 
 #include "Emu/RSX/Program/SPIRVCommon.h"
 
-namespace vk
-{
-	extern const vk::render_device* get_current_renderer();
-}
-
 namespace vk::glsl
 {
 	using namespace ::glsl;
@@ -32,10 +27,26 @@ namespace vk::glsl
 			ptr->range == b.range;
 	}
 
-	bool operator == (const descriptor_slot_t& a, const VkBufferView& b)
+	// FIXME: Kill buffer view usage completely, this is nasty
+	bool operator == (const descriptor_slot_t& a, const vk::buffer_view& b)
 	{
-		const auto ptr = std::get_if<VkBufferView>(&a);
-		return !!ptr && *ptr == b;
+		const auto ptr = std::get_if<descriptor_buffer_view_t>(&a);
+		if (!ptr)
+		{
+			return false;
+		}
+
+		// Take advantage of the fact that we have a buffer-view already.
+		if (ptr->view == b.value)
+		{
+			return true;
+		}
+
+		// VA check.
+		return
+			ptr->va == b.va &&
+			ptr->length == b.info.range &&
+			ptr->format == b.info.format;
 	}
 
 	VkDescriptorType to_descriptor_type(program_input_type type)
@@ -109,16 +120,24 @@ namespace vk::glsl
 	void program::init()
 	{
 		m_linked = false;
+		m_use_descriptor_buffers = m_device.get_descriptor_buffer_support();
 
 		// Initialize all sets with legacy binding table for now
 		for (auto& set : m_sets)
 		{
-			set = std::make_unique<descriptor_table_legacy_t>();
+			if (m_use_descriptor_buffers)
+			{
+				set = std::make_unique<descriptor_table_buffer_t>();
+			}
+			else
+			{
+				set = std::make_unique<descriptor_table_legacy_t>();
+			}
 		}
 	}
 
 	program::program(
-		VkDevice dev,
+		const vk::render_device& dev,
 		const VkGraphicsPipelineCreateInfo& create_info,
 		const std::vector<program_input> &vertex_inputs,
 		const std::vector<program_input>& fragment_inputs)
@@ -131,7 +150,7 @@ namespace vk::glsl
 	}
 
 	program::program(
-		VkDevice dev,
+		const vk::render_device& dev,
 		const VkComputePipelineCreateInfo& create_info,
 		const std::vector<program_input>& compute_inputs)
 		: m_device(dev), m_info(create_info)
@@ -189,7 +208,7 @@ namespace vk::glsl
 			auto& sink = m_sets[0];
 			for (auto& set : m_sets)
 			{
-				if (&set == &sink)
+				if (set == sink)
 				{
 					continue;
 				}
@@ -305,14 +324,16 @@ namespace vk::glsl
 		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, buffer_descriptor);
 	}
 
-	void program::bind_uniform(const VkBufferView &buffer_view, u32 set_id, u32 binding_point)
+	void program::bind_uniform(const vk::buffer_view& buffer_view, u32 set_id, u32 binding_point)
 	{
 		if (m_sets[set_id]->bind_slots(binding_point) == buffer_view)
 		{
 			return;
 		}
 
-		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, buffer_view);
+		const auto payload = descriptor_buffer_view_t::make(buffer_view);
+		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, payload);
+		return;
 	}
 
 	void program::bind_uniform_array(const VkDescriptorImageInfo* image_descriptors, int count, u32 set_id, u32 binding_point)
@@ -395,7 +416,7 @@ namespace vk::glsl
 
 		if (m_descriptor_set_layout)
 		{
-			vkDestroyDescriptorSetLayout(m_device, m_descriptor_set_layout, nullptr);
+			vkDestroyDescriptorSetLayout(*m_device, m_descriptor_set_layout, nullptr);
 		}
 
 		m_device = VK_NULL_HANDLE;
@@ -418,9 +439,9 @@ namespace vk::glsl
 		descriptor_table_t::destroy();
 	}
 
-	void descriptor_table_t::init(VkDevice dev)
+	void descriptor_table_t::init(const vk::render_device& dev)
 	{
-		m_device = dev;
+		m_device = &dev;
 
 		size_t bind_slots_count = 0;
 		for (auto& type_arr : m_inputs)
@@ -438,87 +459,6 @@ namespace vk::glsl
 
 		m_descriptors_dirty.resize(bind_slots_count);
 		std::fill(m_descriptors_dirty.begin(), m_descriptors_dirty.end(), false);
-	}
-
-	VkDescriptorSet descriptor_table_legacy_t::allocate_descriptor_set()
-	{
-		if (!m_descriptor_pool)
-		{
-			create_descriptor_pool();
-		}
-
-		return m_descriptor_pool->allocate(m_descriptor_set_layout);
-	}
-
-	VkDescriptorSet descriptor_table_legacy_t::commit(const vk::command_buffer&)
-	{
-		if (!m_descriptor_set)
-		{
-			m_any_descriptors_dirty = true;
-			std::fill(m_descriptors_dirty.begin(), m_descriptors_dirty.end(), false);
-		}
-
-		// Check if we need to actually open a new set
-		if (!m_any_descriptors_dirty)
-		{
-			return m_descriptor_set.value();
-		}
-
-		auto push_descriptor_slot = [this](unsigned idx)
-		{
-			const auto& slot = m_descriptor_slots[idx];
-			const VkDescriptorType type = m_descriptor_types[idx];
-			if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
-			{
-				m_descriptor_set.push(*ptr, type, idx);
-				return;
-			}
-
-			if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
-			{
-				m_descriptor_set.push(*ptr, type, idx);
-				return;
-			}
-
-			if (auto ptr = std::get_if<VkBufferView>(&slot))
-			{
-				m_descriptor_set.push(*ptr, type, idx);
-				return;
-			}
-
-			if (auto ptr = std::get_if<descriptor_array_ref_t>(&slot))
-			{
-				ensure(type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // Only type supported at the moment
-				ensure((ptr->first + ptr->count) <= m_scratch_images_array.size());
-				m_descriptor_set.push(m_scratch_images_array.data() + ptr->first, ptr->count, type, idx);
-				return;
-			}
-
-			fmt::throw_exception("Unexpected descriptor structure at index %u", idx);
-		};
-
-		m_descriptor_set = allocate_descriptor_set();
-
-		for (unsigned i = 0; i < m_descriptor_slots.size(); ++i)
-		{
-			if (m_descriptors_dirty[i])
-			{
-				// Push
-				push_descriptor_slot(i);
-				m_descriptors_dirty[i] = false;
-				continue;
-			}
-
-			// We should copy here if possible.
-			// Without descriptor_buffer, the most efficient option is to just use the normal bind logic due to the pointer-based nature of the descriptor inputs and no stride.
-			push_descriptor_slot(i);
-		}
-
-		m_descriptor_set.on_bind();
-		m_any_descriptors_dirty = false;
-		m_scratch_images_array.clear();
-
-		return m_descriptor_set.value();
 	}
 
 	void descriptor_table_t::create_descriptor_set_layout()
@@ -597,7 +537,7 @@ namespace vk::glsl
 	void descriptor_table_legacy_t::create_descriptor_pool()
 	{
 		m_descriptor_pool = std::make_unique<descriptor_pool>();
-		m_descriptor_pool->create(*vk::get_current_renderer(), m_descriptor_pool_sizes);
+		m_descriptor_pool->create(*m_device, m_descriptor_pool_sizes);
 	}
 
 	void descriptor_table_t::validate() const
@@ -618,6 +558,283 @@ namespace vk::glsl
 				ensure(taken_locations.find(input.location) == taken_locations.end(), "Overlapping input locations found.");
 				taken_locations.insert(input.location);
 			}
+		}
+	}
+
+	VkDescriptorSet descriptor_table_legacy_t::allocate_descriptor_set()
+	{
+		if (!m_descriptor_pool)
+		{
+			create_descriptor_pool();
+		}
+
+		return m_descriptor_pool->allocate(m_descriptor_set_layout);
+	}
+
+	VkDescriptorSet descriptor_table_legacy_t::commit(const vk::command_buffer&)
+	{
+		if (!m_descriptor_set)
+		{
+			m_any_descriptors_dirty = true;
+			std::fill(m_descriptors_dirty.begin(), m_descriptors_dirty.end(), false);
+		}
+
+		// Check if we need to actually open a new set
+		if (!m_any_descriptors_dirty)
+		{
+			return m_descriptor_set.value();
+		}
+
+		auto push_descriptor_slot = [this](unsigned idx)
+		{
+			const auto& slot = m_descriptor_slots[idx];
+			const VkDescriptorType type = m_descriptor_types[idx];
+			if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
+			{
+				m_descriptor_set.push(*ptr, type, idx);
+				return;
+			}
+
+			if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
+			{
+				m_descriptor_set.push(*ptr, type, idx);
+				return;
+			}
+
+			if (auto ptr = std::get_if<descriptor_buffer_view_t>(&slot))
+			{
+				m_descriptor_set.push(ptr->view, type, idx);
+				return;
+			}
+
+			if (auto ptr = std::get_if<descriptor_array_ref_t>(&slot))
+			{
+				ensure(type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // Only type supported at the moment
+				ensure((ptr->first + ptr->count) <= m_scratch_images_array.size());
+				m_descriptor_set.push(m_scratch_images_array.data() + ptr->first, ptr->count, type, idx);
+				return;
+			}
+
+			fmt::throw_exception("Unexpected descriptor structure at index %u", idx);
+		};
+
+		m_descriptor_set = allocate_descriptor_set();
+
+		for (unsigned i = 0; i < m_descriptor_slots.size(); ++i)
+		{
+			if (m_descriptors_dirty[i])
+			{
+				// Push
+				push_descriptor_slot(i);
+				m_descriptors_dirty[i] = false;
+				continue;
+			}
+
+			// We should copy here if possible.
+			// Without descriptor_buffer, the most efficient option is to just use the normal bind logic due to the pointer-based nature of the descriptor inputs and no stride.
+			push_descriptor_slot(i);
+		}
+
+		m_descriptor_set.on_bind();
+		m_any_descriptors_dirty = false;
+		m_scratch_images_array.clear();
+
+		return m_descriptor_set.value();
+	}
+
+	VkDescriptorSet descriptor_table_buffer_t::commit(const vk::command_buffer& cmd)
+	{
+		if (!m_bo)
+		{
+			initialize_bo();
+
+			m_any_descriptors_dirty = true;
+			std::fill(m_descriptors_dirty.begin(), m_descriptors_dirty.end(), true);
+		}
+
+		// Check if we need to actually open a new set
+		if (!m_any_descriptors_dirty)
+		{
+			return VK_NULL_HANDLE;
+		}
+
+		auto push_descriptor_slot = [this, &cmd](unsigned idx)
+		{
+			const auto& slot = m_descriptor_slots[idx];
+			const VkDescriptorType type = m_descriptor_types[idx];
+			if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
+			{
+				vkCmdUpdateBuffer(
+					cmd,
+					m_bo->value,
+					m_descriptor_offsets[idx],
+					sizeof(VkDescriptorImageInfo), ptr);
+				return;
+			}
+
+			if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
+			{
+				vkCmdUpdateBuffer(
+					cmd,
+					m_bo->value,
+					m_descriptor_offsets[idx],
+					sizeof(VkDescriptorBufferInfo),
+					ptr);
+				return;
+			}
+
+			if (auto ptr = std::get_if<descriptor_buffer_view_t>(&slot))
+			{
+				VkDescriptorAddressInfoEXT data
+				{
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
+					.address = ptr->va,
+					.range = ptr->length,
+					.format = ptr->format
+				};
+				vkCmdUpdateBuffer(
+					cmd,
+					m_bo->value,
+					m_descriptor_offsets[idx],
+					sizeof(VkDescriptorAddressInfoEXT),
+					&data);
+				return;
+			}
+
+			if (auto ptr = std::get_if<descriptor_array_ref_t>(&slot))
+			{
+				ensure(type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // Only type supported at the moment
+				ensure((ptr->first + ptr->count) <= m_scratch_images_array.size());
+				vkCmdUpdateBuffer(
+					cmd,
+					m_bo->value,
+					m_descriptor_offsets[idx],
+					sizeof(VkDescriptorImageInfo) * ptr->count,
+					m_scratch_images_array.data() + ptr->first);
+				return;
+			}
+
+			fmt::throw_exception("Unexpected descriptor structure at index %u", idx);
+		};
+
+		for (unsigned i = 0; i < m_descriptor_slots.size(); ++i)
+		{
+			if (!m_descriptors_dirty[i])
+			{
+				// Nothing
+				continue;
+			}
+
+			{
+				// Push
+				push_descriptor_slot(i);
+				m_descriptors_dirty[i] = false;
+				continue;
+			}
+
+			// We should copy here if possible.
+			// Without descriptor_buffer, the most efficient option is to just use the normal bind logic due to the pointer-based nature of the descriptor inputs and no stride.
+			push_descriptor_slot(i);
+		}
+
+		m_any_descriptors_dirty = false;
+		m_scratch_images_array.clear();
+
+		return VK_NULL_HANDLE;
+	}
+
+	void descriptor_table_buffer_t::initialize_bo()
+	{
+		const auto device_props = m_device->get_descriptor_buffer_support();
+
+		auto get_descriptor_size = [&device_props](VkDescriptorType type, size_t count)
+		{
+			switch (type)
+			{
+			case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+				return device_props.properties.combinedImageSamplerDescriptorSize * count;
+				break;
+			case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+				return device_props.properties.storageImageDescriptorSize * count;
+				break;
+			case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+				return device_props.properties.robustUniformBufferDescriptorSize * count;
+				break;
+			case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+				return device_props.properties.robustStorageBufferDescriptorSize * count;
+				break;
+			case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+				return device_props.properties.robustUniformTexelBufferDescriptorSize * count;
+				break;
+			case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+				return device_props.properties.inputAttachmentDescriptorSize * count;
+				break;
+			default:
+				fmt::throw_exception("Unhandled descriptor type %d", static_cast<int>(type));
+			}
+		};
+
+		auto get_descriptor_pointer = [&device_props](const VkDescriptorGetInfoEXT& info) -> const void*
+		{
+			switch (info.type)
+			{
+			case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+				return info.data.pCombinedImageSampler;
+			case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+				return info.data.pStorageImage;
+			case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+				return info.data.pUniformBuffer;
+			case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+				return info.data.pStorageBuffer;
+			case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+				return info.data.pUniformTexelBuffer;
+			case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+				return info.data.pInputAttachmentImage;
+			default:
+				fmt::throw_exception("Unhandled descriptor type %d", static_cast<int>(info.type));
+			}
+		};
+
+		// First, figure out the descriptor sizes.
+		size_t required_size = 0;
+		for (const auto& type_size : m_descriptor_pool_sizes)
+		{
+			required_size += get_descriptor_size(type_size.type, type_size.descriptorCount);
+		}
+
+		// Next, allocate the memory. Round up to nearest 256 just because.
+		const size_t bo_size = utils::align(required_size, 256u);
+		m_bo = std::make_unique<vk::buffer>(
+			*m_device,
+			bo_size,
+			m_device->get_memory_mapping().device_bar,
+			0,
+			VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT,
+			0,
+			VMM_ALLOCATION_POOL_SYSTEM);
+
+		char* buf = reinterpret_cast<char*>(m_bo->map(0, VK_WHOLE_SIZE));
+		const auto va_base = reinterpret_cast<uintptr_t>(buf);
+		const auto va_end = va_base + bo_size;
+
+		// Initialize offsets
+		for (unsigned i = 0; i < m_descriptor_slots.size(); ++i)
+		{
+			VkDeviceSize binding_offset = UINT64_MAX;
+			VkDescriptorGetInfoEXT info
+			{
+				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
+				.type = m_descriptor_types[i]
+			};
+
+			_vkGetDescriptorSetLayoutBindingOffsetEXT(*m_device, m_descriptor_set_layout, i, &binding_offset);
+			ensure(binding_offset != UINT64_MAX);
+
+			_vkGetDescriptorEXT(*m_device, &info, get_descriptor_size(m_descriptor_types[i], 1), buf + binding_offset);
+			const auto write_offset = reinterpret_cast<uintptr_t>(get_descriptor_pointer(info));
+
+			ensure(write_offset >= va_base && write_offset < va_end);
+			m_descriptor_offsets[i] = (write_offset - va_base);
 		}
 	}
 }

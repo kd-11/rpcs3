@@ -666,7 +666,7 @@ namespace vk::glsl
 			const VkDescriptorType type = m_descriptor_types[idx];
 
 			VkDescriptorAddressInfoEXT addr_info { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT };
-			VkDescriptorGetInfoEXT get_info { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT };
+			VkDescriptorGetInfoEXT get_info{ .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT, .type = type, .data = {} };
 			m_scratch_buffer.resize(m_descriptor_blob_sizes[idx]);
 
 			if (auto ptr = std::get_if<descriptor_array_ref_t>(&slot))

@@ -35,6 +35,7 @@ namespace vk
 		VkPhysicalDeviceBorderColorSwizzleFeaturesEXT border_color_swizzle_info{};
 		VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
 		VkPhysicalDeviceMultiDrawFeaturesEXT multidraw_info{};
+		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_info{};
 
 		// Optional features
 		if (device_extensions.is_supported(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME))
@@ -79,6 +80,13 @@ namespace vk
 			features2.pNext      = &multidraw_info;
 		}
 
+		if (device_extensions.is_supported(VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME))
+		{
+			descriptor_buffer_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
+			descriptor_buffer_info.pNext = features2.pNext;
+			features2.pNext              = &descriptor_buffer_info;
+		}
+
 		vkGetPhysicalDeviceFeatures2(dev, &features2);
 
 		shader_types_support.allow_float64 = !!features2.features.shaderFloat64;
@@ -92,7 +100,7 @@ namespace vk
 		multidraw_support.supported = !!multidraw_info.multiDraw;
 		multidraw_support.max_batch_size = 65536;
 
-		descriptor_buffer_support.supported = !!features12.bufferDeviceAddress;
+		descriptor_buffer_support.supported = !!descriptor_buffer_info.descriptorBuffer;
 
 		optional_features_support.barycentric_coords  = !!shader_barycentric_info.fragmentShaderBarycentric;
 		optional_features_support.framebuffer_loops   = !!fbo_loops_info.attachmentFeedbackLoopLayout;
@@ -570,6 +578,11 @@ namespace vk
 			requested_extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 		}
 
+		if (pgpu->descriptor_buffer_support)
+		{
+			requested_extensions.push_back(VK_EXT_DESCRIPTOR_BUFFER_EXTENSION_NAME);
+		}
+
 		enabled_features.robustBufferAccess = VK_TRUE;
 		enabled_features.fullDrawIndexUint32 = VK_TRUE;
 		enabled_features.independentBlend = VK_TRUE;
@@ -734,8 +747,15 @@ namespace vk
 #undef SET_DESCRIPTOR_BITFLAG
 		}
 
+		VkPhysicalDeviceDescriptorBufferFeaturesEXT descriptor_buffer_features{};
 		if (pgpu->descriptor_buffer_support)
 		{
+			descriptor_buffer_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_BUFFER_FEATURES_EXT;
+			descriptor_buffer_features.descriptorBuffer = VK_TRUE;
+			descriptor_buffer_features.pNext = const_cast<void*>(device.pNext);
+			device.pNext = &descriptor_buffer_features;
+
+			// Force-enable BDA
 			features12.bufferDeviceAddress = VK_TRUE;
 		}
 

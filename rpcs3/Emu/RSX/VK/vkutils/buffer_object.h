@@ -63,4 +63,29 @@ namespace vk
 	private:
 		VkDevice m_device;
 	};
+
+	struct buffer_reference
+	{
+		VkDeviceAddress va = 0;
+		VkBuffer value = VK_NULL_HANDLE;
+		VkDeviceSize offset = 0;
+		VkDeviceSize range = 0;
+
+		buffer_reference() = default;
+
+		buffer_reference(const vk::buffer* buf, VkDeviceSize offset, VkDeviceSize range)
+			: va(buf->va + offset)
+			, value(buf->value)
+			, offset(offset)
+			, range(range == VK_WHOLE_SIZE ? buf->size() : range)
+		{};
+
+		buffer_reference(const vk::buffer& buf, VkDeviceSize offset, VkDeviceSize range)
+			: buffer_reference(&buf, offset, range)
+		{};
+
+		buffer_reference(const std::unique_ptr<vk::buffer>& buf, VkDeviceSize offset, VkDeviceSize range)
+			: buffer_reference(buf.get(), offset, range)
+		{};
+	};
 }

@@ -20,13 +20,12 @@ namespace vk::glsl
 			ptr->imageLayout == b.imageLayout;
 	}
 
-	bool operator == (const descriptor_slot_t& a, const VkDescriptorBufferInfo& b)
+	bool operator == (const descriptor_slot_t& a, const buffer_reference& b)
 	{
-		const auto ptr = std::get_if<VkDescriptorBufferInfo>(&a);
+		const auto ptr = std::get_if<descriptor_buffer_view_t>(&a);
 		return !!ptr &&
-			ptr->buffer == b.buffer &&
-			ptr->offset == b.offset &&
-			ptr->range == b.range;
+			ptr->va == b.va &&
+			ptr->length == b.range;
 	}
 
 	// FIXME: Kill buffer view usage completely, this is nasty
@@ -316,14 +315,15 @@ namespace vk::glsl
 		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, image_descriptor);
 	}
 
-	void program::bind_uniform(const VkDescriptorBufferInfo &buffer_descriptor, u32 set_id, u32 binding_point)
+	void program::bind_uniform(const vk::buffer_reference& buffer_reference, u32 set_id, u32 binding_point)
 	{
-		if (m_sets[set_id]->bind_slots(binding_point) == buffer_descriptor)
+		if (m_sets[set_id]->bind_slots(binding_point) == buffer_reference)
 		{
 			return;
 		}
 
-		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, buffer_descriptor);
+		const auto payload = descriptor_buffer_view_t::make(buffer_reference);
+		m_sets[set_id]->notify_descriptor_slot_updated(binding_point, payload);
 	}
 
 	void program::bind_uniform(const vk::buffer_view& buffer_view, u32 set_id, u32 binding_point)
@@ -597,15 +597,15 @@ namespace vk::glsl
 				return;
 			}
 
-			if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
-			{
-				m_descriptor_set.push(*ptr, type, idx);
-				return;
-			}
-
 			if (auto ptr = std::get_if<descriptor_buffer_view_t>(&slot))
 			{
-				m_descriptor_set.push(ptr->view, type, idx);
+				if (ptr->view)
+				{
+					m_descriptor_set.push(ptr->view, type, idx);
+					return;
+				}
+
+				m_descriptor_set.push(static_cast<VkDescriptorBufferInfo>(*ptr), type, idx);
 				return;
 			}
 
@@ -660,63 +660,57 @@ namespace vk::glsl
 			return VK_NULL_HANDLE;
 		}
 
-		auto push_descriptor_slot = [this, &cmd](unsigned idx)
+		auto push_descriptor_slot = [&](unsigned idx)
 		{
 			const auto& slot = m_descriptor_slots[idx];
 			const VkDescriptorType type = m_descriptor_types[idx];
-			if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
-			{
-				vkCmdUpdateBuffer(
-					cmd,
-					m_bo->value,
-					m_descriptor_offsets[idx],
-					sizeof(VkDescriptorImageInfo), ptr);
-				return;
-			}
 
-			if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
-			{
-				vkCmdUpdateBuffer(
-					cmd,
-					m_bo->value,
-					m_descriptor_offsets[idx],
-					sizeof(VkDescriptorBufferInfo),
-					ptr);
-				return;
-			}
-
-			if (auto ptr = std::get_if<descriptor_buffer_view_t>(&slot))
-			{
-				VkDescriptorAddressInfoEXT data
-				{
-					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
-					.address = ptr->va,
-					.range = ptr->length,
-					.format = ptr->format
-				};
-				vkCmdUpdateBuffer(
-					cmd,
-					m_bo->value,
-					m_descriptor_offsets[idx],
-					sizeof(VkDescriptorAddressInfoEXT),
-					&data);
-				return;
-			}
+			VkDescriptorAddressInfoEXT addr_info { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT };
+			VkDescriptorGetInfoEXT get_info { .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT };
+			m_scratch_buffer.resize(m_descriptor_blob_sizes[idx]);
 
 			if (auto ptr = std::get_if<descriptor_array_ref_t>(&slot))
 			{
-				ensure(type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER); // Only type supported at the moment
-				ensure((ptr->first + ptr->count) <= m_scratch_images_array.size());
-				vkCmdUpdateBuffer(
-					cmd,
-					m_bo->value,
-					m_descriptor_offsets[idx],
-					sizeof(VkDescriptorImageInfo) * ptr->count,
-					m_scratch_images_array.data() + ptr->first);
-				return;
+				fmt::format("Unimplemented!");
 			}
 
-			fmt::throw_exception("Unexpected descriptor structure at index %u", idx);
+			switch (type)
+			{
+			case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
+				get_info.data.pCombinedImageSampler = ensure(std::get_if<VkDescriptorImageInfo>(&slot));
+				break;
+			case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+				get_info.data.pStorageImage = ensure(std::get_if<VkDescriptorImageInfo>(&slot));
+				break;
+			case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
+				addr_info = static_cast<VkDescriptorAddressInfoEXT>(*ensure(std::get_if<descriptor_buffer_view_t>(&slot)));
+				get_info.data.pUniformBuffer = &addr_info;
+				break;
+			case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+				addr_info = static_cast<VkDescriptorAddressInfoEXT>(*ensure(std::get_if<descriptor_buffer_view_t>(&slot)));
+				get_info.data.pUniformBuffer = &addr_info;
+				break;
+			case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
+				addr_info = static_cast<VkDescriptorAddressInfoEXT>(*ensure(std::get_if<descriptor_buffer_view_t>(&slot)));
+				get_info.data.pUniformBuffer = &addr_info;
+				break;
+			case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
+				get_info.data.pInputAttachmentImage = ensure(std::get_if<VkDescriptorImageInfo>(&slot));
+				break;
+			default:
+				fmt::throw_exception("Unhandled descriptor type %d", static_cast<int>(type));
+			}
+
+			// Retrieve raw bytes
+			_vkGetDescriptorEXT(*m_device, &get_info, m_descriptor_blob_sizes[idx], m_scratch_buffer.data());
+
+			// Write to the descriptor buffer
+			vkCmdUpdateBuffer(
+				cmd,
+				m_bo->value,
+				m_descriptor_offsets[idx],
+				m_descriptor_blob_sizes[idx],
+				m_scratch_buffer.data());
 		};
 
 		for (unsigned i = 0; i < m_descriptor_slots.size(); ++i)
@@ -755,45 +749,18 @@ namespace vk::glsl
 			{
 			case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
 				return device_props.properties.combinedImageSamplerDescriptorSize * count;
-				break;
 			case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
 				return device_props.properties.storageImageDescriptorSize * count;
-				break;
 			case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
 				return device_props.properties.robustUniformBufferDescriptorSize * count;
-				break;
 			case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
 				return device_props.properties.robustStorageBufferDescriptorSize * count;
-				break;
 			case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
 				return device_props.properties.robustUniformTexelBufferDescriptorSize * count;
-				break;
 			case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
 				return device_props.properties.inputAttachmentDescriptorSize * count;
-				break;
 			default:
 				fmt::throw_exception("Unhandled descriptor type %d", static_cast<int>(type));
-			}
-		};
-
-		auto get_descriptor_pointer = [&device_props](const VkDescriptorGetInfoEXT& info) -> const void*
-		{
-			switch (info.type)
-			{
-			case VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:
-				return info.data.pCombinedImageSampler;
-			case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
-				return info.data.pStorageImage;
-			case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-				return info.data.pUniformBuffer;
-			case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
-				return info.data.pStorageBuffer;
-			case VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER:
-				return info.data.pUniformTexelBuffer;
-			case VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT:
-				return info.data.pInputAttachmentImage;
-			default:
-				fmt::throw_exception("Unhandled descriptor type %d", static_cast<int>(info.type));
 			}
 		};
 
@@ -809,34 +776,25 @@ namespace vk::glsl
 		m_bo = std::make_unique<vk::buffer>(
 			*m_device,
 			bo_size,
-			m_device->get_memory_mapping().device_bar,
+			m_device->get_memory_mapping().host_visible_coherent,
 			0,
 			VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT,
 			0,
 			VMM_ALLOCATION_POOL_SYSTEM);
 
-		char* buf = reinterpret_cast<char*>(m_bo->map(0, VK_WHOLE_SIZE));
-		const auto va_base = reinterpret_cast<uintptr_t>(buf);
-		const auto va_end = va_base + bo_size;
+		// Initialize internals
+		m_descriptor_blob_sizes.resize(m_descriptor_slots.size());
+		m_descriptor_offsets.resize(m_descriptor_slots.size());
 
 		// Initialize offsets
 		for (unsigned i = 0; i < m_descriptor_slots.size(); ++i)
 		{
 			VkDeviceSize binding_offset = UINT64_MAX;
-			VkDescriptorGetInfoEXT info
-			{
-				.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_GET_INFO_EXT,
-				.type = m_descriptor_types[i]
-			};
-
 			_vkGetDescriptorSetLayoutBindingOffsetEXT(*m_device, m_descriptor_set_layout, i, &binding_offset);
+
 			ensure(binding_offset != UINT64_MAX);
-
-			_vkGetDescriptorEXT(*m_device, &info, get_descriptor_size(m_descriptor_types[i], 1), buf + binding_offset);
-			const auto write_offset = reinterpret_cast<uintptr_t>(get_descriptor_pointer(info));
-
-			ensure(write_offset >= va_base && write_offset < va_end);
-			m_descriptor_offsets[i] = (write_offset - va_base);
+			m_descriptor_offsets[i] = binding_offset;
+			m_descriptor_blob_sizes[i] = get_descriptor_size(m_descriptor_types[i], 1); // TODO: Arrays
 		}
 	}
 }

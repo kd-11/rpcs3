@@ -70,7 +70,7 @@ namespace vk
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 		VkFlags mm_flags = 0;
-		if (usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS)
+		if ((usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS) && dev.get_descriptor_buffer_support())
 		{
 			info.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 			mm_flags |= VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;
@@ -108,7 +108,7 @@ namespace vk
 		info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
 		VkFlags mm_flags = 0;
-		if (usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS)
+		if ((usage & BUFFER_RESOURCE_BINDING_USAGE_FLAGS) && dev.get_descriptor_buffer_support())
 		{
 			info.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
 			mm_flags |= VK_MEMORY_ALLOCATE_DEVICE_ADDRESS_BIT;

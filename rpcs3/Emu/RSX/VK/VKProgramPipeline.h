@@ -3,6 +3,7 @@
 #include "VulkanAPI.h"
 #include "Emu/RSX/Program/GLSLTypes.h"
 
+#include "vkutils/buffer_object.h"
 #include "vkutils/descriptors.h"
 #include "vkutils/shader_program.h"
 
@@ -111,10 +112,31 @@ namespace vk
 
 		struct descriptor_buffer_view_t
 		{
-			VkBufferView view;
-			VkDeviceAddress va;
-			VkDeviceSize length;
-			VkFormat format;
+			VkBufferView view = VK_NULL_HANDLE;
+			VkBuffer buffer = VK_NULL_HANDLE;
+			VkDeviceAddress va = 0;
+			VkDeviceSize offset = 0;
+			VkDeviceSize length = 0;
+			VkFormat format = VK_FORMAT_UNDEFINED;
+
+			operator VkDescriptorAddressInfoEXT() const
+			{
+				return {
+					.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_ADDRESS_INFO_EXT,
+					.address = va,
+					.range = length,
+					.format = format
+				};
+			}
+
+			operator VkDescriptorBufferInfo() const
+			{
+				return {
+					.buffer = buffer,
+					.offset = offset,
+					.range = length
+				};
+			}
 
 			static inline
 			descriptor_buffer_view_t make(const vk::buffer_view& buffer_view)
@@ -126,11 +148,21 @@ namespace vk
 					.format = buffer_view.info.format
 				};
 			}
+
+			static inline
+			descriptor_buffer_view_t make(const vk::buffer_reference& buffer_ref)
+			{
+				return descriptor_buffer_view_t {
+					.buffer = buffer_ref.value,
+					.va = buffer_ref.va,
+					.offset = buffer_ref.offset,
+					.length = buffer_ref.range
+				};
+			}
 		};
 
 		using descriptor_slot_t = std::variant<
 			VkDescriptorImageInfo,
-			VkDescriptorBufferInfo,
 			descriptor_buffer_view_t,
 			descriptor_array_ref_t>;
 
@@ -225,7 +257,9 @@ namespace vk
 
 		protected:
 			std::unique_ptr<vk::buffer> m_bo;
-			rsx::simple_array<u32> m_descriptor_offsets;
+			rsx::simple_array<VkDeviceSize> m_descriptor_offsets;
+			rsx::simple_array<VkDeviceSize> m_descriptor_blob_sizes;
+			rsx::simple_array<char> m_scratch_buffer;
 
 			void initialize_bo();
 		};
@@ -260,7 +294,7 @@ namespace vk
 			std::pair<u32, u32> get_uniform_location(::glsl::program_domain domain, program_input_type type, const std::string& uniform_name);
 
 			void bind_uniform(const VkDescriptorImageInfo &image_descriptor, u32 set_id, u32 binding_point);
-			void bind_uniform(const VkDescriptorBufferInfo &buffer_descriptor, u32 set_id, u32 binding_point);
+			void bind_uniform(const vk::buffer_reference &buffer_reference, u32 set_id, u32 binding_point);
 			void bind_uniform(const vk::buffer_view& buffer_view, u32 set_id, u32 binding_point);
 
 			void bind_uniform_array(const VkDescriptorImageInfo* image_descriptors, int count, u32 set_id, u32 binding_point);

@@ -135,6 +135,10 @@ namespace vk::glsl
 				set = std::make_unique<descriptor_table_legacy_t>();
 			}
 		}
+
+		fn_bind_descriptors = m_use_descriptor_buffers
+			? descriptor_table_buffer_t::bind
+			: descriptor_table_legacy_t::bind;
 	}
 
 	program::program(
@@ -255,16 +259,22 @@ namespace vk::glsl
 		create_pipeline_layout();
 		ensure(m_pipeline_layout);
 
+		VkFlags pipeline_create_flags = m_device.get_descriptor_buffer_support()
+			? VK_PIPELINE_CREATE_DESCRIPTOR_BUFFER_BIT_EXT
+			: 0;
+
 		if (is_graphics_pipe)
 		{
 			VkGraphicsPipelineCreateInfo create_info = *p_graphics_info;
 			create_info.layout = m_pipeline_layout;
+			create_info.flags |= pipeline_create_flags;
 			m_pipeline = std::make_unique<vk::pipeline>(m_device, create_info);
 		}
 		else
 		{
 			VkComputePipelineCreateInfo create_info = *p_compute_info;
 			create_info.layout = m_pipeline_layout;
+			create_info.flags |= pipeline_create_flags;
 			m_pipeline = std::make_unique<vk::pipeline>(m_device, create_info);
 		}
 
@@ -391,21 +401,9 @@ namespace vk::glsl
 
 	program& program::bind(const vk::command_buffer& cmd, VkPipelineBindPoint bind_point)
 	{
-		VkDescriptorSet bind_sets[binding_set_index_max_enum];
-		unsigned count = 0;
-
-		for (auto& set : m_sets)
-		{
-			if (!*set)
-			{
-				continue;
-			}
-
-			bind_sets[count++] = set->commit(cmd);   // Commit variable changes and return handle to the new set
-		}
-
 		vkCmdBindPipeline(cmd, bind_point, m_pipeline->handle());
-		vkCmdBindDescriptorSets(cmd, bind_point, m_pipeline_layout, 0, count, bind_sets, 0, nullptr);
+
+		fn_bind_descriptors(cmd, bind_point, m_pipeline_layout, m_sets.data(), m_sets.size());
 		return *this;
 	}
 
@@ -644,6 +642,27 @@ namespace vk::glsl
 		return m_descriptor_set.value();
 	}
 
+	void descriptor_table_legacy_t::bind(
+		const vk::command_buffer& cmd,
+		VkPipelineBindPoint bind_point,
+		VkPipelineLayout layout,
+		std::unique_ptr<descriptor_table_t>* sets,
+		size_t max_count)
+	{
+		rsx::simple_array<VkDescriptorSet> bind_sets;
+		for (size_t i = 0; i < max_count; ++i)
+		{
+			if (!*sets[i])
+			{
+				continue;
+			}
+
+			bind_sets.push_back(sets[i]->commit(cmd));   // Commit variable changes and return handle to the new set
+		}
+
+		vkCmdBindDescriptorSets(cmd, bind_point, layout, 0, bind_sets.size(), bind_sets.data(), 0, nullptr);
+	}
+
 	VkDescriptorSet descriptor_table_buffer_t::commit(const vk::command_buffer& cmd)
 	{
 		if (!m_bo)
@@ -795,6 +814,45 @@ namespace vk::glsl
 			ensure(binding_offset != UINT64_MAX);
 			m_descriptor_offsets[i] = binding_offset;
 			m_descriptor_blob_sizes[i] = get_descriptor_size(m_descriptor_types[i], 1); // TODO: Arrays
+		}
+	}
+
+	void descriptor_table_buffer_t::bind(
+		const vk::command_buffer& cmd,
+		VkPipelineBindPoint bind_point,
+		VkPipelineLayout layout,
+		std::unique_ptr<descriptor_table_t>* sets,
+		size_t max_count)
+	{
+		rsx::simple_array<VkDescriptorBufferBindingInfoEXT> bind_sets;
+		for (size_t i = 0; i < max_count; ++i)
+		{
+			const auto& set = static_cast<descriptor_table_buffer_t*>(sets[i].get());
+			if (!*set)
+			{
+				continue;
+			}
+
+			set->check();
+
+			bind_sets.emplace_back(
+				VK_STRUCTURE_TYPE_DESCRIPTOR_BUFFER_BINDING_INFO_EXT,
+				nullptr,
+				set->buffer().va,
+				VK_BUFFER_USAGE_RESOURCE_DESCRIPTOR_BUFFER_BIT_EXT);
+		}
+
+		static const std::array<u32, binding_set_index_max_enum> bind_indices{ { 0, 1 } };
+		static const std::array<VkDeviceSize, binding_set_index_max_enum> bind_offsets{ { 0, 0 } };
+
+		_vkCmdBindDescriptorBuffersEXT(cmd, bind_sets.size(), bind_sets.data());
+		_vkCmdSetDescriptorBufferOffsetsEXT(cmd, bind_point, layout, 0, bind_sets.size(), bind_indices.data(), bind_offsets.data());
+
+		// Now we commit?
+		for (size_t i = 0; i < max_count; ++i)
+		{
+			const auto& set = static_cast<descriptor_table_buffer_t*>(sets[i].get());
+			set->commit(cmd);
 		}
 	}
 }

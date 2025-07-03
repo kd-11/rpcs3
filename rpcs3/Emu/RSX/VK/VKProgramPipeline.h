@@ -241,6 +241,13 @@ namespace vk
 			VkDescriptorSet commit(const vk::command_buffer& cmd) override;
 			void destroy() override;
 
+			static void bind(
+				const vk::command_buffer& cmd,
+				VkPipelineBindPoint bind_point,
+				VkPipelineLayout layout,
+				std::unique_ptr<descriptor_table_t>* sets,
+				size_t max_count);
+
 		protected:
 			std::unique_ptr<vk::descriptor_pool> m_descriptor_pool;
 			vk::descriptor_set m_descriptor_set{};
@@ -252,8 +259,19 @@ namespace vk
 		class descriptor_table_buffer_t : public descriptor_table_t
 		{
 		public:
+			const vk::buffer& buffer() const { return *m_bo; }
 			VkDescriptorSet commit(const vk::command_buffer& cmd) override;
 			void destroy() override;
+
+			// FIXME: Vomit
+			void check() { if (!m_bo) initialize_bo(); }
+
+			static void bind(
+				const vk::command_buffer& cmd,
+				VkPipelineBindPoint bind_point,
+				VkPipelineLayout layout,
+				std::unique_ptr<descriptor_table_t>* sets,
+				size_t max_count);
 
 		protected:
 			std::unique_ptr<vk::buffer> m_bo;
@@ -311,6 +329,14 @@ namespace vk
 			std::array<std::unique_ptr<descriptor_table_t>, binding_set_index_max_enum> m_sets;
 			bool m_linked = false;
 			bool m_use_descriptor_buffers = false;
+
+			std::function<void(
+				const vk::command_buffer& cmd,
+				VkPipelineBindPoint bind_point,
+				VkPipelineLayout layout,
+				std::unique_ptr<descriptor_table_t>* sets,
+				size_t max_count
+			)> fn_bind_descriptors;
 
 			void init();
 			void create_pipeline_layout();

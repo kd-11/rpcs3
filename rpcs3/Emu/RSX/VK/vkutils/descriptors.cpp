@@ -84,15 +84,25 @@ namespace vk
 			const auto deferred_mask = g_render_device->get_descriptor_update_after_bind_support();
 			binding_flags.resize(::size32(bindings));
 
-			for (u32 i = 0; i < binding_flags.size(); ++i)
+			if (g_render_device->get_descriptor_buffer_support())
 			{
-				if ((1ull << bindings[i].descriptorType) & ~deferred_mask)
+				infos.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_DESCRIPTOR_BUFFER_BIT_EXT;
+				std::memset(binding_flags.data(), 0, binding_flags.size_bytes());
+			}
+			else
+			{
+				infos.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+
+				for (u32 i = 0; i < binding_flags.size(); ++i)
 				{
-					binding_flags[i] = 0u;
-				}
-				else
-				{
-					binding_flags[i] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+					if ((1ull << bindings[i].descriptorType) & ~deferred_mask)
+					{
+						binding_flags[i] = 0u;
+					}
+					else
+					{
+						binding_flags[i] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT;
+					}
 				}
 			}
 
@@ -100,9 +110,7 @@ namespace vk
 			binding_infos.pNext = nullptr;
 			binding_infos.bindingCount = ::size32(binding_flags);
 			binding_infos.pBindingFlags = binding_flags.data();
-
 			infos.pNext = &binding_infos;
-			infos.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
 
 			VkDescriptorSetLayout result;
 			CHECK_RESULT(vkCreateDescriptorSetLayout(*g_render_device, &infos, nullptr, &result));

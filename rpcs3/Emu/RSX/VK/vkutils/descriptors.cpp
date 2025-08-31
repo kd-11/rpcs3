@@ -473,6 +473,10 @@ namespace vk
 
 		m_storage_cache_id++;
 
+		ensure(m_image_info_pool.size() <= m_pool_size, "Image info pool overflow");
+		ensure(m_buffer_info_pool.size() <= m_pool_size, "Buffer info pool overflow");
+		ensure(m_buffer_view_pool.size() < m_pool_size, "Buffer view pool overflow");
+
 		m_push_type_mask = 0;
 		m_pending_writes.clear();
 		m_pending_copies.clear();

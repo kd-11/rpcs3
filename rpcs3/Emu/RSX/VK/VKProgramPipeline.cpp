@@ -93,6 +93,32 @@ namespace vk
 			}
 		}
 
+		const char* to_string(VkDescriptorType type)
+		{
+#define ENUM_CASE(name) \
+	case name: \
+		return #name
+
+			switch (type)
+			{
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_SAMPLER);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC);
+				ENUM_CASE(VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT);
+			default:
+				return "Unknown";
+			}
+
+#undef ENUM_CASE
+		}
+
 		void shader::create(::glsl::program_domain domain, const std::string& source)
 		{
 			type     = domain;
@@ -710,6 +736,76 @@ namespace vk
 				{
 					ensure(taken_locations.find(input.location) == taken_locations.end(), "Overlapping input locations found.");
 					taken_locations.insert(input.location);
+				}
+			}
+		}
+
+		void program::dump_descriptors(std::stringstream& ss) const
+		{
+			ss << fmt::format("Program pipeline [%p]", m_pipeline) << "\n";
+			ss << "Descriptors:\n\n";
+
+			int index = 0;
+			for (const auto& set : m_sets)
+			{
+				if (!set.m_device) {
+					continue;
+				}
+
+				ss << "Set " << index++ << ":\n";
+				ss << "Slots: " << set.m_descriptor_slots.size() << "\n";
+
+				for (u32 idx = 0; idx < ::size32(set.m_descriptor_slots); ++idx)
+				{
+					const auto& slot = set.m_descriptor_slots[idx];
+					const VkDescriptorType type = set.m_descriptor_types[idx];
+
+					const bool cache_is_valid = set.m_descriptor_template_cache_id == set.m_descriptor_set.cache_id();
+
+					ss << "Slot " << idx << ": Type = " << to_string(type) << "\n";
+					ss << "Descriptor set = " << set.m_descriptor_set.value() << "\n";
+					ss << "Cache valid? = " << (cache_is_valid ? "Yes" : "No") << "\n";
+
+					if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
+					{
+						ss << "Sampled image: View = " << ptr->imageView << ", Sampler = " << ptr->sampler << "\n";
+						ss << "Template value = " << set.m_descriptor_template[idx].pImageInfo << "\n";
+						continue;
+					}
+
+					if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
+					{
+						const std::string range_str = ptr->range == VK_WHOLE_SIZE ? "VK_WHOLE_SIZE" : std::to_string(ptr->range);
+						ss << "Sampled image: Buffer = " << ptr->buffer << ", Ofsset = " << ptr->offset << ", Range = " << range_str << "\n";
+						ss << "Template value = " << set.m_descriptor_template[idx].pBufferInfo << "\n";
+						continue;
+					}
+
+					if (auto ptr = std::get_if<VkBufferView>(&slot))
+					{
+						ss << "Buffer view: Value = " << ptr << "\n";
+						ss << "Template value = " << set.m_descriptor_template[idx].pTexelBufferView << "\n";
+						continue;
+					}
+
+					if (auto ptr = std::get_if<descriptor_image_array_t>(&slot))
+					{
+						std::stringstream array_str;
+						bool first = true;
+						for (const auto& image_info : *ptr)
+						{
+							if (!first) {
+								array_str << ", ";
+							}
+							array_str << "{ View=" << image_info.imageView << ", Sampler=" << image_info.sampler << " }";
+						}
+
+						ss << "Image array: Values = [" << array_str.str() << "]\n";
+						ss << "Template value = " << set.m_descriptor_template[idx].pImageInfo << "\n";
+						continue;
+					}
+
+					ss << fmt::format("Unexpected descriptor structure at index %u", idx);
 				}
 			}
 		}

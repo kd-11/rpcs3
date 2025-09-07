@@ -2996,3 +2996,112 @@ void VKGSRender::end_conditional_rendering()
 {
 	thread::end_conditional_rendering();
 }
+
+void VKGSRender::dump_crash_data() const
+{
+	rsx_log.error(">> Dumping debug dianostics to log. Please wait.");
+
+	const auto heap_snapshot = vk::data_heap_manager::get_heap_snapshot();
+
+	auto vk_handle_to_string = [](void* handle)
+	{
+		return fmt::format("[%p]", handle);
+	};
+
+	auto vk_buffer_name = [&](VkBuffer buf) -> std::string
+	{
+		for (auto& heap_data : heap_snapshot)
+		{
+			if (heap_data.first->heap->value == buf)
+			{
+				return std::string{ heap_data.first->name() };
+			}
+		}
+
+		return fmt::format("Unknown buffer [%p]", buf);
+	};
+
+	auto format_heap = [&](std::stringstream& ss, const vk::data_heap& heap)
+	{
+		ss << "Data heap:\n"
+			"Name: " << heap.name() << "\n"
+			"Size: " << heap.size() / 1048576 << "MiB\n"
+			"Handle:" << vk_handle_to_string(heap.heap->value) << "\n\n";
+	};
+
+	auto format_buffer_info = [&](std::stringstream& ss, const VkDescriptorBufferInfo& desc)
+	{
+		ss << "Descriptor buffer info:\n"
+			"Name: " << vk_buffer_name(desc.buffer) << "\n"
+			"Offset: " << desc.offset << "\n"
+			"Range: " << (desc.range == VK_WHOLE_SIZE ? "VK_WHOLE_SIZE" : std::to_string(desc.range)) << "\n\n";
+	};
+
+	std::stringstream ss;
+
+	ss <<
+		"====================================================================\n"
+		"                              HEAPS                                 \n"
+		"====================================================================\n";
+
+	// Descriptor information
+	format_heap(ss, m_attrib_ring_info);
+	format_heap(ss, m_fragment_constants_ring_info);
+	format_heap(ss, m_transform_constants_ring_info);
+	format_heap(ss, m_fragment_env_ring_info);
+	format_heap(ss, m_vertex_env_ring_info);
+	format_heap(ss, m_fragment_texture_params_ring_info);
+	format_heap(ss, m_vertex_layout_ring_info);
+	format_heap(ss, m_index_buffer_ring_info);
+	format_heap(ss, m_texture_upload_buffer_ring_info);
+	format_heap(ss, m_raster_env_ring_info);
+	format_heap(ss, m_instancing_buffer_ring_info);
+	format_heap(ss, m_fragment_instructions_buffer);
+	format_heap(ss, m_vertex_instructions_buffer);
+
+	ss <<
+		"====================================================================\n"
+		"                         REFERENCES                                 \n"
+		"====================================================================\n";
+
+	format_buffer_info(ss, m_vertex_env_buffer_info);
+	format_buffer_info(ss, m_fragment_env_buffer_info);
+	format_buffer_info(ss, m_vertex_layout_stream_info);
+	format_buffer_info(ss, m_vertex_constants_buffer_info);
+	format_buffer_info(ss, m_fragment_constants_buffer_info);
+	format_buffer_info(ss, m_fragment_texture_params_buffer_info);
+	format_buffer_info(ss, m_raster_env_buffer_info);
+	format_buffer_info(ss, m_instancing_indirection_buffer_info);
+	format_buffer_info(ss, m_instancing_constants_array_buffer_info);
+	format_buffer_info(ss, m_vertex_instructions_buffer_info);
+	format_buffer_info(ss, m_fragment_instructions_buffer_info);
+
+	ss <<
+		"====================================================================\n"
+		"                         DYNAMIC OFFSETS                            \n"
+		"====================================================================\n";
+
+	ss << "Values:\n"
+		<< "xform_constants = " << m_xform_constants_dynamic_offset << "\n"
+		<< "vertex_env = " << m_vertex_env_dynamic_offset << "\n"
+		<< "vertex_layout = " << m_vertex_layout_dynamic_offset << "\n"
+		<< "frag_constants = " << m_fragment_constants_dynamic_offset << "\n"
+		<< "frag_env = " << m_fragment_env_dynamic_offset << "\n"
+		<< "texture_config = " << m_texture_parameters_dynamic_offset << "\n"
+		<< "stipple_data = " << m_stipple_array_dynamic_offset << "\n\n";
+
+	ss <<
+		"====================================================================\n"
+		"                           DESCRIPTORS                              \n"
+		"====================================================================\n";
+
+	const auto all_pipelines = m_prog_buffer->dump_pipelines();
+	for (auto& program : all_pipelines)
+	{
+		program->dump_descriptors(ss);
+		ss << "-------------------------------------------------------------------\n";
+	}
+
+	rsx_log.warning("%s", ss.str());
+	rsx_log.error(">> Diagnostic information dump completed. Upload the log file for developer analysis.");
+}

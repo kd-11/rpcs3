@@ -102,5 +102,15 @@ namespace vk
 		{
 			return m_cache_miss_flag;
 		}
+
+		std::vector<const vk::glsl::program*> dump_pipelines() const
+		{
+			std::vector<const vk::glsl::program*> result;
+			for (const auto& cache_entry : m_storage)
+			{
+				result.push_back(cache_entry.second.get());
+			}
+			return result;
+		}
 	};
 }

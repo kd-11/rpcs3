@@ -278,6 +278,9 @@ public:
 	// Misc
 	bool is_current_program_interpreted() const override;
 
+	// Debug
+	void dump_crash_data() const;
+
 protected:
 	void clear_surface(u32 mask) override;
 	void begin() override;

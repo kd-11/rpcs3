@@ -166,4 +166,9 @@ public:
 	{
 		return m_size;
 	}
+
+	std::string_view name() const
+	{
+		return m_name;
+	}
 };

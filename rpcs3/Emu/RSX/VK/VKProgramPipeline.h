@@ -209,6 +209,8 @@ namespace vk
 
 			inline VkPipelineLayout layout() const { return m_pipeline_layout; }
 			inline VkPipeline value() const { return m_pipeline; }
+
+			void dump_descriptors(std::stringstream& ss) const;
 		};
 	}
 }

@@ -9,6 +9,7 @@
 namespace vk
 {
 	extern void print_debug_markers();
+	extern void print_crash_diagnostics();
 
 	std::string retrieve_device_fault_info()
 	{
@@ -200,6 +201,7 @@ namespace vk
 		default:
 		case 0:
 			print_debug_markers();
+			print_crash_diagnostics();
 
 			if (!message.empty()) message += "\n\n";
 			fmt::throw_exception("%sAssertion Failed! Vulkan API call failed with unrecoverable error: %s%s", message, error_message, src_loc);

@@ -401,6 +401,25 @@ namespace vk
 
 		return properties;
 	}
+
+	void print_crash_diagnostics()
+	{
+		auto renderer = g_fxo->try_get<rsx::thread>();
+		if (!renderer)
+		{
+			rsx_log.error("No current renderer found. How did we get here?");
+			return;
+		}
+
+		auto vk_renderer = dynamic_cast<VKGSRender*>(renderer);
+		if (!vk_renderer)
+		{
+			rsx_log.error("Current renderer is not a vulkan renderer. How did this happen?");
+			return;
+		}
+
+		vk_renderer->dump_crash_data();
+	}
 }
 
 u64 VKGSRender::get_cycles()

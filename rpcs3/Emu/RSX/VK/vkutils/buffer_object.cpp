@@ -2,8 +2,56 @@
 #include "device.h"
 #include "shared.h"
 
+#include <unordered_set>
+
 namespace vk
 {
+	static std::mutex s_liveness_lock;
+	static std::unordered_set<VkBuffer> s_live_buffers;
+	static std::unordered_map<VkBufferView, VkBuffer> s_view_map;
+
+	bool is_buffer_resident(VkBuffer buffer)
+	{
+		std::lock_guard lock(s_liveness_lock);
+		return s_live_buffers.contains(buffer);
+	}
+
+	bool is_buffer_view_resident(VkBufferView view)
+	{
+		std::lock_guard lock(s_liveness_lock);
+		if (!s_view_map.contains(view))
+		{
+			return false;
+		}
+
+		VkBuffer buffer = s_view_map[view];
+		return s_live_buffers.contains(buffer);
+	}
+
+	void notify_buffer_created(VkBuffer buffer)
+	{
+		std::lock_guard lock(s_liveness_lock);
+		s_live_buffers.insert(buffer);
+	}
+
+	void notify_buffer_destroyed(VkBuffer buffer)
+	{
+		std::lock_guard lock(s_liveness_lock);
+		s_live_buffers.insert(buffer);
+	}
+
+	void notify_buffer_view_created(VkBufferView view, VkBuffer buffer)
+	{
+		std::lock_guard lock(s_liveness_lock);
+		s_view_map[view] = buffer;
+	}
+
+	void notify_buffer_view_destroyed(VkBufferView view)
+	{
+		std::lock_guard lock(s_liveness_lock);
+		s_view_map.erase(view);
+	}
+
 	buffer_view::buffer_view(VkDevice dev, VkBuffer buffer, VkFormat format, VkDeviceSize offset, VkDeviceSize size)
 		: m_device(dev)
 	{
@@ -13,11 +61,14 @@ namespace vk
 		info.range  = size;
 		info.sType  = VK_STRUCTURE_TYPE_BUFFER_VIEW_CREATE_INFO;
 		CHECK_RESULT(vkCreateBufferView(m_device, &info, nullptr, &value));
+
+		notify_buffer_view_created(value, buffer);
 	}
 
 	buffer_view::~buffer_view()
 	{
 		vkDestroyBufferView(m_device, value, nullptr);
+		notify_buffer_view_destroyed(value);
 	}
 
 	bool buffer_view::in_range(u32 address, u32 size, u32& offset) const
@@ -62,6 +113,8 @@ namespace vk
 
 		memory = std::make_unique<memory_block>(m_device, memory_reqs.size, memory_reqs.alignment, allocation_type_info, allocation_pool);
 		vkBindBufferMemory(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset());
+
+		notify_buffer_created(value);
 	}
 
 	buffer::buffer(const vk::render_device& dev, VkBufferUsageFlags usage, void* host_pointer, u64 size)
@@ -110,11 +163,14 @@ namespace vk
 
 		memory = std::make_unique<memory_block_host>(m_device, host_pointer, size, allocation_type_info);
 		CHECK_RESULT(vkBindBufferMemory(dev, value, memory->get_vk_device_memory(), memory->get_vk_device_memory_offset()));
+
+		notify_buffer_created(value);
 	}
 
 	buffer::~buffer()
 	{
 		vkDestroyBuffer(m_device, value, nullptr);
+		notify_buffer_destroyed(value);
 	}
 
 	void* buffer::map(u64 offset, u64 size)

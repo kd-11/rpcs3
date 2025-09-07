@@ -43,4 +43,7 @@ namespace vk
 	private:
 		VkDevice m_device;
 	};
+
+	bool is_buffer_resident(VkBuffer buffer);
+	bool is_buffer_view_resident(VkBufferView view);
 }

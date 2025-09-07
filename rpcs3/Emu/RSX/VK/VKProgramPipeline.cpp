@@ -775,6 +775,11 @@ namespace vk
 
 					if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
 					{
+						if (!vk::is_buffer_resident(ptr->buffer))
+						{
+							ss << "<<<<<<<<<< INVALID BUFFER HANDLE!\n";
+						}
+
 						const std::string range_str = ptr->range == VK_WHOLE_SIZE ? "VK_WHOLE_SIZE" : std::to_string(ptr->range);
 						ss << "Sampled image: Buffer = " << ptr->buffer << ", Ofsset = " << ptr->offset << ", Range = " << range_str << "\n";
 						ss << "Template value = " << set.m_descriptor_template[idx].pBufferInfo << "\n";
@@ -783,7 +788,12 @@ namespace vk
 
 					if (auto ptr = std::get_if<VkBufferView>(&slot))
 					{
-						ss << "Buffer view: Value = " << ptr << "\n";
+						if (!vk::is_buffer_view_resident(*ptr))
+						{
+							ss << "<<<<<<<<<< INVALID BUFFER VIEW HANDLE!\n";
+						}
+
+						ss << "Buffer view: Value = " << *ptr << "\n";
 						ss << "Template value = " << set.m_descriptor_template[idx].pTexelBufferView << "\n";
 						continue;
 					}

@@ -19,13 +19,13 @@ namespace vk
 			return s_live_samplers.contains(sampler);
 		}
 
-		bool notify_sampler_created(VkSampler sampler)
+		void notify_sampler_created(VkSampler sampler)
 		{
 			std::lock_guard lock(s_sampler_liveness_lock);
 			s_live_samplers.insert(sampler);
 		}
 
-		bool notify_sampler_destroyed(VkSampler sampler)
+		void notify_sampler_destroyed(VkSampler sampler)
 		{
 			std::lock_guard lock(s_sampler_liveness_lock);
 			s_live_samplers.erase(sampler);

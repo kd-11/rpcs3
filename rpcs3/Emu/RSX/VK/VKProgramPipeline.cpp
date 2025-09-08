@@ -743,7 +743,7 @@ namespace vk
 		void program::dump_descriptors(std::stringstream& ss) const
 		{
 			ss << fmt::format("Program pipeline [%p]", m_pipeline) << "\n";
-			ss << "Descriptors:\n\n";
+			ss << "Descriptors:\n";
 
 			int index = 0;
 			for (const auto& set : m_sets)
@@ -752,19 +752,20 @@ namespace vk
 					continue;
 				}
 
+				ss << "\n";
 				ss << "Set " << index++ << ":\n";
 				ss << "Slots: " << set.m_descriptor_slots.size() << "\n";
+
+				const bool cache_is_valid = set.m_descriptor_template_cache_id == set.m_descriptor_set.cache_id();
+				ss << "Cache valid? = " << (cache_is_valid ? "Yes" : "No") << "\n";
 
 				for (u32 idx = 0; idx < ::size32(set.m_descriptor_slots); ++idx)
 				{
 					const auto& slot = set.m_descriptor_slots[idx];
 					const VkDescriptorType type = set.m_descriptor_types[idx];
 
-					const bool cache_is_valid = set.m_descriptor_template_cache_id == set.m_descriptor_set.cache_id();
-
 					ss << "Slot " << idx << ": Type = " << to_string(type) << "\n";
 					ss << "Descriptor set = " << set.m_descriptor_set.value() << "\n";
-					ss << "Cache valid? = " << (cache_is_valid ? "Yes" : "No") << "\n";
 
 					if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
 					{

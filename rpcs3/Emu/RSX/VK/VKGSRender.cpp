@@ -3042,6 +3042,11 @@ void VKGSRender::dump_crash_data() const
 
 	auto format_heap = [&](std::stringstream& ss, const vk::data_heap& heap)
 	{
+		if (!heap.heap)
+		{
+			return;
+		}
+
 		ss << "Data heap:\n"
 			"Name: " << heap.name() << "\n"
 			"Size: " << heap.size() / 1048576 << "MiB\n"
@@ -3058,7 +3063,7 @@ void VKGSRender::dump_crash_data() const
 
 	std::stringstream ss;
 
-	ss <<
+	ss << "\n"
 		"====================================================================\n"
 		"                              HEAPS                                 \n"
 		"====================================================================\n";

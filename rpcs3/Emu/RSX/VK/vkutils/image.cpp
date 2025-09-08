@@ -6,9 +6,61 @@
 
 #include "../VKResourceManager.h"
 #include <memory>
+#include <unordered_set>
 
 namespace vk
 {
+	namespace diagnostics
+	{
+		static std::mutex s_image_liveness_lock;
+		static std::unordered_set<VkImage> s_live_images;
+		static std::unordered_map<VkImageView, VkImage> s_image_view_map;
+
+		bool is_image_resident(VkImage image)
+		{
+			std::lock_guard lock(s_image_liveness_lock);
+			return s_live_images.contains(image);
+		}
+
+		bool is_image_view_resident(VkImageView view)
+		{
+			std::lock_guard lock(s_image_liveness_lock);
+			if (!s_image_view_map.contains(view))
+			{
+				return false;
+			}
+
+			VkImage image = s_image_view_map[view];
+			return s_live_images.contains(image);
+		}
+
+		void notify_image_created(VkImage image)
+		{
+			std::lock_guard lock(s_image_liveness_lock);
+			s_live_images.insert(image);
+		}
+
+		void notify_image_destroyed(VkImage image)
+		{
+			std::lock_guard lock(s_image_liveness_lock);
+			s_live_images.insert(image);
+		}
+
+		void notify_image_view_created(VkImageView view, VkImage image)
+		{
+			std::lock_guard lock(s_image_liveness_lock);
+			s_image_view_map[view] = image;
+		}
+
+		void notify_image_view_destroyed(VkImageView view)
+		{
+			std::lock_guard lock(s_image_liveness_lock);
+			s_image_view_map.erase(view);
+		}
+	}
+
+	using namespace vk::diagnostics;
+
 	void image::validate(const vk::render_device& dev, const VkImageCreateInfo& info) const
 	{
 		const auto& gpu_limits = dev.gpu().get_limits();
@@ -106,6 +158,7 @@ namespace vk
 	image::~image()
 	{
 		vkDestroyImage(m_device, value, nullptr);
+		notify_image_destroyed(value);
 	}
 
 	void image::create_impl(const vk::render_device& dev, u32 access_flags, const memory_type_info& memory_type, vmm_allocation_pool allocation_pool)
@@ -133,6 +186,8 @@ namespace vk
 		{
 			CHECK_RESULT(vkBindImageMemory(m_device, value, device_mem, memory->get_vk_device_memory_offset()));
 			current_layout = info.initialLayout;
+
+			notify_image_created(value);
 		}
 		else
 		{
@@ -360,6 +415,7 @@ namespace vk
 	image_view::~image_view()
 	{
 		vkDestroyImageView(m_device, value, nullptr);
+		notify_image_view_destroyed(value);
 	}
 
 	u32 image_view::encoded_component_map() const
@@ -390,6 +446,8 @@ namespace vk
 #endif
 
 		CHECK_RESULT(vkCreateImageView(m_device, &info, nullptr, &value));
+
+		notify_image_view_created(value, info.image);
 
 #if (VK_DISABLE_COMPONENT_SWIZZLE)
 		// Restore requested mapping

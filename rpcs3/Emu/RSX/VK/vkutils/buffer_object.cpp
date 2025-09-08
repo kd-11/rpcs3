@@ -7,51 +7,56 @@
 
 namespace vk
 {
-	static std::mutex s_liveness_lock;
-	static std::unordered_set<VkBuffer> s_live_buffers;
-	static std::unordered_map<VkBufferView, VkBuffer> s_view_map;
-
-	bool is_buffer_resident(VkBuffer buffer)
+	namespace diagnostics
 	{
-		std::lock_guard lock(s_liveness_lock);
-		return s_live_buffers.contains(buffer);
-	}
+		static std::mutex s_liveness_lock;
+		static std::unordered_set<VkBuffer> s_live_buffers;
+		static std::unordered_map<VkBufferView, VkBuffer> s_view_map;
 
-	bool is_buffer_view_resident(VkBufferView view)
-	{
-		std::lock_guard lock(s_liveness_lock);
-		if (!s_view_map.contains(view))
+		bool is_buffer_resident(VkBuffer buffer)
 		{
-			return false;
+			std::lock_guard lock(s_liveness_lock);
+			return s_live_buffers.contains(buffer);
 		}
 
-		VkBuffer buffer = s_view_map[view];
-		return s_live_buffers.contains(buffer);
+		bool is_buffer_view_resident(VkBufferView view)
+		{
+			std::lock_guard lock(s_liveness_lock);
+			if (!s_view_map.contains(view))
+			{
+				return false;
+			}
+
+			VkBuffer buffer = s_view_map[view];
+			return s_live_buffers.contains(buffer);
+		}
+
+		void notify_buffer_created(VkBuffer buffer)
+		{
+			std::lock_guard lock(s_liveness_lock);
+			s_live_buffers.insert(buffer);
+		}
+
+		void notify_buffer_destroyed(VkBuffer buffer)
+		{
+			std::lock_guard lock(s_liveness_lock);
+			s_live_buffers.insert(buffer);
+		}
+
+		void notify_buffer_view_created(VkBufferView view, VkBuffer buffer)
+		{
+			std::lock_guard lock(s_liveness_lock);
+			s_view_map[view] = buffer;
+		}
+
+		void notify_buffer_view_destroyed(VkBufferView view)
+		{
+			std::lock_guard lock(s_liveness_lock);
+			s_view_map.erase(view);
+		}
 	}
 
-	void notify_buffer_created(VkBuffer buffer)
-	{
-		std::lock_guard lock(s_liveness_lock);
-		s_live_buffers.insert(buffer);
-	}
-
-	void notify_buffer_destroyed(VkBuffer buffer)
-	{
-		std::lock_guard lock(s_liveness_lock);
-		s_live_buffers.insert(buffer);
-	}
-
-	void notify_buffer_view_created(VkBufferView view, VkBuffer buffer)
-	{
-		std::lock_guard lock(s_liveness_lock);
-		s_view_map[view] = buffer;
-	}
-
-	void notify_buffer_view_destroyed(VkBufferView view)
-	{
-		std::lock_guard lock(s_liveness_lock);
-		s_view_map.erase(view);
-	}
+	using namespace diagnostics;
 
 	buffer_view::buffer_view(VkDevice dev, VkBuffer buffer, VkFormat format, VkDeviceSize offset, VkDeviceSize size)
 		: m_device(dev)

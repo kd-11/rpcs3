@@ -93,4 +93,9 @@ namespace vk
 
 		std::vector<std::unique_ptr<cached_sampler_object_t>> collect(std::function<bool(const cached_sampler_object_t&)> predicate);
 	};
+
+	namespace diagnostics
+	{
+		bool is_sampler_resident(VkSampler sampler);
+	}
 }

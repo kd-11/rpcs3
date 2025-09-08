@@ -3,8 +3,37 @@
 #include "../../color_utils.h"
 #include "../../rsx_utils.h"
 
+#include <unordered_set>
+#include <mutex>
+
 namespace vk
 {
+	namespace diagnostics
+	{
+		static std::mutex s_sampler_liveness_lock;
+		static std::unordered_set<VkSampler> s_live_samplers;
+
+		bool is_sampler_resident(VkSampler sampler)
+		{
+			std::lock_guard lock(s_sampler_liveness_lock);
+			return s_live_samplers.contains(sampler);
+		}
+
+		bool notify_sampler_created(VkSampler sampler)
+		{
+			std::lock_guard lock(s_sampler_liveness_lock);
+			s_live_samplers.insert(sampler);
+		}
+
+		bool notify_sampler_destroyed(VkSampler sampler)
+		{
+			std::lock_guard lock(s_sampler_liveness_lock);
+			s_live_samplers.erase(sampler);
+		}
+	}
+
+	using namespace vk::diagnostics;
+
 	extern VkBorderColor get_border_color(u32);
 
 	static VkBorderColor get_closest_border_color_enum(const color4f& color4)
@@ -99,12 +128,14 @@ namespace vk
 
 		CHECK_RESULT(vkCreateSampler(m_device, &info, nullptr, &value));
 		vmm_notify_object_allocated(VMM_ALLOCATION_POOL_SAMPLER);
+		notify_sampler_created(value);
 	}
 
 	sampler::~sampler()
 	{
 		vkDestroySampler(m_device, value, nullptr);
 		vmm_notify_object_freed(VMM_ALLOCATION_POOL_SAMPLER);
+		notify_sampler_destroyed(value);
 	}
 
 	bool sampler::matches(VkSamplerAddressMode clamp_u, VkSamplerAddressMode clamp_v, VkSamplerAddressMode clamp_w,

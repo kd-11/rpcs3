@@ -139,4 +139,10 @@ namespace vk
 
 		void set_native_component_layout(VkComponentMapping new_layout);
 	};
+
+	namespace diagnostics
+	{
+		bool is_image_resident(VkImage image);
+		bool is_image_view_resident(VkImageView view);
+	}
 }

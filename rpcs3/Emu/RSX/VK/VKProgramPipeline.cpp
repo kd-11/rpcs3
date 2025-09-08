@@ -3,6 +3,7 @@
 #include "VKResourceManager.h"
 #include "vkutils/descriptors.h"
 #include "vkutils/device.h"
+#include "vkutils/image.h"
 
 #include "../Program/SPIRVCommon.h"
 
@@ -755,6 +756,7 @@ namespace vk
 				ss << "\n";
 				ss << "Set " << index++ << ":\n";
 				ss << "Slots: " << set.m_descriptor_slots.size() << "\n";
+				ss << "Descriptor set = " << set.m_descriptor_set.value() << "\n";
 
 				const bool cache_is_valid = set.m_descriptor_template_cache_id == set.m_descriptor_set.cache_id();
 				ss << "Cache valid? = " << (cache_is_valid ? "Yes" : "No") << "\n";
@@ -765,10 +767,19 @@ namespace vk
 					const VkDescriptorType type = set.m_descriptor_types[idx];
 
 					ss << "Slot " << idx << ": Type = " << to_string(type) << "\n";
-					ss << "Descriptor set = " << set.m_descriptor_set.value() << "\n";
 
 					if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
 					{
+						if (!vk::diagnostics::is_image_view_resident(ptr->imageView))
+						{
+							ss << "<<<<<<<<<< INVALID IMAGE VIEW HANDLE!\n";
+						}
+
+						if (!vk::diagnostics::is_sampler_resident(ptr->sampler))
+						{
+							ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
+						}
+
 						ss << "Sampled image: View = " << ptr->imageView << ", Sampler = " << ptr->sampler << "\n";
 						ss << "Template value = " << set.m_descriptor_template[idx].pImageInfo << "\n";
 						continue;
@@ -776,20 +787,20 @@ namespace vk
 
 					if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
 					{
-						if (!vk::is_buffer_resident(ptr->buffer))
+						if (!vk::diagnostics::is_buffer_resident(ptr->buffer))
 						{
 							ss << "<<<<<<<<<< INVALID BUFFER HANDLE!\n";
 						}
 
 						const std::string range_str = ptr->range == VK_WHOLE_SIZE ? "VK_WHOLE_SIZE" : std::to_string(ptr->range);
-						ss << "Sampled image: Buffer = " << ptr->buffer << ", Ofsset = " << ptr->offset << ", Range = " << range_str << "\n";
+						ss << "Buffer reference: Buffer = " << ptr->buffer << ", Ofsset = " << ptr->offset << ", Range = " << range_str << "\n";
 						ss << "Template value = " << set.m_descriptor_template[idx].pBufferInfo << "\n";
 						continue;
 					}
 
 					if (auto ptr = std::get_if<VkBufferView>(&slot))
 					{
-						if (!vk::is_buffer_view_resident(*ptr))
+						if (!vk::diagnostics::is_buffer_view_resident(*ptr))
 						{
 							ss << "<<<<<<<<<< INVALID BUFFER VIEW HANDLE!\n";
 						}
@@ -805,7 +816,18 @@ namespace vk
 						bool first = true;
 						for (const auto& image_info : *ptr)
 						{
-							if (!first) {
+							if (!vk::diagnostics::is_image_view_resident(image_info.imageView))
+							{
+								ss << "<<<<<<<<<< INVALID IMAGE VIEW HANDLE!\n";
+							}
+
+							if (!vk::diagnostics::is_sampler_resident(image_info.sampler))
+							{
+								ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
+							}
+
+							if (!first)
+							{
 								array_str << ", ";
 							}
 							array_str << "{ View=" << image_info.imageView << ", Sampler=" << image_info.sampler << " }";

@@ -44,6 +44,9 @@ namespace vk
 		VkDevice m_device;
 	};
 
-	bool is_buffer_resident(VkBuffer buffer);
-	bool is_buffer_view_resident(VkBufferView view);
+	namespace diagnostics
+	{
+		bool is_buffer_resident(VkBuffer buffer);
+		bool is_buffer_view_resident(VkBufferView view);
+	}
 }

@@ -761,6 +761,12 @@ namespace vk
 				const bool cache_is_valid = set.m_descriptor_template_cache_id == set.m_descriptor_set.cache_id();
 				ss << "Cache valid? = " << (cache_is_valid ? "Yes" : "No") << "\n";
 
+				if (!set.m_descriptor_set)
+				{
+					ss << "Descriptors are not yet initialized.";
+					continue;
+				}
+
 				for (u32 idx = 0; idx < ::size32(set.m_descriptor_slots); ++idx)
 				{
 					const auto& slot = set.m_descriptor_slots[idx];
@@ -770,12 +776,12 @@ namespace vk
 
 					if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
 					{
-						if (ptr->imageView && !vk::diagnostics::is_image_view_resident(ptr->imageView))
+						if (!vk::diagnostics::is_image_view_resident(ptr->imageView))
 						{
 							ss << "<<<<<<<<<< INVALID IMAGE VIEW HANDLE!\n";
 						}
 
-						if (ptr->sampler && !vk::diagnostics::is_sampler_resident(ptr->sampler))
+						if (!vk::diagnostics::is_sampler_resident(ptr->sampler))
 						{
 							ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
 						}
@@ -787,7 +793,7 @@ namespace vk
 
 					if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
 					{
-						if (ptr->buffer && !vk::diagnostics::is_buffer_resident(ptr->buffer))
+						if (!vk::diagnostics::is_buffer_resident(ptr->buffer))
 						{
 							ss << "<<<<<<<<<< INVALID BUFFER HANDLE!\n";
 						}
@@ -816,12 +822,12 @@ namespace vk
 						bool first = true;
 						for (const auto& image_info : *ptr)
 						{
-							if (image_info.imageView && !vk::diagnostics::is_image_view_resident(image_info.imageView))
+							if (!vk::diagnostics::is_image_view_resident(image_info.imageView))
 							{
 								ss << "<<<<<<<<<< INVALID IMAGE VIEW HANDLE!\n";
 							}
 
-							if (image_info.sampler && !vk::diagnostics::is_sampler_resident(image_info.sampler))
+							if (!vk::diagnostics::is_sampler_resident(image_info.sampler))
 							{
 								ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
 							}

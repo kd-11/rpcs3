@@ -3061,6 +3061,15 @@ void VKGSRender::dump_crash_data() const
 			"Range: " << (desc.range == VK_WHOLE_SIZE ? "VK_WHOLE_SIZE" : std::to_string(desc.range)) << "\n\n";
 	};
 
+	auto format_buffer_view = [&](std::stringstream& ss, const vk::buffer_view& view, const char* title)
+	{
+		ss << "Descriptor buffer view:\n"
+			"Name: " << title << "\n"
+			"Value: " << view.value << "\n"
+			"Offset: " << view.info.offset << "\n"
+			"Range: " << view.info.range << "\n\n";
+	};
+
 	std::stringstream ss;
 
 	ss << "\n"
@@ -3099,6 +3108,9 @@ void VKGSRender::dump_crash_data() const
 	format_buffer_info(ss, m_instancing_constants_array_buffer_info);
 	format_buffer_info(ss, m_vertex_instructions_buffer_info);
 	format_buffer_info(ss, m_fragment_instructions_buffer_info);
+
+	format_buffer_view(ss, *m_persistent_attribute_storage, "persistent attributes");
+	format_buffer_view(ss, *m_volatile_attribute_storage, "volatile attributes");
 
 	ss <<
 		"====================================================================\n"

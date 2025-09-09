@@ -51,12 +51,25 @@ namespace vk
 			vk::pipe_compiler::op_flags compiler_flags = compile_async ? vk::pipe_compiler::COMPILE_DEFERRED : vk::pipe_compiler::COMPILE_INLINE;
 			compiler_flags |= vk::pipe_compiler::SEPARATE_SHADER_OBJECTS;
 
+			auto debug_callback = [callback, vid=vertexProgramData.id, fid=fragmentProgramData.id](pipeline_storage_type& pipeline)
+			{
+				rsx_log.warning("Compiled new pipeline [%p]. Vp=%u, Fp=%u",
+					pipeline->value(), vid, fid);
+
+				if (!callback)
+				{
+					return;
+				}
+
+				callback(pipeline);
+			};
+
 			auto compiler = vk::get_pipe_compiler();
 			auto result = compiler->compile(
 				pipelineProperties,
 				vertexProgramData.handle,
 				fragmentProgramData.handle,
-				compiler_flags, callback,
+				compiler_flags, debug_callback,
 				vertexProgramData.uniforms,
 				fragmentProgramData.uniforms);
 

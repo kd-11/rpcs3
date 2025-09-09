@@ -770,12 +770,12 @@ namespace vk
 
 					if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
 					{
-						if (!vk::diagnostics::is_image_view_resident(ptr->imageView))
+						if (ptr->imageView && !vk::diagnostics::is_image_view_resident(ptr->imageView))
 						{
 							ss << "<<<<<<<<<< INVALID IMAGE VIEW HANDLE!\n";
 						}
 
-						if (!vk::diagnostics::is_sampler_resident(ptr->sampler))
+						if (ptr->sampler && !vk::diagnostics::is_sampler_resident(ptr->sampler))
 						{
 							ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
 						}
@@ -787,7 +787,7 @@ namespace vk
 
 					if (auto ptr = std::get_if<VkDescriptorBufferInfo>(&slot))
 					{
-						if (!vk::diagnostics::is_buffer_resident(ptr->buffer))
+						if (ptr->buffer && !vk::diagnostics::is_buffer_resident(ptr->buffer))
 						{
 							ss << "<<<<<<<<<< INVALID BUFFER HANDLE!\n";
 						}
@@ -816,12 +816,12 @@ namespace vk
 						bool first = true;
 						for (const auto& image_info : *ptr)
 						{
-							if (!vk::diagnostics::is_image_view_resident(image_info.imageView))
+							if (image_info.imageView && !vk::diagnostics::is_image_view_resident(image_info.imageView))
 							{
 								ss << "<<<<<<<<<< INVALID IMAGE VIEW HANDLE!\n";
 							}
 
-							if (!vk::diagnostics::is_sampler_resident(image_info.sampler))
+							if (image_info.sampler && !vk::diagnostics::is_sampler_resident(image_info.sampler))
 							{
 								ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
 							}

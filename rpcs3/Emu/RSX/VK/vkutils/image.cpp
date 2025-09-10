@@ -34,6 +34,16 @@ namespace vk
 			return s_live_images.contains(image);
 		}
 
+		VkImage image_from_view(VkImageView view)
+		{
+			std::lock_guard lock(s_image_liveness_lock);
+			if (!s_image_view_map.contains(view))
+			{
+				return VK_NULL_HANDLE;
+			}
+			return s_image_view_map[view];
+		}
+
 		void notify_image_created(VkImage image)
 		{
 			std::lock_guard lock(s_image_liveness_lock);

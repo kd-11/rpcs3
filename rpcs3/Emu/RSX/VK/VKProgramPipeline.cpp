@@ -786,7 +786,7 @@ namespace vk
 							ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
 						}
 
-						ss << "Sampled image: View = " << ptr->imageView << ", Sampler = " << ptr->sampler << "\n";
+						ss << "Sampled image: View = " << ptr->imageView << ", Image = " << vk::diagnostics::image_from_view(ptr->imageView) << ", Sampler = " << ptr->sampler << "\n";
 						ss << "Template value = " << set.m_descriptor_template[idx].pImageInfo << "\n";
 						continue;
 					}
@@ -836,7 +836,7 @@ namespace vk
 							{
 								array_str << ", ";
 							}
-							array_str << "{ View=" << image_info.imageView << ", Sampler=" << image_info.sampler << " }";
+							array_str << "{ View=" << image_info.imageView << ", Image=" << vk::diagnostics::image_from_view(image_info.imageView) <<  ", Sampler=" << image_info.sampler << " }";
 						}
 
 						ss << "Image array: Values = [" << array_str.str() << "]\n";

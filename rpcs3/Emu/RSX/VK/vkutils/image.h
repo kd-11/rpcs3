@@ -144,5 +144,6 @@ namespace vk
 	{
 		bool is_image_resident(VkImage image);
 		bool is_image_view_resident(VkImageView view);
+		VkImage image_from_view(VkImageView view);
 	}
 }

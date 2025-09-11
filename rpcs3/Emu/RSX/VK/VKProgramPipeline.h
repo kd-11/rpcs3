@@ -11,6 +11,23 @@
 
 namespace vk
 {
+	struct image_view;
+	struct sampler;
+
+	struct VkDescriptorImageInfoEx : public VkDescriptorImageInfo
+	{
+		VkImage image = VK_NULL_HANDLE;
+
+		VkDescriptorImageInfoEx() = default;
+		VkDescriptorImageInfoEx(VkSampler sampler, VkImageView view, VkImageLayout layout, VkImage image)
+			: VkDescriptorImageInfo(sampler, view, layout)
+			, image(image)
+		{}
+
+		VkDescriptorImageInfoEx(const vk::image_view& view, const vk::sampler& sampler);
+		VkDescriptorImageInfoEx(const vk::image_view& view);
+	};
+
 	namespace glsl
 	{
 		enum program_input_type : u32
@@ -113,8 +130,8 @@ namespace vk
 			VkShaderModule get_handle() const;
 		};
 
-		using descriptor_image_array_t = rsx::simple_array<VkDescriptorImageInfo>;
-		using descriptor_slot_t = std::variant<VkDescriptorImageInfo, VkDescriptorBufferInfo, VkBufferView, descriptor_image_array_t>;
+		using descriptor_image_array_t = rsx::simple_array<VkDescriptorImageInfoEx>;
+		using descriptor_slot_t = std::variant<VkDescriptorImageInfoEx, VkDescriptorBufferInfo, VkBufferView, descriptor_image_array_t>;
 
 		struct descriptor_table_t
 		{
@@ -200,12 +217,12 @@ namespace vk
 			bool has_uniform(program_input_type type, const std::string &uniform_name);
 			std::pair<u32, u32> get_uniform_location(::glsl::program_domain domain, program_input_type type, const std::string& uniform_name);
 
-			void bind_uniform(const VkDescriptorImageInfo &image_descriptor, u32 set_id, u32 binding_point);
+			void bind_uniform(const VkDescriptorImageInfoEx& image_descriptor, u32 set_id, u32 binding_point);
 			void bind_uniform(const VkDescriptorBufferInfo &buffer_descriptor, u32 set_id, u32 binding_point);
 			void bind_uniform(const VkBufferView &buffer_view, u32 set_id, u32 binding_point);
 			void bind_uniform(const VkBufferView &buffer_view, ::glsl::program_domain domain, program_input_type type, const std::string &binding_name);
 
-			void bind_uniform_array(const std::span<const VkDescriptorImageInfo>& image_descriptors,u32 set_id, u32 binding_point);
+			void bind_uniform_array(const std::span<const VkDescriptorImageInfoEx>& image_descriptors,u32 set_id, u32 binding_point);
 
 			inline VkPipelineLayout layout() const { return m_pipeline_layout; }
 			inline VkPipeline value() const { return m_pipeline; }

@@ -4,6 +4,7 @@
 #include "vkutils/descriptors.h"
 #include "vkutils/device.h"
 #include "vkutils/image.h"
+#include "vkutils/sampler.h"
 
 #include "../Program/SPIRVCommon.h"
 
@@ -11,15 +12,26 @@ namespace vk
 {
 	extern const vk::render_device* get_current_renderer();
 
+	VkDescriptorImageInfoEx::VkDescriptorImageInfoEx(const vk::image_view& view, const vk::sampler& sampler)
+		: VkDescriptorImageInfo(sampler.value, view.value, view.image()->current_layout)
+		, image(view.image()->value)
+	{}
+
+	VkDescriptorImageInfoEx::VkDescriptorImageInfoEx(const vk::image_view& view)
+		: VkDescriptorImageInfo(VK_NULL_HANDLE, view.value, view.image()->current_layout)
+		, image(view.image()->value)
+	{}
+
 	namespace glsl
 	{
 		using namespace ::glsl;
 
-		bool operator == (const descriptor_slot_t& a, const VkDescriptorImageInfo& b)
+		bool operator == (const descriptor_slot_t& a, const VkDescriptorImageInfoEx& b)
 		{
-			const auto ptr = std::get_if<VkDescriptorImageInfo>(&a);
+			const auto ptr = std::get_if<VkDescriptorImageInfoEx>(&a);
 			return !!ptr &&
 				ptr->imageView == b.imageView &&
+				ptr->image == b.image &&
 				ptr->sampler == b.sampler &&
 				ptr->imageLayout == b.imageLayout;
 		}
@@ -39,7 +51,7 @@ namespace vk
 			return !!ptr && *ptr == b;
 		}
 
-		bool operator == (const descriptor_slot_t& a, const std::span<const VkDescriptorImageInfo>& b)
+		bool operator == (const descriptor_slot_t& a, const std::span<const VkDescriptorImageInfoEx>& b)
 		{
 			const auto ptr = std::get_if<descriptor_image_array_t>(&a);
 			return !!ptr && ptr->size() == b.size() && !std::memcmp(ptr->data(), b.data(), b.size_bytes());
@@ -340,7 +352,7 @@ namespace vk
 			return { umax, umax };
 		}
 
-		void program::bind_uniform(const VkDescriptorImageInfo& image_descriptor, u32 set_id, u32 binding_point)
+		void program::bind_uniform(const VkDescriptorImageInfoEx& image_descriptor, u32 set_id, u32 binding_point)
 		{
 			if (m_sets[set_id].m_descriptor_slots[binding_point] == image_descriptor)
 			{
@@ -370,7 +382,7 @@ namespace vk
 			m_sets[set_id].notify_descriptor_slot_updated(binding_point, buffer_view);
 		}
 
-		void program::bind_uniform_array(const std::span<const VkDescriptorImageInfo>& image_descriptors, u32 set_id, u32 binding_point)
+		void program::bind_uniform_array(const std::span<const VkDescriptorImageInfoEx>& image_descriptors, u32 set_id, u32 binding_point)
 		{
 			if (m_sets[set_id].m_descriptor_slots[binding_point] == image_descriptors)
 			{
@@ -506,7 +518,7 @@ namespace vk
 				writer.descriptorCount = 1;
 				writer.descriptorType = type;
 
-				if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
+				if (auto ptr = std::get_if<VkDescriptorImageInfoEx>(&slot))
 				{
 					m_descriptor_set.push(*ptr, type, idx);
 					return;
@@ -557,7 +569,7 @@ namespace vk
 			{
 				const auto& slot = m_descriptor_slots[idx];
 				const VkDescriptorType type = m_descriptor_types[idx];
-				if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
+				if (auto ptr = std::get_if<VkDescriptorImageInfoEx>(&slot))
 				{
 					m_descriptor_template[idx].pImageInfo = m_descriptor_set.store(*ptr);
 					return;
@@ -774,7 +786,7 @@ namespace vk
 
 					ss << "Slot " << idx << ": Type = " << to_string(type) << "\n";
 
-					if (auto ptr = std::get_if<VkDescriptorImageInfo>(&slot))
+					if (auto ptr = std::get_if<VkDescriptorImageInfoEx>(&slot))
 					{
 						if (!vk::diagnostics::is_image_view_resident(ptr->imageView))
 						{
@@ -786,7 +798,7 @@ namespace vk
 							ss << "<<<<<<<<<< INVALID SAMPLER HANDLE!\n";
 						}
 
-						ss << "Sampled image: View = " << ptr->imageView << ", Image = " << vk::diagnostics::image_from_view(ptr->imageView) << ", Sampler = " << ptr->sampler << "\n";
+						ss << "Sampled image: View = " << ptr->imageView << ", Image = " << ptr->image << ", Sampler = " << ptr->sampler << "\n";
 						ss << "Template value = " << set.m_descriptor_template[idx].pImageInfo << "\n";
 						continue;
 					}

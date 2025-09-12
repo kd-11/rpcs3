@@ -167,6 +167,7 @@ namespace vk
 
 	image::~image()
 	{
+		rsx_log.warning("Destroying vkImage %p", value);
 		vkDestroyImage(m_device, value, nullptr);
 		notify_image_destroyed(value);
 	}
@@ -202,6 +203,7 @@ namespace vk
 		else
 		{
 			ensure(nullable);
+			rsx_log.warning("Destroying vkImage %p - OOM", value);
 			vkDestroyImage(m_device, value, nullptr);
 			value = VK_NULL_HANDLE;
 		}

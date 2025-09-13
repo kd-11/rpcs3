@@ -8,6 +8,8 @@
 #include <memory>
 #include <unordered_set>
 
+#include "Utilities/stack_trace.h"
+
 namespace vk
 {
 	namespace diagnostics
@@ -168,8 +170,13 @@ namespace vk
 	image::~image()
 	{
 		rsx_log.warning("Destroying vkImage %p", value);
+		auto logger = utils::stack_trace::print_to_log(rsx_log);
+		utils::print_trace(logger, 8);
+
 		vkDestroyImage(m_device, value, nullptr);
 		notify_image_destroyed(value);
+
+		value = VK_NULL_HANDLE; // Crash on UAF
 	}
 
 	void image::create_impl(const vk::render_device& dev, u32 access_flags, const memory_type_info& memory_type, vmm_allocation_pool allocation_pool)
@@ -198,6 +205,7 @@ namespace vk
 			CHECK_RESULT(vkBindImageMemory(m_device, value, device_mem, memory->get_vk_device_memory_offset()));
 			current_layout = info.initialLayout;
 
+			rsx_log.warning("Creating vkImage %p", value);
 			notify_image_created(value);
 		}
 		else
@@ -428,6 +436,7 @@ namespace vk
 	{
 		vkDestroyImageView(m_device, value, nullptr);
 		notify_image_view_destroyed(value);
+		value = VK_NULL_HANDLE;
 	}
 
 	u32 image_view::encoded_component_map() const

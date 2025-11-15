@@ -347,7 +347,7 @@ namespace vk
 		// Filter out the Re-BAR heap
 		if (::size32(stats) > m_rebar_heap_idx)
 		{
-			stats[m_rebar_heap_idx].budget = 0;
+			stats[m_rebar_heap_idx].usage = 0;
 		}
 
 		float max_usage = 0.f;

@@ -354,7 +354,7 @@ namespace vk
 		int i = 0;
 		for (const auto& info : stats)
 		{
-			const heap_idx = i++;;
+			const auto heap_idx = i++;;
 			if (!info.budget)
 			{
 				break;

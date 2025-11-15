@@ -351,8 +351,10 @@ namespace vk
 		}
 
 		float max_usage = 0.f;
+		int i = 0;
 		for (const auto& info : stats)
 		{
+			const heap_idx = i++;;
 			if (!info.budget)
 			{
 				break;
@@ -360,6 +362,7 @@ namespace vk
 
 			const float this_usage = (info.usage * 100.f) / info.budget;
 			max_usage = std::max(max_usage, this_usage);
+			rsx_log.warning("Mem usage check. Heap %d, usage=%.2f", heap_idx, this_usage);
 		}
 
 		return max_usage;

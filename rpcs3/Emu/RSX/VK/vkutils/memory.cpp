@@ -203,6 +203,14 @@ namespace vk
 
 		// Determine the rebar heap. We will exclude it from stats
 		const auto& memory_map = dev.get_memory_mapping();
+		rsx_log.warning("Detecting Re-BAR configuration");
+		rsx_log.warning("Re-BAR size=%llu, VRAM=%llu", memory_map.device_bar_total_bytes, memory_map.device_local_total_bytes);
+		for (u32 i = 0; i < ::size32(memory_map.heaps); ++i)
+		{
+			const auto& heap = memory_map.heaps[i];
+			rsx_log.warning("Heap %u, size=%llu, flags=%u", i, heap.size, heap.flags);
+		}
+
 		if (memory_map.device_bar_total_bytes !=
 			memory_map.device_local_total_bytes)
 		{
@@ -212,10 +220,16 @@ namespace vk
 				if ((heap.flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT) &&
 					heap.size == memory_map.device_bar_total_bytes)
 				{
+					rsx_log.warning("Re-BAR match on heap %u", i);
 					m_rebar_heap_idx = i;
 					break;
 				}
 			}
+		}
+
+		if (m_rebar_heap_idx == umax)
+		{
+			rsx_log.warning("Failed to detect Re-BAR heap");
 		}
 	}
 

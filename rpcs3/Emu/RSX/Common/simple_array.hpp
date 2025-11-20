@@ -196,13 +196,17 @@ namespace rsx
 			if (is_local_storage())
 			{
 				// Switch to heap storage
-				ensure(_data = static_cast<Ty*>(std::malloc(sizeof(Ty) * size)));
+				ensure(_data = static_cast<Ty*>(std::aligned_alloc(alignof(Ty), sizeof(Ty) * size)));
 				std::memcpy(static_cast<void*>(_data), _local_storage, size_bytes());
 			}
 			else
 			{
 				// Extend heap storage
-				ensure(_data = static_cast<Ty*>(std::realloc(_data, sizeof(Ty) * size))); // "realloc() failed!"
+				//ensure(_data = static_cast<Ty*>(std::realloc(_data, sizeof(Ty) * size))); // "realloc() failed!"
+				auto old_data = _data;
+				ensure(_data = static_cast<Ty*>(std::aligned_alloc(alignof(Ty), sizeof(Ty) * size)));
+				std::memcpy(static_cast<void*>(_data), old_data, size_bytes());
+				std::free(old_data);
 			}
 
 			_capacity = size;

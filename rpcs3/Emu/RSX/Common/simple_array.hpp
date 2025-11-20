@@ -28,7 +28,7 @@ namespace rsx
 
 	private:
 		static constexpr u32 _local_capacity = std::max<u32>(64u / sizeof(Ty), 1u);
-		_Alignas(Ty) char _local_storage[_local_capacity * sizeof(Ty)];
+		alignas(alignof(Ty)) char _local_storage[_local_capacity * sizeof(Ty)];
 
 		u32 _capacity = _local_capacity;
 		Ty* _data = _local_capacity ? reinterpret_cast<Ty*>(_local_storage) : nullptr;

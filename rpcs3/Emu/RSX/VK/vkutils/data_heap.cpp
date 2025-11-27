@@ -1,6 +1,7 @@
 #include "barriers.h"
 #include "data_heap.h"
 #include "device.h"
+#include "chip_class.h"
 
 #include "../../RSXOffload.h"
 #include "../VKHelpers.h"
@@ -18,8 +19,10 @@ namespace vk
 		::data_heap::init(size, name, guard);
 
 		const auto& memory_map = g_render_device->get_memory_mapping();
+		const auto chip_fam = vk::get_chip_family();
+		const bool force_shadow = (flags & heap_pool_low_latency) && chip_fam >= chip_class::NV_kepler && chip_fam <= chip_class::NV_volta;
 
-		if ((flags & heap_pool_low_latency) && g_cfg.video.vk.use_rebar_upload_heap)
+		if (!force_shadow && (flags & heap_pool_low_latency) && g_cfg.video.vk.use_rebar_upload_heap)
 		{
 			// Prefer uploading to BAR if low latency is desired.
 			const int max_usage = memory_map.device_bar_total_bytes <= (256 * 0x100000) ? 75 : 90;
@@ -39,7 +42,7 @@ namespace vk
 		VkFlags memory_flags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 		auto memory_index = m_prefer_writethrough ? memory_map.device_bar : memory_map.host_visible_coherent;
 
-		if (!(get_heap_compatible_buffer_types() & usage))
+		if (force_shadow || !(get_heap_compatible_buffer_types() & usage))
 		{
 			rsx_log.warning("Buffer usage %u is not heap-compatible using this driver, explicit staging buffer in use", usage);
 
@@ -243,3 +246,4 @@ namespace vk
 		return &g_upload_heap;
 	}
 }
+

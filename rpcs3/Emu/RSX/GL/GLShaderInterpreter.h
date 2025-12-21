@@ -5,6 +5,11 @@
 
 #include <unordered_map>
 
+namespace rsx
+{
+	struct shader_loading_dialog;
+}
+
 namespace gl
 {
 	using namespace ::glsl;
@@ -78,7 +83,7 @@ namespace gl
 		interpreter::cached_program* m_current_interpreter = nullptr;
 
 	public:
-		void create();
+		void create(rsx::shader_loading_dialog* dlg);
 		void destroy();
 
 		void update_fragment_textures(const std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, 16>& descriptors, u16 reference_mask, u32* out);

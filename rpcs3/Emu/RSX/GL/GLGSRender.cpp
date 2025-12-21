@@ -331,8 +331,6 @@ void GLGSRender::on_init_thread()
 	{
 		m_vertex_instructions_buffer->create(gl::buffer::target::ssbo, 16 * 0x100000);
 		m_fragment_instructions_buffer->create(gl::buffer::target::ssbo, 16 * 0x100000);
-
-		m_shader_interpreter.create();
 	}
 
 	if (gl_caps.vendor_AMD)
@@ -408,20 +406,30 @@ void GLGSRender::on_init_thread()
 		}
 	);
 
-	if (!m_overlay_manager)
+	if (shadermode == shader_mode::async_with_interpreter ||
+		shadermode == shader_mode::interpreter_only)
 	{
-		m_frame->hide();
-		m_shaders_cache->load(nullptr);
-		m_frame->show();
+		std::unique_ptr<rsx::shader_loading_dialog> dlg = m_overlay_manager
+			? std::make_unique<rsx::shader_loading_dialog_native>(this)
+			: std::make_unique<rsx::shader_loading_dialog>();
+		m_shader_interpreter.create(dlg.get());
 	}
-	else
-	{
-		rsx::shader_loading_dialog_native dlg(this);
 
-		m_shaders_cache->load(&dlg);
+	if (shadermode != shader_mode::interpreter_only)
+	{
+		if (!m_overlay_manager)
+		{
+			m_frame->hide();
+			m_shaders_cache->load(nullptr);
+			m_frame->show();
+		}
+		else
+		{
+			rsx::shader_loading_dialog_native dlg(this);
+			m_shaders_cache->load(&dlg);
+		}
 	}
 }
-
 
 void GLGSRender::on_exit()
 {

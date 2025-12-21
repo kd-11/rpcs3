@@ -3,9 +3,11 @@
 #include "GLTextureCache.h"
 #include "GLVertexProgram.h"
 #include "GLFragmentProgram.h"
-#include "../rsx_methods.h"
-#include "../Program/ShaderInterpreter.h"
-#include "../Program/GLSLCommon.h"
+
+#include "Emu/RSX/rsx_methods.h"
+#include "Emu/RSX/Overlays/Shaders/shader_loading_dialog.h"
+#include "Emu/RSX/Program/ShaderInterpreter.h"
+#include "Emu/RSX/Program/GLSLCommon.h"
 
 namespace gl
 {
@@ -44,10 +46,25 @@ namespace gl
 		}
 	}
 
-	void shader_interpreter::create()
+	void shader_interpreter::create(rsx::shader_loading_dialog* dlg)
 	{
-		build_program(::program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES);
-		build_program(::program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES | ::program_common::interpreter::COMPILER_OPT_ENABLE_F32_EXPORT);
+		dlg->create("Precompiling interpreter variants.\nPlease wait...", "Shader Compilation");
+
+		const auto variants = program_common::interpreter::get_interpreter_variants();
+		const u32 limit = ::size32(variants);
+		dlg->set_limit(0, limit);
+		dlg->set_limit(1, 1);
+
+		u32 ctr = 0;
+		for (auto& variant : variants)
+		{
+			build_program(variant.first | variant.second);
+			dlg->update_msg(0, fmt::format("Building variant %u of %u...", ++ctr, limit));
+			dlg->inc_value(0, 1);
+		}
+
+		dlg->inc_value(1, 1);
+		dlg->refresh();
 	}
 
 	void shader_interpreter::destroy()

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <util/types.hpp>
+
 namespace program_common
 {
 	namespace interpreter
@@ -22,7 +24,15 @@ namespace program_common
 			COMPILER_OPT_ENABLE_INSTANCING     = (1 << 13),
 			COMPILER_OPT_ENABLE_VTX_TEXTURES   = (1 << 14),
 
-			COMPILER_OPT_MAX                   = COMPILER_OPT_ENABLE_VTX_TEXTURES
+			// Meta
+			COMPILER_OPT_MAX                   = COMPILER_OPT_ENABLE_VTX_TEXTURES,
+			COMPILER_OPT_ALPHA_TEST_MASK       = (0b111111 << COMPILER_OPT_ENABLE_ALPHA_TEST_GE),
+
+			// Bounds
+			COMPILER_OPT_FS_MAX                = COMPILER_OPT_ENABLE_STIPPLING,
+			COMPILER_OPT_FS_MIN                = COMPILER_OPT_ENABLE_TEXTURES,
+			COMPILER_OPT_VS_MAX                = COMPILER_OPT_ENABLE_VTX_TEXTURES,
+			COMPILER_OPT_VS_MIN                = COMPILER_OPT_ENABLE_INSTANCING,
 		};
 
 		static std::string get_vertex_interpreter()
@@ -40,5 +50,8 @@ namespace program_common
 			;
 			return s;
 		}
+
+		using interpreter_variant_t = std::pair<u32, u32>;
+		std::vector<interpreter_variant_t> get_interpreter_variants();
 	}
 }

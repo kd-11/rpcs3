@@ -1402,6 +1402,9 @@
     <ClCompile Include="Emu\NP\clans_client.cpp">
       <Filter>Emu\NP</Filter>
     </ClCompile>
+    <ClCompile Include="Emu\RSX\Program\ShaderInterpreter.cpp">
+      <Filter>Emu\GPU\RSX\Program</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Crypto\aes.h">

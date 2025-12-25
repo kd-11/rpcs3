@@ -8,6 +8,11 @@
 class VKVertexProgram;
 class VKFragmentProgram;
 
+namespace rsx
+{
+	struct shader_loading_dialog;
+}
+
 namespace vk
 {
 	using ::program_hash_util::fragment_program_utils;
@@ -69,6 +74,8 @@ namespace vk
 	public:
 		void init(const vk::render_device& dev);
 		void destroy();
+
+		void preload(rsx::shader_loading_dialog* dlg);
 
 		glsl::program* get(
 			const vk::pipeline_props& properties,

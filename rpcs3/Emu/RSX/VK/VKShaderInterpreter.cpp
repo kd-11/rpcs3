@@ -4,11 +4,13 @@
 #include "VKCommonPipelineLayout.h"
 #include "VKVertexProgram.h"
 #include "VKFragmentProgram.h"
+#include "VKHelpers.h"
+#include "VKRenderPass.h"
+
+#include "../Overlays/Shaders/shader_loading_dialog.h"
 #include "../Program/GLSLCommon.h"
 #include "../Program/ShaderInterpreter.h"
 #include "../rsx_methods.h"
-#include "VKHelpers.h"
-#include "VKRenderPass.h"
 
 namespace vk
 {
@@ -569,5 +571,27 @@ namespace vk
 
 		auto it = m_pipeline_info_cache.insert_or_assign(compiler_opt, result);
 		return &it.first->second;
+	}
+
+	void shader_interpreter::preload(rsx::shader_loading_dialog* dlg)
+	{
+		dlg->create("Precompiling interpreter variants.\nPlease wait...", "Shader Compilation");
+
+		const auto variants = program_common::interpreter::get_interpreter_variants();
+		const u32 limit = ::size32(variants);
+		dlg->set_limit(0, limit);
+		dlg->set_limit(1, 1);
+
+		u32 ctr = 0;
+		for (auto& variant : variants)
+		{
+			build_fs(variant.first | variant.second);
+			build_vs(variant.first | variant.second);
+			dlg->update_msg(0, fmt::format("Building variant %u of %u...", ++ctr, limit));
+			dlg->inc_value(0, 1);
+		}
+
+		dlg->inc_value(1, 1);
+		dlg->refresh();
 	}
 };

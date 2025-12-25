@@ -413,6 +413,7 @@ void GLGSRender::on_init_thread()
 			? std::make_unique<rsx::shader_loading_dialog_native>(this)
 			: std::make_unique<rsx::shader_loading_dialog>();
 		m_shader_interpreter.create(dlg.get());
+		dlg->close();
 	}
 
 	if (shadermode != shader_mode::interpreter_only)

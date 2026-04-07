@@ -55,7 +55,7 @@ namespace gl
 
 			const std::string& get_source() const { return source; }
 
-			fence get_compile_fence_sync() const { return m_compiled_fence; }
+			const fence& get_compile_fence_sync() const { return m_compiled_fence; }
 
 			bool created() const { return m_id != GL_NONE; }
 
@@ -106,13 +106,16 @@ namespace gl
 
 			class uniforms_t
 			{
-				program& m_program;
+				program* m_program = nullptr;
 				std::unordered_map<std::string, GLint> locations;
 
 			public:
 				uniforms_t(program* program)
-					: m_program(*program)
+					: m_program(program)
 				{}
+
+				uniforms_t(uniforms_t&&) noexcept = default;
+				uniforms_t& operator = (uniforms_t&&) noexcept = default;
 
 				void clear() { locations.clear(); }
 
@@ -120,15 +123,17 @@ namespace gl
 
 				GLint location(const std::string& name);
 
-				uniform_t operator[](GLint location) { return{ m_program, location }; }
+				uniform_t operator[](GLint location) { return{ *m_program, location }; }
 
-				uniform_t operator[](const std::string& name) { return{ m_program, location(name) }; }
+				uniform_t operator[](const std::string& name) { return{ *m_program, location(name) }; }
 
 			} uniforms{ this };
 
 		public:
 			program() = default;
+
 			program(const program&) = delete;
+			program& operator = (const program&) = delete;
 
 			~program()
 			{
@@ -136,6 +141,13 @@ namespace gl
 				{
 					remove();
 				}
+			}
+
+			void swap(program&& other) noexcept
+			{
+				std::swap(m_id, other.m_id);
+				std::swap(m_fence, other.m_fence);
+				std::swap(uniforms, other.uniforms);
 			}
 
 			program& recreate()

@@ -78,7 +78,10 @@ namespace gl
 
 		void build_vs(u64 compiler_options, interpreter::cached_program& prog_data);
 		void build_fs(u64 compiler_options, interpreter::cached_program& prog_data);
+
 		interpreter::cached_program* build_program(u64 compiler_options);
+		void build_program_async(u64 compiler_options, std::function<void(interpreter::cached_program*)> callback);
+		void post_init_hook(interpreter::cached_program* data, u64 compiler_options);
 
 		interpreter::cached_program* m_current_interpreter = nullptr;
 

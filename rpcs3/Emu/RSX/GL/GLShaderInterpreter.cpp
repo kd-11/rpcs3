@@ -3,6 +3,7 @@
 #include "GLTextureCache.h"
 #include "GLVertexProgram.h"
 #include "GLFragmentProgram.h"
+#include "GLPipelineCompiler.h"
 
 #include "Emu/RSX/rsx_methods.h"
 #include "Emu/RSX/Overlays/Shaders/shader_loading_dialog.h"
@@ -55,13 +56,23 @@ namespace gl
 		dlg->set_limit(0, limit);
 		dlg->set_limit(1, 1);
 
-		u32 ctr = 0;
+		atomic_t<u32> ctr = 0;
+		auto progress_hook = [&](interpreter::cached_program*) { ctr++; };
+
 		for (auto& variant : variants)
 		{
-			build_program(variant.first | variant.second);
-			dlg->update_msg(0, fmt::format("Building variant %u of %u...", ++ctr, limit));
-			dlg->inc_value(0, 1);
+			build_program_async(variant.first | variant.second, progress_hook);
 		}
+
+		do
+		{
+			std::this_thread::sleep_for(16ms);
+
+			const u32 completed = ctr.load();
+			dlg->update_msg(0, fmt::format("Building variant %u of %u...", completed, limit));
+			dlg->set_value(0, completed);
+		}
+		while (ctr < limit);
 
 		dlg->inc_value(1, 1);
 		dlg->refresh();
@@ -359,6 +370,45 @@ namespace gl
 			attach(data->fragment_shader).
 			link();
 
+		post_init_hook(data, compiler_options);
+		return data;
+	}
+
+	void shader_interpreter::build_program_async(u64 compiler_options, std::function<void(interpreter::cached_program*)> callback)
+	{
+		auto data = new interpreter::cached_program();
+
+		auto post_create_hook = [=](glsl::program* prog)
+		{
+			build_fs(compiler_options, *data);
+			build_vs(compiler_options, *data);
+
+			prog->attach(data->vertex_shader).
+				attach(data->fragment_shader);
+		};
+
+		auto storage_hook = [=](std::unique_ptr<glsl::program>& prog)
+		{
+			data->prog.swap(std::move(*prog));
+			post_init_hook(data, compiler_options);
+
+			if (callback)
+			{
+				callback(data);
+			}
+		};
+
+		auto compiler = gl::get_pipe_compiler();
+		compiler->compile(
+			gl::pipe_compiler::COMPILE_DEFERRED,
+			post_create_hook,
+			{},
+			storage_hook
+		);
+	}
+
+	void shader_interpreter::post_init_hook(interpreter::cached_program* data, u64 compiler_options)
+	{
 		data->prog.uniforms[0] = GL_STREAM_BUFFER_START + 0;
 		data->prog.uniforms[1] = GL_STREAM_BUFFER_START + 1;
 
@@ -381,7 +431,6 @@ namespace gl
 		}
 
 		m_program_cache[compiler_options].reset(data);
-		return data;
 	}
 
 	bool shader_interpreter::is_interpreter(const glsl::program* program) const

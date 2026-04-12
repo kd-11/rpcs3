@@ -20,7 +20,10 @@ namespace vk
 
 	class shader_interpreter
 	{
+		using async_build_fn_callback = std::function<void(std::shared_ptr<glsl::program>&)>;
+
 		VkDevice m_device = VK_NULL_HANDLE;
+		VkPipelineCache m_driver_pipeline_cache = VK_NULL_HANDLE;
 
 		struct pipeline_key
 		{
@@ -69,7 +72,7 @@ namespace vk
 
 		std::shared_ptr<VKVertexProgram> build_vs(u64 compiler_opt);
 		std::shared_ptr<VKFragmentProgram> build_fs(u64 compiler_opt);
-		std::shared_ptr<glsl::program> link(const vk::pipeline_props& properties, u64 compiler_opt);
+		std::shared_ptr<glsl::program> link(const vk::pipeline_props& properties, u64 compiler_opt, bool async = false, async_build_fn_callback async_callback = {});
 
 		u32 init(std::shared_ptr<VKVertexProgram>& vk_prog, u64 compiler_opt) const;
 		u32 init(std::shared_ptr<VKFragmentProgram>& vk_prog, u64 compiler_opt) const;

@@ -57,7 +57,13 @@ namespace vk
 			u32 fragment_textures_location = 0;
 		};
 
-		std::unordered_map<pipeline_key, std::shared_ptr<glsl::program>, key_hasher> m_program_cache;
+		struct pipeline_cache_entry_t
+		{
+			u32 flags = 0;
+			std::shared_ptr<glsl::program> program;
+		};
+
+		std::unordered_map<pipeline_key, pipeline_cache_entry_t, key_hasher> m_program_cache;
 		std::unordered_map<u64, std::shared_ptr<VKVertexProgram>> m_vs_shader_cache;
 		std::unordered_map<u64, std::shared_ptr<VKFragmentProgram>> m_fs_shader_cache;
 		std::unordered_map<u64, pipeline_info_ex_t> m_pipeline_info_cache;

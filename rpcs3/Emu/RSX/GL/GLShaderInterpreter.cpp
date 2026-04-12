@@ -509,7 +509,7 @@ namespace gl
 
 		auto storage_hook = [=](std::unique_ptr<glsl::program>& prog)
 		{
-			data->prog.reset(prog.release());
+			data->prog = std::move(prog);
 			post_init_hook(data, compiler_options);
 
 			if (callback)

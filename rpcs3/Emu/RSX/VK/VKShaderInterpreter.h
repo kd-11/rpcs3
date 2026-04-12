@@ -55,8 +55,13 @@ namespace vk
 		};
 
 		std::unordered_map<pipeline_key, std::shared_ptr<glsl::program>, key_hasher> m_program_cache;
-		std::unordered_map<u64, shader_cache_entry_t> m_shader_cache;
+		std::unordered_map<u64, std::shared_ptr<VKVertexProgram>> m_vs_shader_cache;
+		std::unordered_map<u64, std::shared_ptr<VKFragmentProgram>> m_fs_shader_cache;
 		std::unordered_map<u64, pipeline_info_ex_t> m_pipeline_info_cache;
+
+		mutable shared_mutex m_program_cache_lock;
+		mutable shared_mutex m_vs_shader_cache_lock;
+		mutable shared_mutex m_fs_shader_cache_lock;
 
 		pipeline_key m_current_key{};
 		pipeline_info_ex_t m_current_pipeline_info_ex{};

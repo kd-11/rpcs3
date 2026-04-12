@@ -2204,6 +2204,7 @@ std::pair<const vs_binding_table_t*, const fs_binding_table_t*> VKGSRender::get_
 	}
 
 	const auto& [vs, fs] = m_shader_interpreter.get_shaders();
+	ensure(vs && fs, "Invalid interpreter configuration");
 	return { &vs->binding_table, &fs->binding_table };
 }
 

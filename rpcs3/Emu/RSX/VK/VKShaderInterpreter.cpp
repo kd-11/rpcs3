@@ -14,6 +14,8 @@
 
 namespace vk
 {
+	using enum program_common::interpreter::compiler_option;
+
 	u32 shader_interpreter::init(std::shared_ptr<VKVertexProgram>& vk_prog, u64 compiler_options) const
 	{
 		std::memset(&vk_prog->binding_table, 0xff, sizeof(vk_prog->binding_table));
@@ -29,7 +31,7 @@ namespace vk
 			vk_prog->binding_table.cr_pred_buffer_location = location++;
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
+		if (compiler_options & COMPILER_OPT_ENABLE_INSTANCING)
 		{
 			vk_prog->binding_table.instanced_lut_buffer_location = location++;
 			vk_prog->binding_table.instanced_cbuf_location = location++;
@@ -62,6 +64,16 @@ namespace vk
 
 	std::shared_ptr<VKVertexProgram> shader_interpreter::build_vs(u64 compiler_options)
 	{
+		compiler_options &= COMPILER_OPT_ALL_VS_MASK;
+		{
+			reader_lock lock(m_vs_shader_cache_lock);
+			if (auto found = m_vs_shader_cache.find(compiler_options);
+				found != m_vs_shader_cache.end())
+			{
+				return found->second;
+			}
+		}
+
 		::glsl::shader_properties properties{};
 		properties.domain = ::glsl::program_domain::glsl_vertex_program;
 		properties.require_lit_emulation = true;
@@ -75,7 +87,7 @@ namespace vk
 		auto vk_prog = std::make_shared<VKVertexProgram>();
 		const u32 vertex_instruction_start = init(vk_prog, compiler_options);
 
-		null_prog.ctrl = (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
+		null_prog.ctrl = (compiler_options & COMPILER_OPT_ENABLE_INSTANCING)
 			? RSX_SHADER_CONTROL_INSTANCED_CONSTANTS
 			: 0;
 		VKVertexDecompilerThread comp(null_prog, shader_str, arr, *vk_prog);
@@ -113,13 +125,13 @@ namespace vk
 		"	uvec4 vp_instructions[];\n"
 		"};\n\n";
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_VTX_TEXTURES)
+		if (compiler_options & COMPILER_OPT_ENABLE_VTX_TEXTURES)
 		{
 			// FIXME: Unimplemented
 			rsx_log.todo("Vertex textures are currently not implemented for the shader interpreter.");
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
+		if (compiler_options & COMPILER_OPT_ENABLE_INSTANCING)
 		{
 			builder << "#define _ENABLE_INSTANCED_CONSTANTS\n";
 		}
@@ -153,12 +165,23 @@ namespace vk
 
 		vk_prog->SetInputs(vs_inputs);
 
-		m_shader_cache[compiler_options].m_vs = vk_prog;
+		std::lock_guard lock(m_vs_shader_cache_lock);
+		m_vs_shader_cache[compiler_options] = vk_prog;
 		return vk_prog;
 	}
 
 	std::shared_ptr<VKFragmentProgram> shader_interpreter::build_fs(u64 compiler_options)
 	{
+		compiler_options &= COMPILER_OPT_ALL_FS_MASK;
+		{
+			reader_lock lock(m_fs_shader_cache_lock);
+			if (auto found = m_fs_shader_cache.find(compiler_options);
+				found != m_fs_shader_cache.end())
+			{
+				return found->second;
+			}
+		}
+
 		[[maybe_unused]] ::glsl::shader_properties properties{};
 		properties.domain = ::glsl::program_domain::glsl_fragment_program;
 		properties.require_depth_conversion = true;
@@ -196,68 +219,68 @@ namespace vk
 		"#define wpos_scale fs_contexts[_fs_context_offset].wpos_scale\n"
 		"#define wpos_bias fs_contexts[_fs_context_offset].wpos_bias\n\n";
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_GE)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_GE)
 		{
 			builder << "#define ALPHA_TEST_GEQUAL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_G)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_G)
 		{
 			builder << "#define ALPHA_TEST_GREATER\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_LE)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_LE)
 		{
 			builder << "#define ALPHA_TEST_LEQUAL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_L)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_L)
 		{
 			builder << "#define ALPHA_TEST_LESS\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_EQ)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_EQ)
 		{
 			builder << "#define ALPHA_TEST_EQUAL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_NE)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_NE)
 		{
 			builder << "#define ALPHA_TEST_NEQUAL\n";
 		}
 
-		if (!(compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_F32_EXPORT))
+		if (!(compiler_options & COMPILER_OPT_ENABLE_F32_EXPORT))
 		{
 			builder << "#define WITH_HALF_OUTPUT_REGISTER\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_DEPTH_EXPORT)
+		if (compiler_options & COMPILER_OPT_ENABLE_DEPTH_EXPORT)
 		{
 			builder << "#define WITH_DEPTH_EXPORT\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_FLOW_CTRL)
+		if (compiler_options & COMPILER_OPT_ENABLE_FLOW_CTRL)
 		{
 			builder << "#define WITH_FLOW_CTRL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_PACKING)
+		if (compiler_options & COMPILER_OPT_ENABLE_PACKING)
 		{
 			builder << "#define WITH_PACKING\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_KIL)
+		if (compiler_options & COMPILER_OPT_ENABLE_KIL)
 		{
 			builder << "#define WITH_KIL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_STIPPLING)
+		if (compiler_options & COMPILER_OPT_ENABLE_STIPPLING)
 		{
 			builder << "#define WITH_STIPPLING\n";
 		}
 
 		const char* type_names[] = { "sampler1D", "sampler2D", "sampler3D", "samplerCube" };
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES)
+		if (compiler_options & COMPILER_OPT_ENABLE_TEXTURES)
 		{
 			builder << "#define WITH_TEXTURES\n\n";
 
@@ -278,14 +301,14 @@ namespace vk
 		}
 
 		builder <<
-		"layout(std430, set=1, binding=" << fragment_instruction_start << ") readonly restrict buffer FragmentInstructionBlock\n"
-		"{\n"
-		"	uint shader_control;\n"
-		"	uint texture_control;\n"
-		"	uint reserved1;\n"
-		"	uint reserved2;\n"
-		"	uvec4 fp_instructions[];\n"
-		"};\n\n";
+			"layout(std430, set=1, binding=" << fragment_instruction_start << ") readonly restrict buffer FragmentInstructionBlock\n"
+			"{\n"
+			"	uint shader_control;\n"
+			"	uint texture_control;\n"
+			"	uint reserved1;\n"
+			"	uint reserved2;\n"
+			"	uvec4 fp_instructions[];\n"
+			"};\n\n";
 
 		builder <<
 			"	uint rop_control = fs_contexts[_fs_context_offset].rop_control;\n"
@@ -309,7 +332,7 @@ namespace vk
 		in.name = "FragmentInstructionBlock";
 		inputs.push_back(in);
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES)
+		if (compiler_options & COMPILER_OPT_ENABLE_TEXTURES)
 		{
 			for (int i = 0, location = fragment_textures_start; i < 4; ++i, ++location)
 			{
@@ -322,7 +345,8 @@ namespace vk
 
 		vk_prog->SetInputs(inputs);
 
-		m_shader_cache[compiler_options].m_fs = vk_prog;
+		std::lock_guard lock(m_fs_shader_cache_lock);
+		m_fs_shader_cache[compiler_options] = vk_prog;
 		return vk_prog;
 	}
 
@@ -335,24 +359,14 @@ namespace vk
 	{
 		m_current_interpreter.reset();
 		m_program_cache.clear();
-		m_shader_cache.clear();
+		m_vs_shader_cache.clear();
+		m_fs_shader_cache.clear();
 	}
 
 	std::shared_ptr<glsl::program> shader_interpreter::link(const vk::pipeline_props& properties, u64 compiler_opt)
 	{
-		std::shared_ptr<VKVertexProgram> vs;
-		std::shared_ptr<VKFragmentProgram> fs;
-
-		if (auto found = m_shader_cache.find(compiler_opt); found != m_shader_cache.end())
-		{
-			fs = found->second.m_fs;
-			vs = found->second.m_vs;
-		}
-		else
-		{
-			fs = build_fs(compiler_opt);
-			vs = build_vs(compiler_opt);
-		}
+		auto vs = build_vs(compiler_opt);
+		auto fs = build_fs(compiler_opt);
 
 		VkPipelineShaderStageCreateInfo shader_stages[2] = {};
 		shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -474,35 +488,35 @@ namespace vk
 			case rsx::comparison_function::never:
 				return nullptr;
 			case rsx::comparison_function::greater_or_equal:
-				key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_GE;
+				key.compiler_opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_GE;
 				break;
 			case rsx::comparison_function::greater:
-				key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_G;
+				key.compiler_opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_G;
 				break;
 			case rsx::comparison_function::less_or_equal:
-				key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_LE;
+				key.compiler_opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_LE;
 				break;
 			case rsx::comparison_function::less:
-				key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_L;
+				key.compiler_opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_L;
 				break;
 			case rsx::comparison_function::equal:
-				key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_EQ;
+				key.compiler_opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_EQ;
 				break;
 			case rsx::comparison_function::not_equal:
-				key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_NE;
+				key.compiler_opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_NE;
 				break;
 			}
 		}
 
-		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_DEPTH_EXPORT;
-		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_F32_EXPORT;
-		if (fp_ctrl & RSX_SHADER_CONTROL_USES_KIL) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_KIL;
-		if (fp_metadata.referenced_textures_mask) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES;
-		if (fp_metadata.has_branch_instructions) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_FLOW_CTRL;
-		if (fp_metadata.has_pack_instructions) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_PACKING;
-		if (rsx::method_registers.polygon_stipple_enabled()) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_STIPPLING;
-		if (vp_ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING;
-		if (vp_metadata.referenced_textures_mask) key.compiler_opt |= program_common::interpreter::COMPILER_OPT_ENABLE_VTX_TEXTURES;
+		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT) key.compiler_opt |= COMPILER_OPT_ENABLE_DEPTH_EXPORT;
+		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) key.compiler_opt |= COMPILER_OPT_ENABLE_F32_EXPORT;
+		if (fp_ctrl & RSX_SHADER_CONTROL_USES_KIL) key.compiler_opt |= COMPILER_OPT_ENABLE_KIL;
+		if (fp_metadata.referenced_textures_mask) key.compiler_opt |= COMPILER_OPT_ENABLE_TEXTURES;
+		if (fp_metadata.has_branch_instructions) key.compiler_opt |= COMPILER_OPT_ENABLE_FLOW_CTRL;
+		if (fp_metadata.has_pack_instructions) key.compiler_opt |= COMPILER_OPT_ENABLE_PACKING;
+		if (rsx::method_registers.polygon_stipple_enabled()) key.compiler_opt |= COMPILER_OPT_ENABLE_STIPPLING;
+		if (vp_ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS) key.compiler_opt |= COMPILER_OPT_ENABLE_INSTANCING;
+		if (vp_metadata.referenced_textures_mask) key.compiler_opt |= COMPILER_OPT_ENABLE_VTX_TEXTURES;
 
 		if (m_current_key == key) [[likely]]
 		{
@@ -543,14 +557,31 @@ namespace vk
 
 	std::pair<std::shared_ptr<VKVertexProgram>, std::shared_ptr<VKFragmentProgram>> shader_interpreter::get_shaders() const
 	{
-		if (auto found = m_shader_cache.find(m_current_key.compiler_opt); found != m_shader_cache.end())
+		const auto vs_opt = m_current_key.compiler_opt & COMPILER_OPT_ALL_VS_MASK;
+		const auto fs_opt = m_current_key.compiler_opt & COMPILER_OPT_ALL_FS_MASK;
+
+		std::shared_ptr<VKVertexProgram> vs;
+		std::shared_ptr<VKFragmentProgram> fs;
+
 		{
-			auto fs = found->second.m_fs;
-			auto vs = found->second.m_vs;
-			return { vs, fs };
+			reader_lock lock(m_vs_shader_cache_lock);
+			if (auto found = m_vs_shader_cache.find(vs_opt);
+				found != m_vs_shader_cache.end())
+			{
+				vs = found->second;
+			}
 		}
 
-		return {};
+		{
+			reader_lock lock(m_fs_shader_cache_lock);
+			if (auto found = m_fs_shader_cache.find(fs_opt);
+				found != m_fs_shader_cache.end())
+			{
+				fs = found->second;
+			}
+		}
+
+		return { vs, fs };
 	}
 
 	const shader_interpreter::pipeline_info_ex_t* shader_interpreter::get_pipeline_info_ex(u64 compiler_opt)

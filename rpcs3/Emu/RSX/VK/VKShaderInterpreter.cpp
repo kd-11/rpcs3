@@ -14,7 +14,7 @@
 
 namespace vk
 {
-	u32 shader_interpreter::init(VKVertexProgram* vk_prog, u64 compiler_options) const
+	u32 shader_interpreter::init(std::shared_ptr<VKVertexProgram>& vk_prog, u64 compiler_options) const
 	{
 		std::memset(&vk_prog->binding_table, 0xff, sizeof(vk_prog->binding_table));
 
@@ -48,7 +48,7 @@ namespace vk
 		return location;
 	}
 
-	u32 shader_interpreter::init(VKFragmentProgram* vk_prog, u64 /*compiler_opt*/) const
+	u32 shader_interpreter::init(std::shared_ptr<VKFragmentProgram>& vk_prog, u64 /*compiler_opt*/) const
 	{
 		std::memset(&vk_prog->binding_table, 0xff, sizeof(vk_prog->binding_table));
 
@@ -60,7 +60,7 @@ namespace vk
 		return 3;
 	}
 
-	VKVertexProgram* shader_interpreter::build_vs(u64 compiler_options)
+	std::shared_ptr<VKVertexProgram> shader_interpreter::build_vs(u64 compiler_options)
 	{
 		::glsl::shader_properties properties{};
 		properties.domain = ::glsl::program_domain::glsl_vertex_program;
@@ -72,8 +72,8 @@ namespace vk
 		ParamArray arr;
 
 		// Initialize binding layout
-		auto vk_prog = std::make_unique<VKVertexProgram>();
-		const u32 vertex_instruction_start = init(vk_prog.get(), compiler_options);
+		auto vk_prog = std::make_shared<VKVertexProgram>();
+		const u32 vertex_instruction_start = init(vk_prog, compiler_options);
 
 		null_prog.ctrl = (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
 			? RSX_SHADER_CONTROL_INSTANCED_CONSTANTS
@@ -153,12 +153,11 @@ namespace vk
 
 		vk_prog->SetInputs(vs_inputs);
 
-		auto ret = vk_prog.get();
-		m_shader_cache[compiler_options].m_vs = std::move(vk_prog);
-		return ret;
+		m_shader_cache[compiler_options].m_vs = vk_prog;
+		return vk_prog;
 	}
 
-	VKFragmentProgram* shader_interpreter::build_fs(u64 compiler_options)
+	std::shared_ptr<VKFragmentProgram> shader_interpreter::build_fs(u64 compiler_options)
 	{
 		[[maybe_unused]] ::glsl::shader_properties properties{};
 		properties.domain = ::glsl::program_domain::glsl_fragment_program;
@@ -172,8 +171,8 @@ namespace vk
 
 		frag.ctrl |= RSX_SHADER_CONTROL_INTERPRETER_MODEL;
 
-		auto vk_prog = std::make_unique<VKFragmentProgram>();
-		const u32 fragment_instruction_start = init(vk_prog.get(), compiler_options);
+		auto vk_prog = std::make_shared<VKFragmentProgram>();
+		const u32 fragment_instruction_start = init(vk_prog, compiler_options);
 		const u32 fragment_textures_start = fragment_instruction_start + 1;
 
 		VKFragmentDecompilerThread comp(shader_str, arr, frag, len, *vk_prog);
@@ -323,9 +322,8 @@ namespace vk
 
 		vk_prog->SetInputs(inputs);
 
-		auto ret = vk_prog.get();
-		m_shader_cache[compiler_options].m_fs = std::move(vk_prog);
-		return ret;
+		m_shader_cache[compiler_options].m_fs = vk_prog;
+		return vk_prog;
 	}
 
 	void shader_interpreter::init(const vk::render_device& dev)
@@ -335,19 +333,20 @@ namespace vk
 
 	void shader_interpreter::destroy()
 	{
+		m_current_interpreter.reset();
 		m_program_cache.clear();
 		m_shader_cache.clear();
 	}
 
-	glsl::program* shader_interpreter::link(const vk::pipeline_props& properties, u64 compiler_opt)
+	std::shared_ptr<glsl::program> shader_interpreter::link(const vk::pipeline_props& properties, u64 compiler_opt)
 	{
-		VKVertexProgram* vs;
-		VKFragmentProgram* fs;
+		std::shared_ptr<VKVertexProgram> vs;
+		std::shared_ptr<VKFragmentProgram> fs;
 
 		if (auto found = m_shader_cache.find(compiler_opt); found != m_shader_cache.end())
 		{
-			fs = found->second.m_fs.get();
-			vs = found->second.m_vs.get();
+			fs = found->second.m_fs;
+			vs = found->second.m_vs;
 		}
 		else
 		{
@@ -436,7 +435,7 @@ namespace vk
 			vs->uniforms,
 			fs->uniforms);
 
-		return program.release();
+		return program;
 	}
 
 	void shader_interpreter::update_fragment_textures(const std::array<VkDescriptorImageInfoEx, 68>& sampled_images)
@@ -507,7 +506,7 @@ namespace vk
 
 		if (m_current_key == key) [[likely]]
 		{
-			return m_current_interpreter;
+			return m_current_interpreter.get();
 		}
 		else
 		{
@@ -518,18 +517,18 @@ namespace vk
 		auto found = m_program_cache.find(key);
 		if (found != m_program_cache.end()) [[likely]]
 		{
-			m_current_interpreter = found->second.get();
-			return m_current_interpreter;
+			m_current_interpreter = found->second;
+			return m_current_interpreter.get();
 		}
 
 		m_current_interpreter = link(properties, key.compiler_opt);
-		m_program_cache[key].reset(m_current_interpreter);
-		return m_current_interpreter;
+		m_program_cache[key] = m_current_interpreter;
+		return m_current_interpreter.get();
 	}
 
 	bool shader_interpreter::is_interpreter(const glsl::program* prog) const
 	{
-		return prog == m_current_interpreter;
+		return prog == m_current_interpreter.get();
 	}
 
 	u32 shader_interpreter::get_vertex_instruction_location() const
@@ -542,16 +541,16 @@ namespace vk
 		return m_current_pipeline_info_ex.fragment_instruction_location;
 	}
 
-	std::pair<VKVertexProgram*, VKFragmentProgram*> shader_interpreter::get_shaders() const
+	std::pair<std::shared_ptr<VKVertexProgram>, std::shared_ptr<VKFragmentProgram>> shader_interpreter::get_shaders() const
 	{
 		if (auto found = m_shader_cache.find(m_current_key.compiler_opt); found != m_shader_cache.end())
 		{
-			auto fs = found->second.m_fs.get();
-			auto vs = found->second.m_vs.get();
+			auto fs = found->second.m_fs;
+			auto vs = found->second.m_vs;
 			return { vs, fs };
 		}
 
-		return { nullptr, nullptr };
+		return {};
 	}
 
 	const shader_interpreter::pipeline_info_ex_t* shader_interpreter::get_pipeline_info_ex(u64 compiler_opt)
@@ -561,10 +560,10 @@ namespace vk
 			return &found->second;
 		}
 
-		VKVertexProgram vs_stub{};
-		VKFragmentProgram fs_stub{};
-		const auto vi_location = init(&vs_stub, compiler_opt);
-		const auto fi_location = init(&fs_stub, compiler_opt);
+		auto vs_stub = std::make_shared<VKVertexProgram>();
+		auto fs_stub = std::make_shared<VKFragmentProgram>();
+		const auto vi_location = init(vs_stub, compiler_opt);
+		const auto fi_location = init(fs_stub, compiler_opt);
 
 		pipeline_info_ex_t result
 		{
@@ -579,9 +578,9 @@ namespace vk
 
 	void shader_interpreter::preload(rsx::shader_loading_dialog* dlg)
 	{
-#if 0
 		dlg->create("Precompiling interpreter variants.\nPlease wait...", "Shader Compilation");
 
+#if 0
 		const auto variants = program_common::interpreter::get_interpreter_variants();
 		const u32 limit = ::size32(variants);
 		dlg->set_limit(0, limit);

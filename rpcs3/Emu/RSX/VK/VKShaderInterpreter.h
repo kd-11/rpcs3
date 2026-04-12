@@ -21,7 +21,6 @@ namespace vk
 	class shader_interpreter
 	{
 		VkDevice m_device = VK_NULL_HANDLE;
-		glsl::program* m_current_interpreter = nullptr;
 
 		struct pipeline_key
 		{
@@ -44,8 +43,8 @@ namespace vk
 
 		struct shader_cache_entry_t
 		{
-			std::unique_ptr<VKFragmentProgram> m_fs;
-			std::unique_ptr<VKVertexProgram> m_vs;
+			std::shared_ptr<VKFragmentProgram> m_fs;
+			std::shared_ptr<VKVertexProgram> m_vs;
 		};
 
 		struct pipeline_info_ex_t
@@ -55,19 +54,20 @@ namespace vk
 			u32 fragment_textures_location = 0;
 		};
 
-		std::unordered_map<pipeline_key, std::unique_ptr<glsl::program>, key_hasher> m_program_cache;
+		std::unordered_map<pipeline_key, std::shared_ptr<glsl::program>, key_hasher> m_program_cache;
 		std::unordered_map<u64, shader_cache_entry_t> m_shader_cache;
 		std::unordered_map<u64, pipeline_info_ex_t> m_pipeline_info_cache;
 
 		pipeline_key m_current_key{};
 		pipeline_info_ex_t m_current_pipeline_info_ex{};
+		std::shared_ptr<glsl::program> m_current_interpreter;
 
-		VKVertexProgram* build_vs(u64 compiler_opt);
-		VKFragmentProgram* build_fs(u64 compiler_opt);
-		glsl::program* link(const vk::pipeline_props& properties, u64 compiler_opt);
+		std::shared_ptr<VKVertexProgram> build_vs(u64 compiler_opt);
+		std::shared_ptr<VKFragmentProgram> build_fs(u64 compiler_opt);
+		std::shared_ptr<glsl::program> link(const vk::pipeline_props& properties, u64 compiler_opt);
 
-		u32 init(VKVertexProgram* vk_prog, u64 compiler_opt) const;
-		u32 init(VKFragmentProgram* vk_prog, u64 compiler_opt) const;
+		u32 init(std::shared_ptr<VKVertexProgram>& vk_prog, u64 compiler_opt) const;
+		u32 init(std::shared_ptr<VKFragmentProgram>& vk_prog, u64 compiler_opt) const;
 
 		const pipeline_info_ex_t* get_pipeline_info_ex(u64 compiler_opt);
 
@@ -85,7 +85,7 @@ namespace vk
 			u32 fp_ctrl);
 
 		// Retrieve the shader components that make up the current interpreter
-		std::pair<VKVertexProgram*, VKFragmentProgram*> get_shaders() const;
+		std::pair<std::shared_ptr<VKVertexProgram>, std::shared_ptr<VKFragmentProgram>> get_shaders() const;
 
 		bool is_interpreter(const glsl::program* prog) const;
 

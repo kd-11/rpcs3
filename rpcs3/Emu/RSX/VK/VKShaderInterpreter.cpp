@@ -15,6 +15,7 @@
 namespace vk
 {
 	using enum program_common::interpreter::compiler_option;
+	using enum program_common::interpreter::cached_pipeline_flags;
 
 	class async_pipe_compiler_context
 	{
@@ -497,7 +498,13 @@ namespace vk
 
 			std::shared_ptr<glsl::program> result = std::move(prog);
 			std::lock_guard lock(this->m_program_cache_lock);
-			this->m_program_cache[key] = result;
+
+			pipeline_cache_entry_t cached_program
+			{
+				.flags = 0,
+				.program = result
+			};
+			this->m_program_cache[key] = cached_program;
 
 			if (async_callback)
 			{
@@ -601,15 +608,21 @@ namespace vk
 			auto found = m_program_cache.find(key);
 			if (found != m_program_cache.end()) [[likely]]
 			{
-				m_current_interpreter = found->second;
+				m_current_interpreter = found->second.program;
 				return m_current_interpreter.get();
 			}
 		}
 
 		m_current_interpreter = link(properties, key.compiler_opt);
 
+		pipeline_cache_entry_t cache_entry
+		{
+			.flags = 0,
+			.program = m_current_interpreter
+		};
+
 		std::lock_guard lock(m_program_cache_lock);
-		m_program_cache[key] = m_current_interpreter;
+		m_program_cache[key] = cache_entry;
 		return m_current_interpreter.get();
 	}
 
@@ -709,6 +722,8 @@ namespace vk
 			}
 		}
 
+		// Drain the queue.
+		// FIXME: Since the queue is executing from the context of the pipe compiler, we cannot properly stop this process.
 		do
 		{
 			std::this_thread::sleep_for(16ms);
@@ -719,25 +734,39 @@ namespace vk
 		}
 		while (ctr.load() < limit1);
 
-		// TODO: Propagate base pipelines for faster startup
 		ctr = 0;
-		for (auto& variant : variants.pipelines)
+		std::lock_guard lock(m_program_cache_lock);
+
+		for (const auto& props : pipe_properties)
 		{
-			for (const auto& props : pipe_properties)
+			pipeline_key base_key;
+			base_key.properties = props;
+
+			for (auto& variant : variants.pipelines)
 			{
-				link(props, variant.vs_opts.shader_opt | variant.fs_opts.shader_opt, true, [&](std::shared_ptr<glsl::program>&) { ctr++; });
+				// Check if we have an exact match
+				base_key.compiler_opt = variant.vs_opts.shader_opt | variant.fs_opts.shader_opt;
+				if (auto found = m_program_cache.find(base_key);
+					found != m_program_cache.end())
+				{
+					// We have a perfect match, no propagation required
+					continue;
+				}
+
+				// Find a compatible pipeline
+				auto compat_key = base_key;
+				compat_key.compiler_opt = variant.vs_opts.compatible_shader_opts | variant.fs_opts.compatible_shader_opts;
+				auto found = m_program_cache.find(compat_key);
+				ensure(found != m_program_cache.end(), "Invalid interpreter configuration.");
+
+				pipeline_cache_entry_t cache_entry
+				{
+					.flags = CACHED_PIPE_UNOPTIMIZED,
+					.program = found->second.program
+				};
+				m_program_cache[base_key] = cache_entry;
 			}
 		}
-
-		do
-		{
-			std::this_thread::sleep_for(16ms);
-
-			const auto completed = ctr.load();
-			dlg->update_msg(1, fmt::format("Linking variant %u of %u...", completed, limit2));
-			dlg->set_value(1, completed);
-		}
-		while (ctr.load() < limit2);
 
 		dlg->set_value(1, limit2);
 		dlg->refresh();

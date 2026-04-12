@@ -13,7 +13,8 @@
 namespace gl
 {
 	using glsl::shader;
-	using enum  program_common::interpreter::compiler_option;
+	using enum program_common::interpreter::compiler_option;
+	using enum program_common::interpreter::cached_pipeline_flags;
 
 	namespace interpreter
 	{
@@ -88,7 +89,7 @@ namespace gl
 
 		// Second stage. Propagate base pipelines to all compatible
 		ctr = 0;
-		reader_lock lock(m_program_cache_lock);
+		std::lock_guard lock(m_program_cache_lock);
 
 		for (const auto& variant : variants.pipelines)
 		{
@@ -107,7 +108,7 @@ namespace gl
 			}
 
 			auto data = new interpreter::cached_program();
-			data->flags |= interpreter::CACHED_PIPE_UNOPTIMIZED;
+			data->flags |= CACHED_PIPE_UNOPTIMIZED;
 			data->allocator = base_pipeline->second->allocator;
 			data->vertex_shader = base_pipeline->second->vertex_shader;
 			data->fragment_shader = base_pipeline->second->fragment_shader;
@@ -193,13 +194,13 @@ namespace gl
 
 			if (m_current_interpreter)
 			{
-				constexpr u32 test_mask = (interpreter::CACHED_PIPE_UNOPTIMIZED | interpreter::CACHED_PIPE_RECOMPILING);
-				constexpr u32 unoptimized_mask = interpreter::CACHED_PIPE_UNOPTIMIZED;
+				constexpr u32 test_mask = (CACHED_PIPE_UNOPTIMIZED | CACHED_PIPE_RECOMPILING);
+				constexpr u32 unoptimized_mask = CACHED_PIPE_UNOPTIMIZED;
 				if ((m_current_interpreter->flags & test_mask) == unoptimized_mask)
 				{
 					// Interpreter is unoptimized and we haven't tried to recompile it
 					// NOTE: This operation effectively orphans the current interpreter, but since unoptimized pipelines just have a non-owning reference then it's actually fine and we don't really leak anything.
-					m_current_interpreter->flags |= interpreter::CACHED_PIPE_RECOMPILING;
+					m_current_interpreter->flags |= CACHED_PIPE_RECOMPILING;
 					build_program_async(opt, {});
 				}
 				return m_current_interpreter->prog.get();

@@ -45,6 +45,12 @@ namespace program_common
 			COMPILER_OPT_VS_MIN                = COMPILER_OPT_ENABLE_INSTANCING,
 		};
 
+		enum cached_pipeline_flags : u32
+		{
+			CACHED_PIPE_UNOPTIMIZED = (1 << 0),
+			CACHED_PIPE_RECOMPILING = (1 << 1),
+		};
+
 		static std::string get_vertex_interpreter()
 		{
 			const char* s =

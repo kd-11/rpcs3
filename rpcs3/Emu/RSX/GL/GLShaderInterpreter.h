@@ -62,12 +62,6 @@ namespace gl
 			void allocate(int size);
 		};
 
-		enum cached_program_flags
-		{
-			CACHED_PIPE_UNOPTIMIZED = (1 << 0),
-			CACHED_PIPE_RECOMPILING = (1 << 1),
-		};
-
 		struct cached_program
 		{
 			u32 flags = 0;

@@ -471,7 +471,11 @@ namespace vk
 		m_vs_shader_cache.clear();
 		m_fs_shader_cache.clear();
 
-		vkDestroyPipelineCache(m_device, m_driver_pipeline_cache, nullptr);
+		if (m_driver_pipeline_cache)
+		{
+			vkDestroyPipelineCache(m_device, m_driver_pipeline_cache, nullptr);
+			m_driver_pipeline_cache = VK_NULL_HANDLE;
+		}
 	}
 
 	std::shared_ptr<glsl::program> shader_interpreter::link(const vk::pipeline_props& properties, u64 compiler_opt, bool async, async_build_fn_callback async_callback)
@@ -609,6 +613,13 @@ namespace vk
 			if (found != m_program_cache.end()) [[likely]]
 			{
 				m_current_interpreter = found->second.program;
+
+				if ((found->second.flags & (CACHED_PIPE_UNOPTIMIZED | CACHED_PIPE_RECOMPILING)) == CACHED_PIPE_UNOPTIMIZED)
+				{
+					found->second.flags |= CACHED_PIPE_RECOMPILING;
+					link(properties, key.compiler_opt, true, {});
+				}
+
 				return m_current_interpreter.get();
 			}
 		}

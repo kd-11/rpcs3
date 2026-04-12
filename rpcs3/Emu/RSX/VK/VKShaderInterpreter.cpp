@@ -579,6 +579,7 @@ namespace vk
 
 	void shader_interpreter::preload(rsx::shader_loading_dialog* dlg)
 	{
+#if 0
 		dlg->create("Precompiling interpreter variants.\nPlease wait...", "Shader Compilation");
 
 		const auto variants = program_common::interpreter::get_interpreter_variants();
@@ -589,13 +590,14 @@ namespace vk
 		u32 ctr = 0;
 		for (auto& variant : variants)
 		{
-			build_fs(variant.first | variant.second);
-			build_vs(variant.first | variant.second);
+			//build_fs(variant.first | variant.second);
+			//build_vs(variant.first | variant.second);
 			dlg->update_msg(0, fmt::format("Building variant %u of %u...", ++ctr, limit));
 			dlg->inc_value(0, 1);
 		}
 
 		dlg->inc_value(1, 1);
 		dlg->refresh();
+#endif
 	}
 };

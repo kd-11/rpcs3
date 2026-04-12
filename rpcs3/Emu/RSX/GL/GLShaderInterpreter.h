@@ -62,19 +62,34 @@ namespace gl
 			void allocate(int size);
 		};
 
+		enum cached_program_flags
+		{
+			CACHED_PIPE_UNOPTIMIZED = 1
+		};
+
 		struct cached_program
 		{
-			glsl::shader vertex_shader;
-			glsl::shader fragment_shader;
-			glsl::program prog;
+			u32 flags = 0;
+
+			std::shared_ptr<glsl::shader> vertex_shader;
+			std::shared_ptr<glsl::shader> fragment_shader;
+			std::shared_ptr<glsl::program> prog;
 			texture_pool_allocator allocator;
 		};
 	}
 
 	class shader_interpreter
 	{
-		using shader_cache_t = std::unordered_map<u64, std::unique_ptr<interpreter::cached_program>>;
-		shader_cache_t m_program_cache;
+		using shader_cache_t = std::unordered_map<u64, std::shared_ptr<glsl::shader>>;
+		using pipeline_cache_t = std::unordered_map<u64, std::unique_ptr<interpreter::cached_program>>;
+
+		shared_mutex m_vs_cache_lock;
+		shared_mutex m_fs_cache_lock;
+
+		shader_cache_t m_vs_cache;
+		shader_cache_t m_fs_cache;
+
+		pipeline_cache_t m_program_cache;
 
 		void build_vs(u64 compiler_options, interpreter::cached_program& prog_data);
 		void build_fs(u64 compiler_options, interpreter::cached_program& prog_data);

@@ -1247,18 +1247,21 @@ void VKGSRender::on_init_thread()
 		dlg->close();
 	}
 
-	if (!m_overlay_manager)
+	if (g_cfg.video.shadermode != shader_mode::interpreter_only)
 	{
-		m_frame->hide();
-		m_shaders_cache->load(nullptr);
-		m_frame->show();
-	}
-	else
-	{
-		rsx::shader_loading_dialog_native dlg(this);
+		if (!m_overlay_manager)
+		{
+			m_frame->hide();
+			m_shaders_cache->load(nullptr);
+			m_frame->show();
+		}
+		else
+		{
+			rsx::shader_loading_dialog_native dlg(this);
 
-		// TODO: Handle window resize messages during loading on GPUs without OUT_OF_DATE_KHR support
-		m_shaders_cache->load(&dlg);
+			// TODO: Handle window resize messages during loading on GPUs without OUT_OF_DATE_KHR support
+			m_shaders_cache->load(&dlg);
+		}
 	}
 }
 

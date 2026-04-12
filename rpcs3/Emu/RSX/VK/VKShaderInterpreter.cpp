@@ -624,7 +624,17 @@ namespace vk
 			}
 		}
 
+		const auto start = std::chrono::steady_clock::now();
+
 		m_current_interpreter = link(properties, key.compiler_opt);
+
+		const auto end = std::chrono::steady_clock::now();
+
+		auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+		if (duration > std::chrono::milliseconds(1000))
+		{
+			rsx_log.error("Cache miss");
+		}
 
 		pipeline_cache_entry_t cache_entry
 		{
@@ -710,25 +720,50 @@ namespace vk
 
 		// Create some basic pipelines that we'll use to seed the base pipeline queue
 		std::vector<vk::pipeline_props> pipe_properties;
+		auto pdev = vk::get_current_renderer();
 
+		// Base pipeline - simple color
 		vk::pipeline_props base_props{};
 		base_props.state.set_attachment_count(1);
 		base_props.state.enable_cull_face(VK_CULL_MODE_BACK_BIT);
 		base_props.state.set_primitive_type(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+		base_props.state.set_color_mask(0, true, true, true, true);
+		base_props.state.set_attachment_count(1);
+		base_props.state.enable_depth_bias(true);
+		base_props.state.enable_depth_clamp(true);
+		base_props.state.enable_depth_bounds_test(pdev->get_depth_bounds_support());
 		base_props.renderpass_key = vk::get_renderpass_key(VK_FORMAT_B8G8R8A8_UNORM);
 		pipe_properties.push_back(base_props);
 
+		// Add in some blending
+		base_props.state.enable_blend(0,
+			VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+			VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+			VK_BLEND_OP_ADD, VK_BLEND_OP_ADD);
+		pipe_properties.push_back(base_props);
+
+		// Add a depth buffer
+		const auto depth_format = pdev->get_formats_support().d24_unorm_s8 ? VK_FORMAT_D24_UNORM_S8_UINT : VK_FORMAT_D32_SFLOAT_S8_UINT;
+		base_props.renderpass_key = vk::get_renderpass_key(VK_FORMAT_B8G8R8A8_UNORM, depth_format);
+		base_props.state.enable_depth_test(VK_COMPARE_OP_LESS);
+		base_props.state.set_depth_mask(true);
+		pipe_properties.push_back(base_props);
+
 		const auto variants = program_common::interpreter::get_interpreter_variants();
-		const u32 limit1 = ::size32(variants.base_pipelines);
-		const u32 limit2 = ::size32(variants.pipelines);
-		dlg->set_limit(0, limit1 * ::size32(pipe_properties));
+		const u32 limit1 = ::size32(variants.base_pipelines) * ::size32(pipe_properties);
+		const u32 limit2 = ::size32(variants.pipelines) * ::size32(pipe_properties);
+		dlg->set_limit(0, limit1);
 		dlg->set_limit(1, limit2);
 
 		atomic_t<u32> ctr = 0;
-		for (auto& variant : variants.base_pipelines)
+		for (const auto& props : pipe_properties)
 		{
-			for (const auto& props : pipe_properties)
+			for (auto& variant : variants.base_pipelines)
 			{
+				pipeline_key key{};
+				key.properties = props;
+				key.compiler_opt = variant.first | variant.second;
+
 				link(props, variant.first | variant.second, true, [&](std::shared_ptr<glsl::program>&) { ctr++; });
 			}
 		}
@@ -768,6 +803,7 @@ namespace vk
 				auto compat_key = base_key;
 				compat_key.compiler_opt = variant.vs_opts.compatible_shader_opts | variant.fs_opts.compatible_shader_opts;
 				auto found = m_program_cache.find(compat_key);
+
 				ensure(found != m_program_cache.end(), "Invalid interpreter configuration.");
 
 				pipeline_cache_entry_t cache_entry

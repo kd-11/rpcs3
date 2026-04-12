@@ -59,7 +59,7 @@ namespace gl
 		dlg->set_limit(1, limit2);
 
 		atomic_t<u32> ctr = 0;
-		auto progress_hook = [&](interpreter::cached_program*) { ctr++; };
+		auto progress_hook = [&](const std::shared_ptr<interpreter::cached_program>&) { ctr++; };
 
 		auto update_progress = [&](u32 stage)
 		{
@@ -188,9 +188,22 @@ namespace gl
 			std::lock_guard lock(m_program_cache_lock);
 			if (auto it = m_program_cache.find(opt); it != m_program_cache.end()) [[likely]]
 			{
-				m_current_interpreter = it->second.get();
+				m_current_interpreter = it->second;
 			}
-			return m_current_interpreter->prog.get();
+
+			if (m_current_interpreter)
+			{
+				constexpr u32 test_mask = (interpreter::CACHED_PIPE_UNOPTIMIZED | interpreter::CACHED_PIPE_RECOMPILING);
+				constexpr u32 unoptimized_mask = interpreter::CACHED_PIPE_UNOPTIMIZED;
+				if ((m_current_interpreter->flags & test_mask) == unoptimized_mask)
+				{
+					// Interpreter is unoptimized and we haven't tried to recompile it
+					// NOTE: This operation effectively orphans the current interpreter, but since unoptimized pipelines just have a non-owning reference then it's actually fine and we don't really leak anything.
+					m_current_interpreter->flags |= interpreter::CACHED_PIPE_RECOMPILING;
+					build_program_async(opt, {});
+				}
+				return m_current_interpreter->prog.get();
+			}
 		}
 
 		m_current_interpreter = build_program(opt);
@@ -465,9 +478,9 @@ namespace gl
 		}
 	}
 
-	interpreter::cached_program* shader_interpreter::build_program(u64 compiler_options)
+	std::shared_ptr<interpreter::cached_program> shader_interpreter::build_program(u64 compiler_options)
 	{
-		auto data = new interpreter::cached_program();
+		auto data = std::make_shared<interpreter::cached_program>();
 		build_fs(compiler_options, *data);
 		build_vs(compiler_options, *data);
 
@@ -481,9 +494,9 @@ namespace gl
 		return data;
 	}
 
-	void shader_interpreter::build_program_async(u64 compiler_options, std::function<void(interpreter::cached_program*)> callback)
+	void shader_interpreter::build_program_async(u64 compiler_options, async_build_callback_t callback)
 	{
-		auto data = new interpreter::cached_program();
+		auto data = std::make_shared<interpreter::cached_program>();
 
 		auto post_create_hook = [=](glsl::program* prog)
 		{
@@ -514,7 +527,7 @@ namespace gl
 		);
 	}
 
-	void shader_interpreter::post_init_hook(interpreter::cached_program* data, u64 compiler_options)
+	void shader_interpreter::post_init_hook(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options)
 	{
 		data->prog->uniforms[0] = GL_STREAM_BUFFER_START + 0;
 		data->prog->uniforms[1] = GL_STREAM_BUFFER_START + 1;
@@ -538,7 +551,7 @@ namespace gl
 		}
 
 		std::lock_guard lock(m_program_cache_lock);
-		m_program_cache[compiler_options].reset(data);
+		m_program_cache[compiler_options] = data;
 	}
 
 	bool shader_interpreter::is_interpreter(const glsl::program* program) const

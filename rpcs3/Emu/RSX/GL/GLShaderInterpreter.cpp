@@ -71,8 +71,7 @@ namespace gl
 			const u32 completed = ctr.load();
 			dlg->update_msg(0, fmt::format("Building variant %u of %u...", completed, limit));
 			dlg->set_value(0, completed);
-		}
-		while (ctr < limit);
+		} while (ctr < limit);
 
 		dlg->inc_value(1, 1);
 		dlg->refresh();
@@ -82,9 +81,9 @@ namespace gl
 	{
 		for (auto& prog : m_program_cache)
 		{
-			prog.second->vertex_shader.remove();
-			prog.second->fragment_shader.remove();
-			prog.second->prog.remove();
+			prog.second->vertex_shader->remove();
+			prog.second->fragment_shader->remove();
+			prog.second->prog->remove();
 		}
 	}
 
@@ -139,11 +138,22 @@ namespace gl
 			m_current_interpreter = build_program(opt);
 		}
 
-		return &m_current_interpreter->prog;
+		return m_current_interpreter->prog.get();
 	}
 
 	void shader_interpreter::build_vs(u64 compiler_options, interpreter::cached_program& prog_data)
 	{
+		{
+			std::lock_guard lock(m_vs_cache_lock);
+
+			if (auto found = m_vs_cache.find(compiler_options);
+				found != m_vs_cache.end())
+			{
+				prog_data.vertex_shader = found->second;
+				return;
+			}
+		}
+
 		::glsl::shader_properties properties{};
 		properties.domain = ::glsl::program_domain::glsl_vertex_program;
 		properties.require_lit_emulation = true;
@@ -201,12 +211,36 @@ namespace gl
 		builder << program_common::interpreter::get_vertex_interpreter();
 		const std::string s = builder.str();
 
-		prog_data.vertex_shader.create(::glsl::program_domain::glsl_vertex_program, s);
-		prog_data.vertex_shader.compile();
+		prog_data.vertex_shader = std::make_shared<glsl::shader>();
+		prog_data.vertex_shader->create(::glsl::program_domain::glsl_vertex_program, s);
+		prog_data.vertex_shader->compile();
+
+		{
+			std::lock_guard lock(m_vs_cache_lock);
+
+			const auto [found, inserted] = m_vs_cache.try_emplace(compiler_options, prog_data.vertex_shader);
+			if (!inserted)
+			{
+				// Cache hit
+				prog_data.vertex_shader->remove();
+				prog_data.vertex_shader = found->second;
+			}
+		}
 	}
 
 	void shader_interpreter::build_fs(u64 compiler_options, interpreter::cached_program& prog_data)
 	{
+		{
+			std::lock_guard lock(m_fs_cache_lock);
+
+			if (auto found = m_fs_cache.find(compiler_options);
+				found != m_fs_cache.end())
+			{
+				prog_data.fragment_shader = found->second;
+				return;
+			}
+		}
+
 		// Allocate TIUs
 		auto& allocator = prog_data.allocator;
 		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES)
@@ -355,8 +389,21 @@ namespace gl
 		builder << program_common::interpreter::get_fragment_interpreter();
 		const std::string s = builder.str();
 
-		prog_data.fragment_shader.create(::glsl::program_domain::glsl_fragment_program, s);
-		prog_data.fragment_shader.compile();
+		prog_data.fragment_shader = std::make_shared<glsl::shader>();
+		prog_data.fragment_shader->create(::glsl::program_domain::glsl_fragment_program, s);
+		prog_data.fragment_shader->compile();
+
+		{
+			std::lock_guard lock(m_fs_cache_lock);
+
+			const auto [found, inserted] = m_fs_cache.try_emplace(compiler_options, prog_data.fragment_shader);
+			if (!inserted)
+			{
+				// Cache hit
+				prog_data.fragment_shader->remove();
+				prog_data.fragment_shader = found->second;
+			}
+		}
 	}
 
 	interpreter::cached_program* shader_interpreter::build_program(u64 compiler_options)
@@ -365,9 +412,10 @@ namespace gl
 		build_fs(compiler_options, *data);
 		build_vs(compiler_options, *data);
 
-		data->prog.create().
-			attach(data->vertex_shader).
-			attach(data->fragment_shader).
+		data->prog = std::make_shared<glsl::program>();
+		data->prog->create().
+			attach(*data->vertex_shader).
+			attach(*data->fragment_shader).
 			link();
 
 		post_init_hook(data, compiler_options);
@@ -383,13 +431,13 @@ namespace gl
 			build_fs(compiler_options, *data);
 			build_vs(compiler_options, *data);
 
-			prog->attach(data->vertex_shader).
-				attach(data->fragment_shader);
+			prog->attach(*data->vertex_shader).
+				attach(*data->fragment_shader);
 		};
 
 		auto storage_hook = [=](std::unique_ptr<glsl::program>& prog)
 		{
-			data->prog.swap(std::move(*prog));
+			data->prog.reset(prog.release());
 			post_init_hook(data, compiler_options);
 
 			if (callback)
@@ -409,8 +457,8 @@ namespace gl
 
 	void shader_interpreter::post_init_hook(interpreter::cached_program* data, u64 compiler_options)
 	{
-		data->prog.uniforms[0] = GL_STREAM_BUFFER_START + 0;
-		data->prog.uniforms[1] = GL_STREAM_BUFFER_START + 1;
+		data->prog->uniforms[0] = GL_STREAM_BUFFER_START + 0;
+		data->prog->uniforms[1] = GL_STREAM_BUFFER_START + 1;
 
 		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES)
 		{
@@ -426,7 +474,7 @@ namespace gl
 					allocator.pools[i].allocate(assigned++);
 				}
 
-				data->prog.uniforms[type_names[i]] = allocator.pools[i].allocated;
+				data->prog->uniforms[type_names[i]] = allocator.pools[i].allocated;
 			}
 		}
 
@@ -435,7 +483,7 @@ namespace gl
 
 	bool shader_interpreter::is_interpreter(const glsl::program* program) const
 	{
-		return (program == &m_current_interpreter->prog);
+		return (program == m_current_interpreter->prog.get());
 	}
 
 	void shader_interpreter::update_fragment_textures(
@@ -528,9 +576,9 @@ namespace gl
 			}
 		}
 
-		if (allocator.pools[0].flags) m_current_interpreter->prog.uniforms["sampler1D_array"] = allocator.pools[0].allocated;
-		if (allocator.pools[1].flags) m_current_interpreter->prog.uniforms["sampler2D_array"] = allocator.pools[1].allocated;
-		if (allocator.pools[2].flags) m_current_interpreter->prog.uniforms["samplerCube_array"] = allocator.pools[2].allocated;
-		if (allocator.pools[3].flags) m_current_interpreter->prog.uniforms["sampler3D_array"] = allocator.pools[3].allocated;
+		if (allocator.pools[0].flags) m_current_interpreter->prog->uniforms["sampler1D_array"] = allocator.pools[0].allocated;
+		if (allocator.pools[1].flags) m_current_interpreter->prog->uniforms["sampler2D_array"] = allocator.pools[1].allocated;
+		if (allocator.pools[2].flags) m_current_interpreter->prog->uniforms["samplerCube_array"] = allocator.pools[2].allocated;
+		if (allocator.pools[3].flags) m_current_interpreter->prog->uniforms["sampler3D_array"] = allocator.pools[3].allocated;
 	}
 }

@@ -64,7 +64,8 @@ namespace gl
 
 		enum cached_program_flags
 		{
-			CACHED_PIPE_UNOPTIMIZED = 1
+			CACHED_PIPE_UNOPTIMIZED = (1 << 0),
+			CACHED_PIPE_RECOMPILING = (1 << 1),
 		};
 
 		struct cached_program
@@ -81,7 +82,8 @@ namespace gl
 	class shader_interpreter
 	{
 		using shader_cache_t = std::unordered_map<u64, std::shared_ptr<glsl::shader>>;
-		using pipeline_cache_t = std::unordered_map<u64, std::unique_ptr<interpreter::cached_program>>;
+		using pipeline_cache_t = std::unordered_map<u64, std::shared_ptr<interpreter::cached_program>>;
+		using async_build_callback_t = std::function<void(const std::shared_ptr<interpreter::cached_program>&)>;
 
 		shared_mutex m_vs_cache_lock;
 		shared_mutex m_fs_cache_lock;
@@ -94,11 +96,11 @@ namespace gl
 		void build_vs(u64 compiler_options, interpreter::cached_program& prog_data);
 		void build_fs(u64 compiler_options, interpreter::cached_program& prog_data);
 
-		interpreter::cached_program* build_program(u64 compiler_options);
-		void build_program_async(u64 compiler_options, std::function<void(interpreter::cached_program*)> callback);
-		void post_init_hook(interpreter::cached_program* data, u64 compiler_options);
+		std::shared_ptr<interpreter::cached_program> build_program(u64 compiler_options);
+		void build_program_async(u64 compiler_options, async_build_callback_t callback);
+		void post_init_hook(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options);
 
-		interpreter::cached_program* m_current_interpreter = nullptr;
+		std::shared_ptr<interpreter::cached_program> m_current_interpreter;
 
 	public:
 		void create(rsx::shader_loading_dialog* dlg);

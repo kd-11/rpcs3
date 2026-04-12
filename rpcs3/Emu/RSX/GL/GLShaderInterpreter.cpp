@@ -345,7 +345,7 @@ namespace gl
 		std::stringstream builder;
 		builder <<
 		"#version 450\n"
-		"#extension GL_ARB_bindless_texture : require\n\n";
+		"//#extension GL_ARB_bindless_texture : require\n\n";
 
 		::glsl::insert_subheader_block(builder);
 		comp.insertConstants(builder);

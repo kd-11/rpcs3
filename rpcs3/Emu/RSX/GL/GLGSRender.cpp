@@ -176,7 +176,8 @@ void GLGSRender::on_init_thread()
 		rsx_log.warning("Texture barriers are not supported by your GPU. Feedback loops will have undefined results.");
 	}
 
-	if (!gl_caps.ARB_bindless_texture_supported)
+	// NOTE: We currently aren't using the bindless version of the interpreter
+	if (false) //!gl_caps.ARB_bindless_texture_supported)
 	{
 		switch (shadermode)
 		{

@@ -13,6 +13,7 @@
 namespace gl
 {
 	using glsl::shader;
+	using enum  program_common::interpreter::compiler_option;
 
 	namespace interpreter
 	{
@@ -52,14 +53,25 @@ namespace gl
 		dlg->create("Precompiling interpreter variants.\nPlease wait...", "Shader Compilation");
 
 		const auto variants = program_common::interpreter::get_interpreter_variants();
-		const u32 limit = ::size32(variants);
-		dlg->set_limit(0, limit);
-		dlg->set_limit(1, 1);
+		const u32 limit1 = ::size32(variants.base_pipelines);
+		const u32 limit2 = ::size32(variants.pipelines);
+		dlg->set_limit(0, limit1);
+		dlg->set_limit(1, limit2);
 
 		atomic_t<u32> ctr = 0;
 		auto progress_hook = [&](interpreter::cached_program*) { ctr++; };
 
-		for (auto& variant : variants)
+		auto update_progress = [&](u32 stage)
+		{
+			const auto completed = ctr.load();
+			const auto limit = stage ? limit2 : limit1;
+			const auto message = fmt::format("%s variant %u of %u...", stage ? "Linking" : "Building", ctr.load(), limit);
+			dlg->update_msg(stage, message);
+			dlg->set_value(stage, completed);
+		};
+
+		// We only need to build the base "compatible pipeline" pairs.
+		for (const auto& variant : variants.base_pipelines)
 		{
 			build_program_async(variant.first | variant.second, progress_hook);
 		}
@@ -67,14 +79,47 @@ namespace gl
 		do
 		{
 			std::this_thread::sleep_for(16ms);
+			update_progress(0);
+		}
+		while (ctr < limit1);
 
-			const u32 completed = ctr.load();
-			dlg->update_msg(0, fmt::format("Building variant %u of %u...", completed, limit));
-			dlg->set_value(0, completed);
-		} while (ctr < limit);
+		// Show final progress
+		update_progress(0);
 
-		dlg->inc_value(1, 1);
-		dlg->refresh();
+		// Second stage. Propagate base pipelines to all compatible
+		ctr = 0;
+		std::lock_guard lock(m_program_cache_lock);
+
+		for (const auto& variant : variants.pipelines)
+		{
+			const u64 compiler_options = variant.vs_opts.shader_opt | variant.fs_opts.shader_opt;
+			if (m_program_cache.find(compiler_options) != m_program_cache.end())
+			{
+				// Base variant
+				continue;
+			}
+
+			const u64 compatible_options = variant.vs_opts.compatible_shader_opts | variant.fs_opts.compatible_shader_opts;
+			auto base_pipeline = m_program_cache.find(compatible_options);
+			if (base_pipeline == m_program_cache.end())
+			{
+				fmt::throw_exception("Base variant was not found in the cache.");
+			}
+
+			auto data = new interpreter::cached_program();
+			data->flags |= interpreter::CACHED_PIPE_UNOPTIMIZED;
+			data->allocator = base_pipeline->second->allocator;
+			data->vertex_shader = base_pipeline->second->vertex_shader;
+			data->fragment_shader = base_pipeline->second->fragment_shader;
+			data->prog = base_pipeline->second->prog;
+			m_program_cache[compiler_options].reset(data);
+		}
+
+		ctr = limit2;
+		update_progress(1);
+
+		// Minor stall to avoid visual flashing
+		std::this_thread::sleep_for(16ms);
 	}
 
 	void shader_interpreter::destroy()
@@ -84,6 +129,16 @@ namespace gl
 			prog.second->vertex_shader->remove();
 			prog.second->fragment_shader->remove();
 			prog.second->prog->remove();
+		}
+
+		for (auto& shader : m_vs_cache)
+		{
+			shader.second->remove();
+		}
+
+		for (auto& shader : m_fs_cache)
+		{
+			shader.second->remove();
 		}
 	}
 
@@ -100,49 +155,51 @@ namespace gl
 			case rsx::comparison_function::never:
 				return nullptr;
 			case rsx::comparison_function::greater_or_equal:
-				opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_GE;
+				opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_GE;
 				break;
 			case rsx::comparison_function::greater:
-				opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_G;
+				opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_G;
 				break;
 			case rsx::comparison_function::less_or_equal:
-				opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_LE;
+				opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_LE;
 				break;
 			case rsx::comparison_function::less:
-				opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_L;
+				opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_L;
 				break;
 			case rsx::comparison_function::equal:
-				opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_EQ;
+				opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_EQ;
 				break;
 			case rsx::comparison_function::not_equal:
-				opt |= program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_NE;
+				opt |= COMPILER_OPT_ENABLE_ALPHA_TEST_NE;
 				break;
 			}
 		}
 
-		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_DEPTH_EXPORT;
-		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_F32_EXPORT;
-		if (fp_ctrl & RSX_SHADER_CONTROL_USES_KIL) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_KIL;
-		if (metadata.referenced_textures_mask) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES;
-		if (metadata.has_branch_instructions) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_FLOW_CTRL;
-		if (metadata.has_pack_instructions) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_PACKING;
-		if (rsx::method_registers.polygon_stipple_enabled()) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_STIPPLING;
-		if (vp_ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS) opt |= program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING;
+		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT) opt |= COMPILER_OPT_ENABLE_DEPTH_EXPORT;
+		if (fp_ctrl & CELL_GCM_SHADER_CONTROL_32_BITS_EXPORTS) opt |= COMPILER_OPT_ENABLE_F32_EXPORT;
+		if (fp_ctrl & RSX_SHADER_CONTROL_USES_KIL) opt |= COMPILER_OPT_ENABLE_KIL;
+		if (metadata.referenced_textures_mask) opt |= COMPILER_OPT_ENABLE_TEXTURES;
+		if (metadata.has_branch_instructions) opt |= COMPILER_OPT_ENABLE_FLOW_CTRL;
+		if (metadata.has_pack_instructions) opt |= COMPILER_OPT_ENABLE_PACKING;
+		if (rsx::method_registers.polygon_stipple_enabled()) opt |= COMPILER_OPT_ENABLE_STIPPLING;
+		if (vp_ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS) opt |= COMPILER_OPT_ENABLE_INSTANCING;
 
-		if (auto it = m_program_cache.find(opt); it != m_program_cache.end()) [[likely]]
 		{
-			m_current_interpreter = it->second.get();
-		}
-		else
-		{
-			m_current_interpreter = build_program(opt);
+			std::lock_guard lock(m_program_cache_lock);
+			if (auto it = m_program_cache.find(opt); it != m_program_cache.end()) [[likely]]
+			{
+				m_current_interpreter = it->second.get();
+			}
+			return m_current_interpreter->prog.get();
 		}
 
+		m_current_interpreter = build_program(opt);
 		return m_current_interpreter->prog.get();
 	}
 
 	void shader_interpreter::build_vs(u64 compiler_options, interpreter::cached_program& prog_data)
 	{
+		compiler_options &= COMPILER_OPT_ALL_VS_MASK;
 		{
 			std::lock_guard lock(m_vs_cache_lock);
 
@@ -165,7 +222,7 @@ namespace gl
 		std::string shader_str;
 		ParamArray arr;
 
-		null_prog.ctrl = (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
+		null_prog.ctrl = (compiler_options & COMPILER_OPT_ENABLE_INSTANCING)
 			? RSX_SHADER_CONTROL_INSTANCED_CONSTANTS
 			: 0;
 		GLVertexDecompilerThread comp(null_prog, shader_str, arr);
@@ -195,7 +252,7 @@ namespace gl
 			"	uvec4 vp_instructions[];\n"
 			"};\n\n";
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_INSTANCING)
+		if (compiler_options & COMPILER_OPT_ENABLE_INSTANCING)
 		{
 			builder << "#define _ENABLE_INSTANCED_CONSTANTS\n";
 		}
@@ -230,20 +287,9 @@ namespace gl
 
 	void shader_interpreter::build_fs(u64 compiler_options, interpreter::cached_program& prog_data)
 	{
-		{
-			std::lock_guard lock(m_fs_cache_lock);
-
-			if (auto found = m_fs_cache.find(compiler_options);
-				found != m_fs_cache.end())
-			{
-				prog_data.fragment_shader = found->second;
-				return;
-			}
-		}
-
 		// Allocate TIUs
 		auto& allocator = prog_data.allocator;
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES)
+		if (compiler_options & COMPILER_OPT_ENABLE_TEXTURES)
 		{
 			allocator.create(::glsl::program_domain::glsl_fragment_program);
 			if (allocator.max_image_units >= 32)
@@ -277,6 +323,19 @@ namespace gl
 			}
 		}
 
+		// Cache lookup
+		compiler_options &= COMPILER_OPT_ALL_FS_MASK;
+		{
+			std::lock_guard lock(m_fs_cache_lock);
+
+			if (auto found = m_fs_cache.find(compiler_options);
+				found != m_fs_cache.end())
+			{
+				prog_data.fragment_shader = found->second;
+				return;
+			}
+		}
+
 		u32 len;
 		ParamArray arr;
 		std::string shader_str;
@@ -291,67 +350,67 @@ namespace gl
 		::glsl::insert_subheader_block(builder);
 		comp.insertConstants(builder);
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_GE)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_GE)
 		{
 			builder << "#define ALPHA_TEST_GEQUAL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_G)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_G)
 		{
 			builder << "#define ALPHA_TEST_GREATER\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_LE)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_LE)
 		{
 			builder << "#define ALPHA_TEST_LEQUAL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_L)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_L)
 		{
 			builder << "#define ALPHA_TEST_LESS\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_EQ)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_EQ)
 		{
 			builder << "#define ALPHA_TEST_EQUAL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_ALPHA_TEST_NE)
+		if (compiler_options & COMPILER_OPT_ENABLE_ALPHA_TEST_NE)
 		{
 			builder << "#define ALPHA_TEST_NEQUAL\n";
 		}
 
-		if (!(compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_F32_EXPORT))
+		if (!(compiler_options & COMPILER_OPT_ENABLE_F32_EXPORT))
 		{
 			builder << "#define WITH_HALF_OUTPUT_REGISTER\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_DEPTH_EXPORT)
+		if (compiler_options & COMPILER_OPT_ENABLE_DEPTH_EXPORT)
 		{
 			builder << "#define WITH_DEPTH_EXPORT\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_FLOW_CTRL)
+		if (compiler_options & COMPILER_OPT_ENABLE_FLOW_CTRL)
 		{
 			builder << "#define WITH_FLOW_CTRL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_PACKING)
+		if (compiler_options & COMPILER_OPT_ENABLE_PACKING)
 		{
 			builder << "#define WITH_PACKING\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_KIL)
+		if (compiler_options & COMPILER_OPT_ENABLE_KIL)
 		{
 			builder << "#define WITH_KIL\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_STIPPLING)
+		if (compiler_options & COMPILER_OPT_ENABLE_STIPPLING)
 		{
 			builder << "#define WITH_STIPPLING\n";
 		}
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES)
+		if (compiler_options & COMPILER_OPT_ENABLE_TEXTURES)
 		{
 			builder << "#define WITH_TEXTURES\n\n";
 
@@ -460,7 +519,7 @@ namespace gl
 		data->prog->uniforms[0] = GL_STREAM_BUFFER_START + 0;
 		data->prog->uniforms[1] = GL_STREAM_BUFFER_START + 1;
 
-		if (compiler_options & program_common::interpreter::COMPILER_OPT_ENABLE_TEXTURES)
+		if (compiler_options & COMPILER_OPT_ENABLE_TEXTURES)
 		{
 			// Initialize texture bindings
 			int assigned = 0;
@@ -478,12 +537,13 @@ namespace gl
 			}
 		}
 
+		std::lock_guard lock(m_program_cache_lock);
 		m_program_cache[compiler_options].reset(data);
 	}
 
 	bool shader_interpreter::is_interpreter(const glsl::program* program) const
 	{
-		return (program == m_current_interpreter->prog.get());
+		return (m_current_interpreter && program == m_current_interpreter->prog.get());
 	}
 
 	void shader_interpreter::update_fragment_textures(

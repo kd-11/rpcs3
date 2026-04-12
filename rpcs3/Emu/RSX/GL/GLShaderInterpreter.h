@@ -85,10 +85,10 @@ namespace gl
 
 		shared_mutex m_vs_cache_lock;
 		shared_mutex m_fs_cache_lock;
+		shared_mutex m_program_cache_lock;
 
 		shader_cache_t m_vs_cache;
 		shader_cache_t m_fs_cache;
-
 		pipeline_cache_t m_program_cache;
 
 		void build_vs(u64 compiler_options, interpreter::cached_program& prog_data);

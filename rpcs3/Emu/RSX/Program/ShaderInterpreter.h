@@ -32,6 +32,11 @@ namespace program_common
 			// Meta
 			COMPILER_OPT_MAX                   = COMPILER_OPT_ENABLE_ALPHA_TEST_NE,
 			COMPILER_OPT_ALPHA_TEST_MASK       = (0b111111 << 9),
+			COMPILER_OPT_ALL_VS_MASK           = COMPILER_OPT_ENABLE_INSTANCING | COMPILER_OPT_ENABLE_VTX_TEXTURES,
+			COMPILER_OPT_BASE_FS_MASK          = 0b1111111,
+			COMPILER_OPT_ALL_FS_MASK           = COMPILER_OPT_BASE_FS_MASK | COMPILER_OPT_ALPHA_TEST_MASK,
+			COMPILER_OPT_VS_EXCL_MASK          = COMPILER_OPT_ENABLE_INSTANCING,
+			COMPILER_OPT_FS_EXCL_MASK          = COMPILER_OPT_ALPHA_TEST_MASK | COMPILER_OPT_ENABLE_STIPPLING | COMPILER_OPT_ENABLE_DEPTH_EXPORT | COMPILER_OPT_ENABLE_F32_EXPORT,
 
 			// Bounds
 			COMPILER_OPT_FS_MAX                = COMPILER_OPT_ENABLE_FLOW_CTRL,
@@ -56,7 +61,24 @@ namespace program_common
 			return s;
 		}
 
-		using interpreter_variant_t = std::pair<u32, u32>;
-		std::vector<interpreter_variant_t> get_interpreter_variants();
+		struct interpreter_shader_variant_t
+		{
+			u32 shader_opt = 0;
+			u32 compatible_shader_opts = 0;
+		};
+
+		struct interpreter_pipeline_variant_t
+		{
+			interpreter_shader_variant_t vs_opts;
+			interpreter_shader_variant_t fs_opts;
+		};
+
+		struct interpreter_variants_t
+		{
+			std::vector<interpreter_pipeline_variant_t> pipelines;
+			std::vector<std::pair<u32, u32>> base_pipelines;
+		};
+
+		interpreter_variants_t get_interpreter_variants();
 	}
 }

@@ -16,6 +16,111 @@ namespace vk
 {
 	using enum program_common::interpreter::compiler_option;
 
+	class async_pipe_compiler_context
+	{
+		vk::pipeline_props m_properties{};
+		VkDevice m_device = VK_NULL_HANDLE;
+		VkPipelineCache m_pipeline_cache = VK_NULL_HANDLE;
+		VkShaderModule m_vs = VK_NULL_HANDLE;
+		VkShaderModule m_fs = VK_NULL_HANDLE;
+
+		VkPipelineShaderStageCreateInfo m_shader_stages[2];
+		VkPipelineDynamicStateCreateInfo m_dynamic_state_info{};
+		VkPipelineVertexInputStateCreateInfo m_vi{ VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+		VkPipelineViewportStateCreateInfo m_vp{};
+		VkPipelineMultisampleStateCreateInfo m_ms{};
+		VkPipelineColorBlendStateCreateInfo m_cs{};
+		VkPipelineTessellationStateCreateInfo m_ts{};
+
+		std::vector<VkDynamicState> m_dynamic_state_descriptors
+		{
+			VK_DYNAMIC_STATE_VIEWPORT,
+			VK_DYNAMIC_STATE_SCISSOR,
+			VK_DYNAMIC_STATE_LINE_WIDTH,
+			VK_DYNAMIC_STATE_BLEND_CONSTANTS,
+			VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
+			VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
+			VK_DYNAMIC_STATE_STENCIL_REFERENCE,
+			VK_DYNAMIC_STATE_DEPTH_BIAS
+		};
+
+	public:
+
+		async_pipe_compiler_context(
+			const vk::pipeline_props& props,
+			VkDevice device,
+			VkPipelineCache pipeline_cache,
+			VkShaderModule vs,
+			VkShaderModule fs)
+			: m_properties(props)
+			, m_device(device)
+			, m_pipeline_cache(pipeline_cache)
+			, m_vs(vs)
+			, m_fs(fs)
+		{
+		}
+
+		VkGraphicsPipelineCreateInfo compile()
+		{
+			m_shader_stages[0] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO };
+			m_shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+			m_shader_stages[0].module = m_vs;
+			m_shader_stages[0].pName = "main";
+
+			m_shader_stages[1] = { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO  };
+			m_shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+			m_shader_stages[1].module = m_fs;
+			m_shader_stages[1].pName = "main";
+
+			if (vk::get_current_renderer()->get_depth_bounds_support())
+			{
+				m_dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_DEPTH_BOUNDS);
+			}
+
+			m_dynamic_state_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+			m_dynamic_state_info.pDynamicStates = m_dynamic_state_descriptors.data();
+			m_dynamic_state_info.dynamicStateCount = ::size32(m_dynamic_state_descriptors);
+
+			m_vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+			m_vp.viewportCount = 1;
+			m_vp.scissorCount = 1;
+
+			m_ms = m_properties.state.ms;
+			ensure(m_ms.rasterizationSamples == VkSampleCountFlagBits((m_properties.renderpass_key >> 16) & 0xF)); // "Multisample state mismatch!"
+			if (m_ms.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT)
+			{
+				// Update the sample mask pointer
+				m_ms.pSampleMask = &m_properties.state.temp_storage.msaa_sample_mask;
+			}
+
+			// Rebase pointers from pipeline structure in case it is moved/copied
+			m_cs = m_properties.state.cs;
+			m_cs.pAttachments = m_properties.state.att_state;
+
+			m_ts = {};
+			m_ts.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+
+			VkGraphicsPipelineCreateInfo info = {};
+			info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+			info.pVertexInputState = &m_vi;
+			info.pInputAssemblyState = &m_properties.state.ia;
+			info.pRasterizationState = &m_properties.state.rs;
+			info.pColorBlendState = &m_cs;
+			info.pMultisampleState = &m_ms;
+			info.pViewportState = &m_vp;
+			info.pDepthStencilState = &m_properties.state.ds;
+			info.pTessellationState = &m_ts;
+			info.stageCount = 2;
+			info.pStages = m_shader_stages;
+			info.pDynamicState = &m_dynamic_state_info;
+			info.layout = VK_NULL_HANDLE;
+			info.basePipelineIndex = -1;
+			info.basePipelineHandle = VK_NULL_HANDLE;
+			info.renderPass = vk::get_renderpass(m_device, m_properties.renderpass_key);
+			return info;
+		}
+	};
+
 	u32 shader_interpreter::init(std::shared_ptr<VKVertexProgram>& vk_prog, u64 compiler_options) const
 	{
 		std::memset(&vk_prog->binding_table, 0xff, sizeof(vk_prog->binding_table));
@@ -353,6 +458,9 @@ namespace vk
 	void shader_interpreter::init(const vk::render_device& dev)
 	{
 		m_device = dev;
+
+		VkPipelineCacheCreateInfo drv_cache_info{ VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+		vkCreatePipelineCache(m_device, &drv_cache_info, nullptr, &m_driver_pipeline_cache);
 	}
 
 	void shader_interpreter::destroy()
@@ -361,91 +469,50 @@ namespace vk
 		m_program_cache.clear();
 		m_vs_shader_cache.clear();
 		m_fs_shader_cache.clear();
+
+		vkDestroyPipelineCache(m_device, m_driver_pipeline_cache, nullptr);
 	}
 
-	std::shared_ptr<glsl::program> shader_interpreter::link(const vk::pipeline_props& properties, u64 compiler_opt)
+	std::shared_ptr<glsl::program> shader_interpreter::link(const vk::pipeline_props& properties, u64 compiler_opt, bool async, async_build_fn_callback async_callback)
 	{
 		auto vs = build_vs(compiler_opt);
 		auto fs = build_fs(compiler_opt);
 
-		VkPipelineShaderStageCreateInfo shader_stages[2] = {};
-		shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-		shader_stages[0].module = vs->shader.get_handle();
-		shader_stages[0].pName = "main";
-
-		shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-		shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-		shader_stages[1].module = fs->shader.get_handle();
-		shader_stages[1].pName = "main";
-
-		std::vector<VkDynamicState> dynamic_state_descriptors =
+		async_pipe_compiler_context context{ properties, m_device, m_driver_pipeline_cache, vs->shader.get_handle(), fs->shader.get_handle() };
+		auto create_graphics_info_fn = [=]() mutable
 		{
-			VK_DYNAMIC_STATE_VIEWPORT,
-			VK_DYNAMIC_STATE_SCISSOR,
-			VK_DYNAMIC_STATE_LINE_WIDTH,
-			VK_DYNAMIC_STATE_BLEND_CONSTANTS,
-			VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK,
-			VK_DYNAMIC_STATE_STENCIL_WRITE_MASK,
-			VK_DYNAMIC_STATE_STENCIL_REFERENCE,
-			VK_DYNAMIC_STATE_DEPTH_BIAS
+			return context.compile();
 		};
 
-		if (vk::get_current_renderer()->get_depth_bounds_support())
+		auto callback_fn = [=](std::unique_ptr<glsl::program>& prog)
 		{
-			dynamic_state_descriptors.push_back(VK_DYNAMIC_STATE_DEPTH_BOUNDS);
-		}
+			if (!async)
+			{
+				return;
+			}
 
-		VkPipelineDynamicStateCreateInfo dynamic_state_info = {};
-		dynamic_state_info.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-		dynamic_state_info.pDynamicStates = dynamic_state_descriptors.data();
-		dynamic_state_info.dynamicStateCount = ::size32(dynamic_state_descriptors);
+			pipeline_key key{};
+			key.compiler_opt = compiler_opt;
+			key.properties = properties;
 
-		VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+			std::shared_ptr<glsl::program> result = std::move(prog);
+			std::lock_guard lock(this->m_program_cache_lock);
+			this->m_program_cache[key] = result;
 
-		VkPipelineViewportStateCreateInfo vp = {};
-		vp.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-		vp.viewportCount = 1;
-		vp.scissorCount = 1;
+			if (async_callback)
+			{
+				async_callback(result);
+			}
+		};
 
-		VkPipelineMultisampleStateCreateInfo ms = properties.state.ms;
-		ensure(ms.rasterizationSamples == VkSampleCountFlagBits((properties.renderpass_key >> 16) & 0xF)); // "Multisample state mismatch!"
-		if (ms.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT)
-		{
-			// Update the sample mask pointer
-			ms.pSampleMask = &properties.state.temp_storage.msaa_sample_mask;
-		}
-
-		// Rebase pointers from pipeline structure in case it is moved/copied
-		VkPipelineColorBlendStateCreateInfo cs = properties.state.cs;
-		cs.pAttachments = properties.state.att_state;
-
-		VkPipelineTessellationStateCreateInfo ts = {};
-		ts.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
-
-		VkGraphicsPipelineCreateInfo info = {};
-		info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-		info.pVertexInputState = &vi;
-		info.pInputAssemblyState = &properties.state.ia;
-		info.pRasterizationState = &properties.state.rs;
-		info.pColorBlendState = &cs;
-		info.pMultisampleState = &ms;
-		info.pViewportState = &vp;
-		info.pDepthStencilState = &properties.state.ds;
-		info.pTessellationState = &ts;
-		info.stageCount = 2;
-		info.pStages = shader_stages;
-		info.pDynamicState = &dynamic_state_info;
-		info.layout = VK_NULL_HANDLE;
-		info.basePipelineIndex = -1;
-		info.basePipelineHandle = VK_NULL_HANDLE;
-		info.renderPass = vk::get_renderpass(m_device, properties.renderpass_key);
+		vk::pipe_compiler::op_flags flags = vk::pipe_compiler::SEPARATE_SHADER_OBJECTS;
+		flags |= (async ? vk::pipe_compiler::COMPILE_DEFERRED : vk::pipe_compiler::COMPILE_INLINE);
 
 		auto compiler = vk::get_pipe_compiler();
 		auto program = compiler->compile(
-			info,
-			vk::pipe_compiler::COMPILE_INLINE | vk::pipe_compiler::SEPARATE_SHADER_OBJECTS,
-			{},
+			create_graphics_info_fn,
+			flags,
+			callback_fn,
 			vs->uniforms,
 			fs->uniforms);
 
@@ -528,14 +595,20 @@ namespace vk
 			m_current_key = key;
 		}
 
-		auto found = m_program_cache.find(key);
-		if (found != m_program_cache.end()) [[likely]]
 		{
-			m_current_interpreter = found->second;
-			return m_current_interpreter.get();
+			reader_lock lock(m_program_cache_lock);
+
+			auto found = m_program_cache.find(key);
+			if (found != m_program_cache.end()) [[likely]]
+			{
+				m_current_interpreter = found->second;
+				return m_current_interpreter.get();
+			}
 		}
 
 		m_current_interpreter = link(properties, key.compiler_opt);
+
+		std::lock_guard lock(m_program_cache_lock);
 		m_program_cache[key] = m_current_interpreter;
 		return m_current_interpreter.get();
 	}
@@ -611,23 +684,62 @@ namespace vk
 	{
 		dlg->create("Precompiling interpreter variants.\nPlease wait...", "Shader Compilation");
 
-#if 0
-		const auto variants = program_common::interpreter::get_interpreter_variants();
-		const u32 limit = ::size32(variants);
-		dlg->set_limit(0, limit);
-		dlg->set_limit(1, 1);
+		// Create some basic pipelines that we'll use to seed the base pipeline queue
+		std::vector<vk::pipeline_props> pipe_properties;
 
-		u32 ctr = 0;
-		for (auto& variant : variants)
+		vk::pipeline_props base_props{};
+		base_props.state.set_attachment_count(1);
+		base_props.state.enable_cull_face(VK_CULL_MODE_BACK_BIT);
+		base_props.state.set_primitive_type(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+		base_props.renderpass_key = vk::get_renderpass_key(VK_FORMAT_B8G8R8A8_UNORM);
+		pipe_properties.push_back(base_props);
+
+		const auto variants = program_common::interpreter::get_interpreter_variants();
+		const u32 limit1 = ::size32(variants.base_pipelines);
+		const u32 limit2 = ::size32(variants.pipelines);
+		dlg->set_limit(0, limit1 * ::size32(pipe_properties));
+		dlg->set_limit(1, limit2);
+
+		atomic_t<u32> ctr = 0;
+		for (auto& variant : variants.base_pipelines)
 		{
-			//build_fs(variant.first | variant.second);
-			//build_vs(variant.first | variant.second);
-			dlg->update_msg(0, fmt::format("Building variant %u of %u...", ++ctr, limit));
-			dlg->inc_value(0, 1);
+			for (const auto& props : pipe_properties)
+			{
+				link(props, variant.first | variant.second, true, [&](std::shared_ptr<glsl::program>&) { ctr++; });
+			}
 		}
 
-		dlg->inc_value(1, 1);
+		do
+		{
+			std::this_thread::sleep_for(16ms);
+
+			const auto completed = ctr.load();
+			dlg->update_msg(0, fmt::format("Building base variant %u of %u...", completed, limit1));
+			dlg->set_value(0, completed);
+		}
+		while (ctr.load() < limit1);
+
+		// TODO: Propagate base pipelines for faster startup
+		ctr = 0;
+		for (auto& variant : variants.pipelines)
+		{
+			for (const auto& props : pipe_properties)
+			{
+				link(props, variant.vs_opts.shader_opt | variant.fs_opts.shader_opt, true, [&](std::shared_ptr<glsl::program>&) { ctr++; });
+			}
+		}
+
+		do
+		{
+			std::this_thread::sleep_for(16ms);
+
+			const auto completed = ctr.load();
+			dlg->update_msg(1, fmt::format("Linking variant %u of %u...", completed, limit2));
+			dlg->set_value(1, completed);
+		}
+		while (ctr.load() < limit2);
+
+		dlg->set_value(1, limit2);
 		dlg->refresh();
-#endif
 	}
 };

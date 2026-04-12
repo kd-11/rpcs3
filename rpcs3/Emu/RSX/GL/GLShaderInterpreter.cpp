@@ -88,7 +88,7 @@ namespace gl
 
 		// Second stage. Propagate base pipelines to all compatible
 		ctr = 0;
-		std::lock_guard lock(m_program_cache_lock);
+		reader_lock lock(m_program_cache_lock);
 
 		for (const auto& variant : variants.pipelines)
 		{
@@ -185,7 +185,7 @@ namespace gl
 		if (vp_ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS) opt |= COMPILER_OPT_ENABLE_INSTANCING;
 
 		{
-			std::lock_guard lock(m_program_cache_lock);
+			reader_lock lock(m_program_cache_lock);
 			if (auto it = m_program_cache.find(opt); it != m_program_cache.end()) [[likely]]
 			{
 				m_current_interpreter = it->second;
@@ -214,7 +214,7 @@ namespace gl
 	{
 		compiler_options &= COMPILER_OPT_ALL_VS_MASK;
 		{
-			std::lock_guard lock(m_vs_cache_lock);
+			reader_lock lock(m_vs_cache_lock);
 
 			if (auto found = m_vs_cache.find(compiler_options);
 				found != m_vs_cache.end())
@@ -339,7 +339,7 @@ namespace gl
 		// Cache lookup
 		compiler_options &= COMPILER_OPT_ALL_FS_MASK;
 		{
-			std::lock_guard lock(m_fs_cache_lock);
+			reader_lock lock(m_fs_cache_lock);
 
 			if (auto found = m_fs_cache.find(compiler_options);
 				found != m_fs_cache.end())

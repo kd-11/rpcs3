@@ -1,7 +1,6 @@
 #include "stdafx.h"
 
 #include "VKShaderInterpreter.h"
-#include "VKCommonPipelineLayout.h"
 #include "VKVertexProgram.h"
 #include "VKFragmentProgram.h"
 #include "VKHelpers.h"
@@ -11,6 +10,8 @@
 #include "../Program/GLSLCommon.h"
 #include "../Program/ShaderInterpreter.h"
 #include "../rsx_methods.h"
+
+#include <thread>
 
 namespace vk
 {
@@ -489,7 +490,7 @@ namespace vk
 			return context.compile();
 		};
 
-		auto callback_fn = [=](std::unique_ptr<glsl::program>& prog)
+		auto callback_fn = [=, this](std::unique_ptr<glsl::program>& prog)
 		{
 			if (!async)
 			{

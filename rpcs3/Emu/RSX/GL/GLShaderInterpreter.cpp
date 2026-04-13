@@ -499,7 +499,7 @@ namespace gl
 	{
 		auto data = std::make_shared<interpreter::cached_program>();
 
-		auto post_create_hook = [=](glsl::program* prog)
+		auto post_create_hook = [=, this](glsl::program* prog)
 		{
 			build_fs(compiler_options, *data);
 			build_vs(compiler_options, *data);
@@ -508,7 +508,7 @@ namespace gl
 				attach(*data->fragment_shader);
 		};
 
-		auto storage_hook = [=](std::unique_ptr<glsl::program>& prog)
+		auto storage_hook = [=, this](std::unique_ptr<glsl::program>& prog)
 		{
 			data->prog = std::move(prog);
 			post_init_hook(data, compiler_options);

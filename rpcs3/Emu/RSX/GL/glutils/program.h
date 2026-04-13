@@ -183,6 +183,12 @@ namespace gl
 
 			program& attach(const shader& shader_)
 			{
+				if (const auto& comp_fence = shader_.get_compile_fence_sync();
+					!comp_fence.check_signaled())
+				{
+					comp_fence.server_wait_sync();
+				}
+
 				glAttachShader(m_id, shader_.id());
 				return *this;
 			}

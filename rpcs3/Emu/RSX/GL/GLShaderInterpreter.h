@@ -1,6 +1,7 @@
 #pragma once
 #include "glutils/program.h"
 #include "../Program/ProgramStateCache.h"
+#include "../Program/ShaderInterpreter.h"
 #include "../Common/TextureUtils.h"
 
 #include <unordered_map>
@@ -64,7 +65,11 @@ namespace gl
 
 		struct cached_program
 		{
-			u32 flags = 0;
+			u32 flags = program_common::interpreter::CACHED_PIPE_UNINITIALIZED;
+
+			// Compiler options mask - May not always match the storage compiler options in case of compatible pipelines
+			// However the storage mask must be a subset of this options mask
+			u32 build_compiler_options = 0;
 
 			std::shared_ptr<glsl::shader> vertex_shader;
 			std::shared_ptr<glsl::shader> fragment_shader;
@@ -92,7 +97,8 @@ namespace gl
 
 		std::shared_ptr<interpreter::cached_program> build_program(u64 compiler_options);
 		void build_program_async(u64 compiler_options, async_build_callback_t callback);
-		void post_init_hook(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options);
+		void init_program(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options);
+		void store_program(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options);
 
 		std::shared_ptr<interpreter::cached_program> m_current_interpreter;
 

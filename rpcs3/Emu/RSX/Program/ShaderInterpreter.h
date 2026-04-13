@@ -47,8 +47,9 @@ namespace program_common
 
 		enum cached_pipeline_flags : u32
 		{
-			CACHED_PIPE_UNOPTIMIZED = (1 << 0),
-			CACHED_PIPE_RECOMPILING = (1 << 1),
+			CACHED_PIPE_UNOPTIMIZED   = (1 << 0),
+			CACHED_PIPE_RECOMPILING   = (1 << 1),
+			CACHED_PIPE_UNINITIALIZED = (1 << 2),
 		};
 
 		[[maybe_unused]] static std::string get_vertex_interpreter()

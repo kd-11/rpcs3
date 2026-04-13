@@ -7,7 +7,6 @@
 
 #include "Emu/RSX/rsx_methods.h"
 #include "Emu/RSX/Overlays/Shaders/shader_loading_dialog.h"
-#include "Emu/RSX/Program/ShaderInterpreter.h"
 #include "Emu/RSX/Program/GLSLCommon.h"
 
 namespace gl
@@ -108,7 +107,8 @@ namespace gl
 			}
 
 			auto data = new interpreter::cached_program();
-			data->flags |= CACHED_PIPE_UNOPTIMIZED;
+			data->flags = base_pipeline->second->flags | CACHED_PIPE_UNOPTIMIZED;
+			data->build_compiler_options = base_pipeline->second->build_compiler_options;
 			data->allocator = base_pipeline->second->allocator;
 			data->vertex_shader = base_pipeline->second->vertex_shader;
 			data->fragment_shader = base_pipeline->second->fragment_shader;
@@ -203,6 +203,13 @@ namespace gl
 					m_current_interpreter->flags |= CACHED_PIPE_RECOMPILING;
 					build_program_async(opt, {});
 				}
+
+				if (m_current_interpreter->flags & CACHED_PIPE_UNINITIALIZED)
+				{
+					m_current_interpreter->prog->sync();
+					init_program(m_current_interpreter, m_current_interpreter->build_compiler_options);
+				}
+
 				return m_current_interpreter->prog.get();
 			}
 		}
@@ -491,7 +498,8 @@ namespace gl
 			attach(*data->fragment_shader).
 			link();
 
-		post_init_hook(data, compiler_options);
+		init_program(data, compiler_options);
+		store_program(data, compiler_options);
 		return data;
 	}
 
@@ -510,8 +518,11 @@ namespace gl
 
 		auto storage_hook = [=, this](std::unique_ptr<glsl::program>& prog)
 		{
+			// NOTE: We need to do the program bindings in the consumer's context, so we skip the post-init hook and just set a flag
+			// The consumer will handle initializing the bindings
+			// The synchronization problem doesn't matter much on Windows driver, but Mesa drivers actually care about it.
 			data->prog = std::move(prog);
-			post_init_hook(data, compiler_options);
+			store_program(data, compiler_options);
 
 			if (callback)
 			{
@@ -528,7 +539,7 @@ namespace gl
 		);
 	}
 
-	void shader_interpreter::post_init_hook(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options)
+	void shader_interpreter::init_program(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options)
 	{
 		data->prog->uniforms[0] = GL_STREAM_BUFFER_START + 0;
 		data->prog->uniforms[1] = GL_STREAM_BUFFER_START + 1;
@@ -550,6 +561,13 @@ namespace gl
 				data->prog->uniforms[type_names[i]] = allocator.pools[i].allocated;
 			}
 		}
+
+		data->flags &= ~CACHED_PIPE_UNINITIALIZED;
+	}
+
+	void shader_interpreter::store_program(const std::shared_ptr<interpreter::cached_program>& data, u64 compiler_options)
+	{
+		data->build_compiler_options = compiler_options;
 
 		std::lock_guard lock(m_program_cache_lock);
 		m_program_cache[compiler_options] = data;

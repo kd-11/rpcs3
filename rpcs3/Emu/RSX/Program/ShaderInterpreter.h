@@ -51,7 +51,7 @@ namespace program_common
 			CACHED_PIPE_RECOMPILING = (1 << 1),
 		};
 
-		static std::string get_vertex_interpreter()
+		[[maybe_unused]] static std::string get_vertex_interpreter()
 		{
 			const char* s =
 			#include "../Program/GLSLInterpreter/VertexInterpreter.glsl"
@@ -59,7 +59,7 @@ namespace program_common
 			return s;
 		}
 
-		static std::string get_fragment_interpreter()
+		[[maybe_unused]] static std::string get_fragment_interpreter()
 		{
 			const char* s =
 			#include "../Program/GLSLInterpreter/FragmentInterpreter.glsl"

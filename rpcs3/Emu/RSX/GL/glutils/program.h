@@ -7,6 +7,8 @@
 #include "Utilities/geometry.h"
 #include "Utilities/mutex.h"
 
+#include <span>
+
 namespace gl
 {
 	namespace glsl
@@ -91,6 +93,7 @@ namespace gl
 				void operator = (unsigned rhs) const { glProgramUniform1ui(m_program.id(), location(), rhs); }
 				void operator = (float rhs) const { glProgramUniform1f(m_program.id(), location(), rhs); }
 				void operator = (bool rhs) const { glProgramUniform1ui(m_program.id(), location(), rhs ? 1 : 0); }
+				void operator = (handle64_t rhs) const { glProgramUniformHandleui64ARB(m_program.id(), location(), rhs); }
 				void operator = (const color1i& rhs) const { glProgramUniform1i(m_program.id(), location(), rhs.r); }
 				void operator = (const color1f& rhs) const { glProgramUniform1f(m_program.id(), location(), rhs.r); }
 				void operator = (const color2i& rhs) const { glProgramUniform2i(m_program.id(), location(), rhs.r, rhs.g); }
@@ -101,7 +104,8 @@ namespace gl
 				void operator = (const color4f& rhs) const { glProgramUniform4f(m_program.id(), location(), rhs.r, rhs.g, rhs.b, rhs.a); }
 				void operator = (const areaf& rhs) const { glProgramUniform4f(m_program.id(), location(), rhs.x1, rhs.y1, rhs.x2, rhs.y2); }
 				void operator = (const areai& rhs) const { glProgramUniform4i(m_program.id(), location(), rhs.x1, rhs.y1, rhs.x2, rhs.y2); }
-				void operator = (const std::vector<int>& rhs) const { glProgramUniform1iv(m_program.id(), location(), ::size32(rhs), rhs.data()); }
+				void operator = (const std::span<const int>& rhs) const { glProgramUniform1iv(m_program.id(), location(), ::size32(rhs), rhs.data()); }
+				void operator = (const std::span<const handle64_t>& rhs) const { glProgramUniformHandleui64vARB(m_program.id(), location(), ::size32(rhs), rhs.data()); }
 			};
 
 			class uniforms_t

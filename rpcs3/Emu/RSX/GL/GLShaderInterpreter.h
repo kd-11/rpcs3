@@ -60,6 +60,8 @@ namespace gl
 			std::array<handle64_t, 16> sampler3D;
 			std::array<handle64_t, 16> samplerCUBE;
 
+			u8 dirty = 0xff;
+
 			std::span<handle64_t> get(rsx::texture_dimension_extended type)
 			{
 				using enum rsx::texture_dimension_extended;

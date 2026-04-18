@@ -151,11 +151,19 @@ namespace gl
 		if (rsx::method_registers.polygon_stipple_enabled()) opt |= COMPILER_OPT_ENABLE_STIPPLING;
 		if (vp_ctrl & RSX_SHADER_CONTROL_INSTANCED_CONSTANTS) opt |= COMPILER_OPT_ENABLE_INSTANCING;
 
+		auto previous = m_current_interpreter ? m_current_interpreter.get() : nullptr;
+		m_current_interpreter.reset();
 		{
 			reader_lock lock(m_program_cache_lock);
 			if (auto it = m_program_cache.find(opt); it != m_program_cache.end()) [[likely]]
 			{
 				m_current_interpreter = it->second;
+			}
+
+			if (!m_current_interpreter || m_current_interpreter.get() != previous)
+			{
+				// Rebind all textures
+				m_texture_bindings.dirty = 0xff;
 			}
 
 			if (m_current_interpreter)
@@ -497,7 +505,12 @@ namespace gl
 
 	void shader_interpreter::bind_fragment_texture(int i, handle64_t handle, const rsx::sampled_image_descriptor_base& descriptor)
 	{
-		m_texture_bindings.get(descriptor.image_type)[i] = handle;
+		auto& bound_handle = m_texture_bindings.get(descriptor.image_type)[i];
+		if (bound_handle != handle)
+		{
+			m_texture_bindings.dirty |= 1u << static_cast<u32>(descriptor.image_type);
+			bound_handle = handle;
+		}
 	}
 
 	void shader_interpreter::flush_texture_bindings(glsl::program* program)
@@ -510,12 +523,33 @@ namespace gl
 			program = m_current_interpreter->prog.get();
 		}
 
+		const bool is_bound_interpreter = m_current_interpreter && m_current_interpreter->prog.get() == program;
+		const u32 dirty_mask = is_bound_interpreter
+			? 0xff
+			: m_texture_bindings.dirty;
+
+		if (!dirty_mask)
+		{
+			return;
+		}
+
 		const char* type_names[] = { "sampler1D_array", "sampler2D_array", "samplerCube_array", "sampler3D_array" };
 		const rsx::texture_dimension_extended types[] = { texture_dimension_1d, texture_dimension_2d, texture_dimension_cubemap, texture_dimension_3d };
 
 		for (int i = 0; i < 4; ++i)
 		{
+			const auto type_mask = (1u << static_cast<int>(types[i]));
+			if ((dirty_mask & type_mask) == 0)
+			{
+				continue;
+			}
+
 			program->uniforms[type_names[i]] = m_texture_bindings.get(types[i]);
+		}
+
+		if (is_bound_interpreter)
+		{
+			m_texture_bindings.dirty = 0;
 		}
 	}
 }

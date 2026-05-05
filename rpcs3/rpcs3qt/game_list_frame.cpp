@@ -861,10 +861,22 @@ void game_list_frame::OnParsingFinished()
 		{
 			if (is_iso_file(entry.path))
 			{
+				std::vector<std::string> subdirs;
+
+				if (iso_cache::load_index(entry.path, subdirs))
+				{
+					for (const std::string& name : subdirs)
+					{
+						if (m_refresh_watcher.isCanceled()) break;
+						add_game(entry.path, name);
+					}
+
+					return;
+				}
+
 				iso_archive archive(entry.path);
 				const iso_fs_node& root = archive.root();
 				const std::regex ps3_gm_regex("^PS3_GM[[:digit:]]{2}$");
-				bool found = false;
 
 				for (const auto& child : root.children)
 				{
@@ -872,24 +884,26 @@ void game_list_frame::OnParsingFinished()
 					{
 						break;
 					}
-
 					if (!child->metadata.is_directory)
 					{
 						continue;
 					}
 
 					const std::string& name = child->metadata.name;
-
 					if (name == "PS3_GAME" || std::regex_match(name, ps3_gm_regex))
 					{
+						subdirs.push_back(name);
 						add_game(entry.path, name);
-						found = true;
 					}
 				}
-
-				if (!found)
+				if (subdirs.empty())
 				{
 					add_game(entry.path);
+					subdirs.push_back("PS3_GAME");
+				}
+				if (!m_refresh_watcher.isCanceled())
+				{
+					iso_cache::save_index(entry.path, subdirs);
 				}
 
 				return;

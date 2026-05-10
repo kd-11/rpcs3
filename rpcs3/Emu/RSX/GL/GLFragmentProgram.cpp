@@ -167,6 +167,11 @@ void GLFragmentDecompilerThread::insertConstants(std::stringstream & OS)
 		}
 	}
 
+	if (m_prog.ctrl & RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE)
+	{
+		OS << "uniform sampler2D frag_depth;\n";
+	}
+
 	OS << "\n";
 
 	if (!properties.constant_offsets.empty())
@@ -238,6 +243,7 @@ void GLFragmentDecompilerThread::insertGlobalFunctions(std::stringstream &OS)
 	m_shader_props.require_shadowProj_ops = properties.shadow_sampler_mask != 0 && properties.has_texShadowProj;
 	m_shader_props.require_alpha_kill = !!(m_prog.ctrl & RSX_SHADER_CONTROL_TEXTURE_ALPHA_KILL);
 	m_shader_props.require_color_format_convert = !!(m_prog.ctrl & RSX_SHADER_CONTROL_TEXTURE_FORMAT_CONVERT);
+	m_shader_props.emulate_depth_compare = !!(m_prog.ctrl & RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE);
 
 	glsl::insert_glsl_legacy_function(OS, m_shader_props);
 }

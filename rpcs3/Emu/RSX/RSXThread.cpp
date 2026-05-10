@@ -2163,7 +2163,8 @@ namespace rsx
 				}
 			}
 
-			if (m_framebuffer_layout.zeta_address &&
+			if (g_cfg.video.emulate_depth_compare &&
+				m_framebuffer_layout.zeta_address &&
 				method_registers.depth_func() == rsx::comparison_function::equal)
 			{
 				current_fragment_program.ctrl |= RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE;

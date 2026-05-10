@@ -247,6 +247,11 @@ namespace glsl
 			{
 				enabled_options.push_back("_ENABLE_DEPTH_COMPARE");
 			}
+
+			if (props.depth_buffer_multisampled)
+			{
+				enabled_options.push_back("_ENABLE_DEPTH_BUFFER_MULTISAMPLED");
+			}
 		}
 
 		// Import common header

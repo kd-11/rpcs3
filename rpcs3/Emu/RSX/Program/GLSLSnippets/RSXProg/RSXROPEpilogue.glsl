@@ -39,7 +39,11 @@ R"(
 #endif
 
 #ifdef _ENABLE_DEPTH_COMPARE
+#ifdef _ENABLE_DEPTH_BUFFER_MULTISAMPLED
+	float dstDepth = texelFetch(frag_depth, ivec2(gl_FragCoord.xy), gl_SampleID).r;
+#else
 	float dstDepth = texelFetch(frag_depth, ivec2(gl_FragCoord.xy), 0).r;
+#endif
 	float srcDepth = gl_FragCoord.z;
 	float scale = _test_bit(rop_control, FRAG_DEPTH_24_BIT) ? float(0xffffffu) : float(0xffffu);
 

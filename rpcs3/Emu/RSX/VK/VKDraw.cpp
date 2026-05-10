@@ -607,6 +607,16 @@ void VKGSRender::load_texture_env()
 
 	m_samplers_dirty.store(false);
 
+	if (current_fragment_program.ctrl & RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE)
+	{
+		// Transition our FBO to a loop-friendly format.
+		// We can also convert it into an input attachment, but for now this is easier.
+		auto ds = ensure(m_rtts.m_bound_depth_stencil.second, "Invalid FS export configuration.");
+		ds->texture_barrier(*m_current_command_buffer);
+
+		check_for_cyclic_refs = true;
+	}
+
 	if (check_for_cyclic_refs)
 	{
 		// Regenerate renderpass key
@@ -771,8 +781,6 @@ bool VKGSRender::bind_texture_env()
 	if (current_fragment_program.ctrl & RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE)
 	{
 		auto ds = ensure(m_rtts.m_bound_depth_stencil.second);
-		vk::insert_texture_barrier(*m_current_command_buffer, ds, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT, true);
-
 		auto view = ds->get_view(rsx::default_remap_vector, VK_IMAGE_ASPECT_DEPTH_BIT);
 		m_program->bind_uniform({ *view, vk::null_sampler() }, vk::glsl::binding_set_index_fragment, m_fs_binding_table->frag_depth_input_location);
 	}

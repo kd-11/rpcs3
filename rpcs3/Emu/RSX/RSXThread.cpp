@@ -1681,6 +1681,15 @@ namespace rsx
 			m_frame_stats.framebuffer_stats.add(layout.width, layout.height, aa_mode);
 		}
 
+		// Flags
+		if (g_cfg.video.emulate_depth_compare &&
+			m_framebuffer_layout.zeta_address &&
+			method_registers.depth_func() == rsx::comparison_function::equal)
+		{
+			current_fragment_program.ctrl |= RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE;
+			current_fragment_program.ctrl &= ~RSX_SHADER_CONTROL_DISABLE_EARLY_Z;
+		}
+
 		// Check if anything has changed
 		bool really_changed = false;
 
@@ -2153,6 +2162,12 @@ namespace rsx
 					current_fragment_program.ctrl |= RSX_SHADER_CONTROL_ALPHA_TO_COVERAGE;
 				}
 			}
+
+			if (m_framebuffer_layout.zeta_address &&
+				method_registers.depth_func() == rsx::comparison_function::equal)
+			{
+				current_fragment_program.ctrl |= RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE;
+			}
 		}
 		else if (m_ctx->register_state->point_sprite_enabled() &&
 			m_ctx->register_state->current_draw_clause.primitive == primitive_type::points)
@@ -2321,7 +2336,7 @@ namespace rsx
 				{
 					m_graphics_state |= rsx::zeta_address_is_cyclic;
 
-					if (!(current_fragment_program.ctrl & (CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT | RSX_SHADER_CONTROL_META_USES_DISCARD)) &&
+					if (!(current_fragment_program.ctrl & (CELL_GCM_SHADER_CONTROL_DEPTH_EXPORT | RSX_SHADER_CONTROL_META_USES_DISCARD | RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE)) &&
 						m_framebuffer_layout.zeta_write_enabled)
 					{
 						current_fragment_program.ctrl |= RSX_SHADER_CONTROL_DISABLE_EARLY_Z;

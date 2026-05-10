@@ -272,6 +272,15 @@ namespace rsx
 			}
 		}
 
+		void set_depth_func(context* ctx, u32 reg, u32 arg)
+		{
+			if (arg != REGS(ctx)->latch)
+			{
+				set_surface_options_dirty_bit(ctx, reg, arg);
+				RSX(ctx)->m_graphics_state |= rsx::pipeline_state::fragment_program_state_dirty;
+			}
+		}
+
 		void set_color_mask(context* ctx, u32 reg, u32 arg)
 		{
 			if (arg == REGS(ctx)->latch)

@@ -768,6 +768,15 @@ bool VKGSRender::bind_texture_env()
 			m_vs_binding_table->vtex_location[i]);
 	}
 
+	if (current_fragment_program.ctrl & RSX_SHADER_CONTROL_EMULATE_DEPTH_COMPARE)
+	{
+		auto ds = ensure(m_rtts.m_bound_depth_stencil.second);
+		vk::insert_texture_barrier(*m_current_command_buffer, ds, VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT, true);
+
+		auto view = ds->get_view(rsx::default_remap_vector, VK_IMAGE_ASPECT_DEPTH_BIT);
+		m_program->bind_uniform({ *view, vk::null_sampler() }, vk::glsl::binding_set_index_fragment, m_fs_binding_table->frag_depth_input_location);
+	}
+
 	return out_of_memory;
 }
 

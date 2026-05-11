@@ -6,7 +6,7 @@ namespace gl
 {
 	static inline void insert_texture_barrier()
 	{
-		auto& caps = gl::get_driver_caps();
+		const auto& caps = gl::get_driver_caps();
 
 		if (caps.ARB_texture_barrier_supported)
 			glTextureBarrier();

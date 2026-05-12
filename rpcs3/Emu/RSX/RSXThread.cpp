@@ -2099,7 +2099,7 @@ namespace rsx
 			current_fragment_program.ctrl |= export_ctrl;
 
 			// Signal backend to reload pipeline
-			m_graphics_state.set(rsx::pipeline_state::fragment_state_dirty);
+			m_graphics_state.set(rsx::pipeline_state::fragment_program_state_dirty);
 		}
 
 		prefetch_vertex_program();

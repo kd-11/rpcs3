@@ -136,5 +136,7 @@ namespace gl
 
 		glsl::program* get(const interpreter::program_metadata& fp_metadata, u32 vp_ctrl, u32 fp_ctrl);
 		bool is_interpreter(const glsl::program* program) const;
+
+		void validate_fragment_textures(u32 type_mask, u32 residency_mask);
 	};
 }

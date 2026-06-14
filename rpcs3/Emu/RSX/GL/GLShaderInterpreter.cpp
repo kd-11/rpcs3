@@ -1,3 +1,4 @@
+#include "Emu/RSX/gcm_enums.h"
 #include "stdafx.h"
 #include "GLShaderInterpreter.h"
 #include "GLTextureCache.h"
@@ -8,6 +9,7 @@
 #include "Emu/RSX/rsx_methods.h"
 #include "Emu/RSX/Overlays/Shaders/shader_loading_dialog.h"
 #include "Emu/RSX/Program/GLSLCommon.h"
+#include <algorithm>
 
 namespace gl
 {
@@ -510,6 +512,7 @@ namespace gl
 
 	void shader_interpreter::bind_fragment_texture(int i, handle64_t handle, const rsx::sampled_image_descriptor_base& descriptor)
 	{
+		printf("Binding fragment texture %llu to slot %d\n", handle, i);
 		auto& bound_handle = m_texture_bindings.get(descriptor.image_type)[i];
 		if (bound_handle != handle)
 		{
@@ -538,6 +541,8 @@ namespace gl
 			return;
 		}
 
+		printf("%u: Flush texture bindings ---------------------------\n", program->id());
+
 		const char* type_names[] = { "sampler1D_array", "sampler2D_array", "samplerCube_array", "sampler3D_array" };
 		const rsx::texture_dimension_extended types[] = { texture_dimension_1d, texture_dimension_2d, texture_dimension_cubemap, texture_dimension_3d };
 
@@ -546,15 +551,39 @@ namespace gl
 			const auto type_mask = (1u << static_cast<int>(types[i]));
 			if ((dirty_mask & type_mask) == 0)
 			{
+				printf("Skipping %s for program %u\n", type_names[i], program->id());
 				continue;
 			}
 
-			program->uniforms[type_names[i]] = m_texture_bindings.get(types[i]);
+			std::vector<std::string> slices;
+			const auto bindings = m_texture_bindings.get(types[i]);
+			std::ranges::for_each(bindings, [&](const auto handle){
+				slices.push_back(std::to_string(handle));
+			});
+			std::string debug_view = fmt::merge(slices, ",");
+			printf(":%u - %s <- [%s]\n", program->id(), type_names[i], debug_view.data());
+
+			program->uniforms[type_names[i]] = bindings;
 		}
 
 		if (is_bound_interpreter)
 		{
 			m_texture_bindings.dirty = 0;
+		}
+	}
+
+	void shader_interpreter::validate_fragment_textures(u32 type_mask, u32 residency_mask)
+	{
+		for (u32 mask = residency_mask, i = 0; mask != 0; ++i, mask <<= 1) {
+			if (!(mask & 1)) {
+				continue;
+			}
+
+			const auto tex_type = static_cast<rsx::texture_dimension_extended>((type_mask >> (i * 2)) & 3);
+			ensure(tex_type == rsx::texture_dimension_extended::texture_dimension_2d);
+
+			auto bindings = m_texture_bindings.get(tex_type);
+			ensure(bindings[i] != GL_NONE);
 		}
 	}
 }

@@ -833,6 +833,7 @@ bool GLGSRender::load_program()
 				current_fp_metadata,
 				current_vertex_program.ctrl,
 				current_fragment_program.ctrl);
+			printf("Use shader program %u\n", m_program->id());
 			return true;
 		}
 	}
@@ -897,6 +898,7 @@ bool GLGSRender::load_program()
 
 			// Program has changed, reupload
 			m_interpreter_state = rsx::invalidate_pipeline_bits;
+			printf("Use shader program %u\n", m_program->id());
 		}
 
 		// If swapping between interpreter and recompiler, we need to adjust some flags to reupload data as needed.

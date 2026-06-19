@@ -305,9 +305,9 @@ namespace vk
 		return (bytes_spilled > 0);
 	}
 
-	render_target_ex_ref::render_target_ex_ref(vk::viewable_image* ref)
+	render_target_ex_ref::render_target_ex_ref(const vk::viewable_image* ref)
 	{
-		m_external_ref = ref;
+		m_external_ref = const_cast<vk::viewable_image*>(ref);
 
 		// Copy state
 		m_storage_aspect = ref->aspect();

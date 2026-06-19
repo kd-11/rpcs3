@@ -28,9 +28,10 @@ namespace rsx
 
 	enum surface_usage_flags : u32
 	{
-		unknown = 0,
-		attachment = 1,
-		storage = 2,
+		unknown      = 0,
+		attachment   = 1,
+		storage      = 2,
+		external_ref = 4
 	};
 
 	enum surface_metrics : u32

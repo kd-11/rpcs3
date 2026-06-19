@@ -117,7 +117,7 @@ namespace gl
 		: public render_target
 	{
 	public:
-		render_target_ex_ref(viewable_image* ref)
+		render_target_ex_ref(const viewable_image* ref)
 		{
 			m_external_ref = ref;
 			m_id = ref->id();
@@ -141,7 +141,7 @@ namespace gl
 		}
 
 	private:
-		viewable_image* m_external_ref = nullptr;
+		const viewable_image* m_external_ref = nullptr;
 	};
 
 	struct framebuffer_holder
@@ -171,6 +171,7 @@ struct gl_render_target_traits
 	using command_list_type = gl::command_context&;
 	using download_buffer_object = std::vector<u8>;
 	using barrier_descriptor_t = rsx::deferred_clipped_region<gl::render_target*>;
+	using external_object_type = gl::viewable_image*;
 
 	static
 	std::unique_ptr<gl::render_target> create_new_surface(
@@ -321,22 +322,23 @@ struct gl_render_target_traits
 	static
 	std::unique_ptr<gl::render_target> clone_external_ref(
 		gl::command_context& /*cmd*/,
-		std::unique_ptr<gl::viewable_image>& src,
+		const gl::viewable_image* src,
 		const rsx::image_section_attributes_t& attributes)
 	{
-		std::unique_ptr<gl::render_target> sink = std::make_unique<gl::render_target_ex_ref>(src.get());
+		std::unique_ptr<gl::render_target> sink = std::make_unique<gl::render_target_ex_ref>(src);
 		sink->set_resolution_scaling_config({});
 		sink->add_ref();
 
 		sink->sample_layout = rsx::surface_sample_layout::ps3;
 		sink->set_spp(1);
 		sink->format_info.from_gcm_format(attributes.gcm_format);
-		sink->memory_usage_flags = rsx::surface_usage_flags::storage;
+		sink->memory_usage_flags = rsx::surface_usage_flags::storage | rsx::surface_usage_flags::external_ref;
 		sink->native_pitch = src->pitch();
 		sink->rsx_pitch = attributes.pitch;
 		sink->surface_width = attributes.width;
 		sink->surface_height = attributes.height;
 		sink->queue_tag(attributes.address);
+		return sink;
 	}
 
 	static

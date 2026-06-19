@@ -3328,6 +3328,23 @@ namespace rsx
 							rsx::texture_dimension_extended::texture_dimension_2d, dst.swizzled);
 
 						set_component_order(*cached_dest, preferred_dst_format, channel_order);
+
+						// Notify the surface cache
+						rsx::image_section_attributes_t section_attr
+						{
+							.address = rsx_range.start,
+							.gcm_format = preferred_dst_format,
+							.pitch = dst.pitch,
+							.width = static_cast<u16>(dst_dimensions.width),
+							.height = static_cast<u16>(dst_dimensions.height),
+							.depth = 1,
+							.mipmaps = 1,
+							.slice_h = static_cast<u16>(dst_dimensions.height),
+							.bpp = dst_bpp,
+							.swizzled = false,
+							.edge_clamped = false
+						};
+						m_rtts.merge_external_surface(cmd, cached_dest->get_raw_texture(), section_attr);
 					}
 
 					dest_texture = cached_dest->get_raw_texture();

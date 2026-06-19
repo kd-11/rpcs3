@@ -45,6 +45,7 @@ namespace rsx
 		using surface_storage_type = typename Traits::surface_storage_type;
 		using surface_type = typename Traits::surface_type;
 		using command_list_type = typename Traits::command_list_type;
+		using external_object_type = typename Traits::external_object_type;
 		using surface_overlap_info = surface_overlap_info_t<surface_type>;
 		using surface_ranged_map = ranged_map<surface_storage_type, 0x400000>;
 		using surface_cache_dma_map = surface_cache_dma<Traits, 0x400000>;
@@ -368,7 +369,7 @@ namespace rsx
 				}
 
 				if (new_surface->inherit_surface_contents(surface) == surface_inheritance_result::full &&
-					surface->memory_usage_flags == surface_usage_flags::storage &&
+					(surface->memory_usage_flags & surface_usage_flags::storage) != 0 &&
 					surface != prev_surface &&
 					surface == e.second)
 				{
@@ -496,6 +497,12 @@ namespace rsx
 				for (auto It = invalidated_resources.begin(); It != invalidated_resources.end(); It++)
 				{
 					auto &surface = *It;
+					if ((surface->memory_usage_flags & rsx::surface_usage_flags::external_ref) != 0)
+					{
+						// Cannot make use of external resources
+						continue;
+					}
+
 					if (Traits::surface_matches_properties(surface, format, width, height, antialias, scaling_config, true))
 					{
 						new_surface_storage = std::move(surface);
@@ -829,6 +836,44 @@ namespace rsx
 			ensure(read_from_ptr<u32>(marker, range.length()) == overrun_cookie_value);
 		}
 
+		// Introduces a new surface into the hierarchy as 'old content'. The input is the invalidated resource.
+		// Traverse the tree, correctly placing this dependency on all overlapping surfaces as an old content to read from if needed.
+		void insert_external_surface_region(command_list_type cmd, surface_type ext_surface)
+		{
+			const auto range = ext_surface->get_memory_range();
+			auto process_list = [&](surface_ranged_map& data, rsx::address_range32 test_range)
+			{
+				if (!range.overlaps(test_range))
+				{
+					return;
+				}
+
+				for (auto it = data.begin_range(range); it != data.end(); ++it)
+				{
+					auto surface = it->second.get();
+					if (!surface->get_memory_range().overlaps(range))
+					{
+						continue;
+					}
+
+					if (!rsx::pitch_compatible(surface, ext_surface))
+					{
+						continue;
+					}
+
+					if (surface->last_use_tag >= ext_surface->last_use_tag)
+					{
+						continue;
+					}
+
+					surface->inherit_surface_contents(ext_surface);
+				}
+			};
+
+			process_list(m_render_targets_storage, m_render_targets_memory_range);
+			process_list(m_depth_stencil_storage, m_depth_stencil_memory_range);
+		}
+
 	protected:
 		/**
 		* If render target already exists at address, issue state change operation on cmdList.
@@ -1025,6 +1070,30 @@ namespace rsx
 			{
 				m_bound_depth_stencil = std::make_pair(0, nullptr);
 			}
+		}
+
+		template <typename ...Args>
+		void merge_external_surface(
+			command_list_type command_list,
+			external_object_type external_resource,
+			const rsx::image_section_attributes_t& attributes,
+			Args&& ...extra_params)
+		{
+			auto surface = Traits::clone_external_ref(
+				command_list,
+				external_resource,
+				attributes,
+				std::forward<Args>(extra_params)...);
+
+			ensure(surface->has_refs());
+			surface->last_use_tag = rsx::get_shared_tag();
+
+			// Immediately intersect the result
+			insert_external_surface_region(command_list, Traits::get(surface));
+
+			// Add to invalidated resources and release the ref
+			Traits::notify_surface_invalidated(surface);
+			invalidated_resources.push_back(std::move(surface));
 		}
 
 		u8 get_color_surface_count() const

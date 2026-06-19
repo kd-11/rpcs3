@@ -131,7 +131,7 @@ namespace vk
 		: public render_target
 	{
 	public:
-		render_target_ex_ref(vk::viewable_image* ref);
+		render_target_ex_ref(const vk::viewable_image* ref);
 		~render_target_ex_ref();
 
 		virtual VkImageLayout& layout() override { return m_external_ref->layout(); }
@@ -160,6 +160,7 @@ namespace vk
 		using command_list_type = vk::command_buffer&;
 		using download_buffer_object = void*;
 		using barrier_descriptor_t = rsx::deferred_clipped_region<vk::render_target*>;
+		using external_object_type = vk::viewable_image*;
 
 		static std::pair<VkImageUsageFlags, VkImageCreateFlags> get_attachment_create_flags(VkFormat format, [[maybe_unused]] u8 samples)
 		{
@@ -424,22 +425,23 @@ namespace vk
 
 		static std::unique_ptr<vk::render_target> clone_external_ref(
 			vk::command_buffer& /*cmd*/,
-			std::unique_ptr<vk::viewable_image>& src,
+			const vk::viewable_image* src,
 			const rsx::image_section_attributes_t& attributes)
 		{
-			std::unique_ptr<vk::render_target> sink = std::make_unique<vk::render_target_ex_ref>(src.get());
+			std::unique_ptr<vk::render_target> sink = std::make_unique<vk::render_target_ex_ref>(src);
 			sink->set_resolution_scaling_config({});
 			sink->add_ref();
 
 			sink->sample_layout = rsx::surface_sample_layout::ps3;
 			sink->set_spp(1);
 			sink->format_info.from_gcm_format(attributes.gcm_format);
-			sink->memory_usage_flags = rsx::surface_usage_flags::storage;
+			sink->memory_usage_flags = rsx::surface_usage_flags::storage | rsx::surface_usage_flags::external_ref;
 			sink->native_pitch = src->width() * vk::get_format_texel_width(src->format());
 			sink->rsx_pitch = attributes.pitch;
 			sink->surface_width = attributes.width;
 			sink->surface_height = attributes.height;
 			sink->queue_tag(attributes.address);
+			return sink;
 		}
 
 		static std::unique_ptr<vk::render_target> convert_pitch(

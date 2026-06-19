@@ -305,6 +305,30 @@ namespace vk
 		return (bytes_spilled > 0);
 	}
 
+	render_target_ex_ref::render_target_ex_ref(vk::viewable_image* ref)
+	{
+		m_external_ref = ref;
+
+		// Copy state
+		m_storage_aspect = ref->aspect();
+		m_format_class = ref->format_class();
+		m_device = *vk::get_current_renderer();
+		m_current_layout = ref->layout();
+
+		// Copy configuration
+		value = ref->value;
+		native_component_map = ref->native_component_map;
+		current_queue_family = ref->current_queue_family;
+		info = ref->info;
+		memory = ref->memory;
+	}
+
+	render_target_ex_ref::~render_target_ex_ref()
+	{
+		info = {};
+		value = VK_NULL_HANDLE;
+	}
+
 	// Get the linear resolve target bound to this surface. Initialize if none exists
 	vk::viewable_image* render_target::get_resolve_target_safe(vk::command_buffer& cmd)
 	{
@@ -352,7 +376,7 @@ namespace vk
 			// This is the source; finish writing before reading
 			vk::insert_image_memory_barrier(
 				cmd, this->value,
-				this->current_layout, VK_IMAGE_LAYOUT_GENERAL,
+				this->layout(), VK_IMAGE_LAYOUT_GENERAL,
 				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -362,15 +386,15 @@ namespace vk
 			// This is the target; finish reading before writing
 			vk::insert_image_memory_barrier(
 				cmd, resolve_surface->value,
-				resolve_surface->current_layout, VK_IMAGE_LAYOUT_GENERAL,
+				resolve_surface->layout(), VK_IMAGE_LAYOUT_GENERAL,
 				VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_SHADER_READ_BIT,
 				VK_ACCESS_SHADER_WRITE_BIT,
 				range);
 
-			this->current_layout = VK_IMAGE_LAYOUT_GENERAL;
-			resolve_surface->current_layout = VK_IMAGE_LAYOUT_GENERAL;
+			this->layout() = VK_IMAGE_LAYOUT_GENERAL;
+			resolve_surface->layout() = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		else
 		{
@@ -384,7 +408,7 @@ namespace vk
 		{
 			vk::insert_image_memory_barrier(
 				cmd, this->value,
-				this->current_layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				this->layout(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 				VK_ACCESS_SHADER_READ_BIT,
@@ -400,8 +424,8 @@ namespace vk
 				VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_TRANSFER_READ_BIT | VK_ACCESS_TRANSFER_WRITE_BIT,
 				range);
 
-			this->current_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			resolve_surface->current_layout = VK_IMAGE_LAYOUT_GENERAL;
+			this->layout() = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			resolve_surface->layout() = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		else
 		{
@@ -420,12 +444,12 @@ namespace vk
 
 		if (!is_depth_surface()) [[likely]]
 		{
-			ensure(current_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+			ensure(layout() == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
 			// This is the dest; finish reading before writing
 			vk::insert_image_memory_barrier(
 				cmd, this->value,
-				this->current_layout, VK_IMAGE_LAYOUT_GENERAL,
+				this->layout(), VK_IMAGE_LAYOUT_GENERAL,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_ACCESS_SHADER_READ_BIT,
@@ -435,15 +459,15 @@ namespace vk
 			// This is the source; finish writing before reading
 			vk::insert_image_memory_barrier(
 				cmd, resolve_surface->value,
-				resolve_surface->current_layout, VK_IMAGE_LAYOUT_GENERAL,
+				resolve_surface->layout(), VK_IMAGE_LAYOUT_GENERAL,
 				VK_PIPELINE_STAGE_TRANSFER_BIT,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_ACCESS_TRANSFER_WRITE_BIT,
 				VK_ACCESS_SHADER_READ_BIT,
 				range);
 
-			this->current_layout = VK_IMAGE_LAYOUT_GENERAL;
-			resolve_surface->current_layout = VK_IMAGE_LAYOUT_GENERAL;
+			this->layout() = VK_IMAGE_LAYOUT_GENERAL;
+			resolve_surface->layout() = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		else
 		{
@@ -457,7 +481,7 @@ namespace vk
 		{
 			vk::insert_image_memory_barrier(
 				cmd, this->value,
-				this->current_layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+				this->layout(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
 				VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 				VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 				VK_ACCESS_SHADER_WRITE_BIT,
@@ -473,8 +497,8 @@ namespace vk
 				VK_ACCESS_TRANSFER_WRITE_BIT,
 				range);
 
-			this->current_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-			resolve_surface->current_layout = VK_IMAGE_LAYOUT_GENERAL;
+			this->layout() = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+			resolve_surface->layout() = VK_IMAGE_LAYOUT_GENERAL;
 		}
 		else
 		{
@@ -488,7 +512,7 @@ namespace vk
 	// Default-initialize memory without loading
 	void render_target::clear_memory(vk::command_buffer& cmd, vk::image* surface)
 	{
-		const auto optimal_layout = (surface->current_layout == VK_IMAGE_LAYOUT_GENERAL) ?
+		const auto optimal_layout = (surface->layout() == VK_IMAGE_LAYOUT_GENERAL) ?
 			VK_IMAGE_LAYOUT_GENERAL :
 			VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
@@ -498,12 +522,12 @@ namespace vk
 		if (surface->aspect() & VK_IMAGE_ASPECT_COLOR_BIT)
 		{
 			VkClearColorValue color = { {0.f, 0.f, 0.f, 1.f} };
-			vkCmdClearColorImage(cmd, surface->value, surface->current_layout, &color, 1, &range);
+			vkCmdClearColorImage(cmd, surface->value, surface->layout(), &color, 1, &range);
 		}
 		else
 		{
 			VkClearDepthStencilValue clear{ 1.f, 255 };
-			vkCmdClearDepthStencilImage(cmd, surface->value, surface->current_layout, &clear, 1, &range);
+			vkCmdClearDepthStencilImage(cmd, surface->value, surface->layout(), &clear, 1, &range);
 		}
 
 		surface->pop_layout(cmd);
@@ -540,6 +564,12 @@ namespace vk
 
 	bool render_target::spill(vk::command_buffer& cmd, std::vector<std::unique_ptr<vk::viewable_image>>& resolve_cache)
 	{
+		if (dynamic_cast<render_target_ex_ref*>(this))
+		{
+			// Cannot spill external references
+			return false;
+		}
+
 		u64 element_size;
 		switch (const auto fmt = format())
 		{
@@ -632,7 +662,7 @@ namespace vk
 
 		const auto regions = build_spill_transfer_descriptors(src);
 		src->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-		vkCmdCopyImageToBuffer(cmd, src->value, src->current_layout, m_spilled_mem->value, ::size32(regions), regions.data());
+		vkCmdCopyImageToBuffer(cmd, src->value, src->layout(), m_spilled_mem->value, ::size32(regions), regions.data());
 
 		// Destroy this object through a cloned object
 		auto obj = std::unique_ptr<viewable_image>(clone());
@@ -669,7 +699,7 @@ namespace vk
 			const auto regions = build_spill_transfer_descriptors(dst);
 
 			dst->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-			vkCmdCopyBufferToImage(cmd, m_spilled_mem->value, dst->value, dst->current_layout, ::size32(regions), regions.data());
+			vkCmdCopyBufferToImage(cmd, m_spilled_mem->value, dst->value, dst->layout(), ::size32(regions), regions.data());
 
 			if (samples() > 1)
 			{
@@ -760,7 +790,7 @@ namespace vk
 			else
 			{
 				content = vk::get_typeless_helper(format(), format_class(), subres.width_in_block, subres.height_in_block);
-				if (content->current_layout == VK_IMAGE_LAYOUT_UNDEFINED)
+				if (content->layout() == VK_IMAGE_LAYOUT_UNDEFINED)
 				{
 					content->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 				}
@@ -854,7 +884,7 @@ namespace vk
 		const auto optimal_layout = supports_fbo_loops ? VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT
 			: VK_IMAGE_LAYOUT_GENERAL;
 
-		if (m_cyclic_ref_tracker.can_skip() && current_layout == optimal_layout && is_framebuffer_read_only)
+		if (m_cyclic_ref_tracker.can_skip() && layout() == optimal_layout && is_framebuffer_read_only)
 		{
 			// If we have back-to-back depth-read barriers, skip subsequent ones
 			// If an actual write is happening, this flag will be automatically reset
@@ -900,7 +930,7 @@ namespace vk
 			dst_access = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 		}
 
-		vk::insert_image_memory_barrier(cmd, value, current_layout, current_layout,
+		vk::insert_image_memory_barrier(cmd, value, layout(), layout(),
 			src_stage, dst_stage, src_access, dst_access, { aspect(), 0, 1, 0, 1 });
 
 		m_cyclic_ref_tracker.reset();
@@ -960,7 +990,7 @@ namespace vk
 
 		if (access == rsx::surface_access::shader_write && m_cyclic_ref_tracker.is_enabled())
 		{
-			if (current_layout == VK_IMAGE_LAYOUT_GENERAL || current_layout == VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT)
+			if (layout() == VK_IMAGE_LAYOUT_GENERAL || layout() == VK_IMAGE_LAYOUT_ATTACHMENT_FEEDBACK_LOOP_OPTIMAL_EXT)
 			{
 				// Flag draw barrier observed
 				m_cyclic_ref_tracker.on_insert_draw_barrier();

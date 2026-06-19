@@ -11,7 +11,7 @@ namespace vk
 	{
 		m_width = width;
 		m_height = height;
-		current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+		m_current_layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
 
 		m_dma_buffer = std::make_unique<buffer>(dev, m_width * m_height * 4, memory_map.host_visible_coherent,
 			VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT, VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, VMM_ALLOCATION_POOL_SWAPCHAIN);

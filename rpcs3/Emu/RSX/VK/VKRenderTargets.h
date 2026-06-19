@@ -67,7 +67,9 @@ namespace vk
 		}
 	};
 
-	class render_target : public viewable_image, public rsx::render_target_descriptor<vk::viewable_image*>
+	class render_target
+		: public viewable_image
+		, public rsx::render_target_descriptor<vk::viewable_image*>
 	{
 		// Cyclic reference hazard tracking
 		image_reference_sync_barrier m_cyclic_ref_tracker;
@@ -104,6 +106,7 @@ namespace vk
 		bool is_bound = false;          // set when the surface is bound for rendering
 
 		using viewable_image::viewable_image;
+		virtual ~render_target() = default;
 
 		vk::viewable_image* get_surface(rsx::surface_access access_type) override;
 		bool is_depth_surface() const override;
@@ -122,6 +125,20 @@ namespace vk
 		void memory_barrier(vk::command_buffer& cmd, rsx::surface_access access);
 		void read_barrier(vk::command_buffer& cmd) { memory_barrier(cmd, rsx::surface_access::shader_read); }
 		void write_barrier(vk::command_buffer& cmd) { memory_barrier(cmd, rsx::surface_access::shader_write); }
+	};
+
+	class render_target_ex_ref
+		: public render_target
+	{
+	public:
+		render_target_ex_ref(vk::viewable_image* ref);
+		~render_target_ex_ref();
+
+		virtual VkImageLayout& layout() override { return m_external_ref->layout(); }
+		virtual const VkImageLayout& layout() const override { return m_external_ref->layout(); }
+
+	private:
+		vk::viewable_image* m_external_ref = nullptr;
 	};
 
 	static inline vk::render_target* as_rtt(vk::image* t)
@@ -381,7 +398,7 @@ namespace vk
 
 				const auto best_layout = (ref->info.usage & VK_IMAGE_USAGE_SAMPLED_BIT) ?
 					VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL :
-					ref->current_layout;
+					ref->layout();
 
 				sink->change_layout(cmd, best_layout);
 			}
@@ -403,6 +420,26 @@ namespace vk
 
 			prev.target = sink.get();
 			sink->set_old_contents_region(prev, false);
+		}
+
+		static std::unique_ptr<vk::render_target> clone_external_ref(
+			vk::command_buffer& /*cmd*/,
+			std::unique_ptr<vk::viewable_image>& src,
+			const rsx::image_section_attributes_t& attributes)
+		{
+			std::unique_ptr<vk::render_target> sink = std::make_unique<vk::render_target_ex_ref>(src.get());
+			sink->set_resolution_scaling_config({});
+			sink->add_ref();
+
+			sink->sample_layout = rsx::surface_sample_layout::ps3;
+			sink->set_spp(1);
+			sink->format_info.from_gcm_format(attributes.gcm_format);
+			sink->memory_usage_flags = rsx::surface_usage_flags::storage;
+			sink->native_pitch = src->width() * vk::get_format_texel_width(src->format());
+			sink->rsx_pitch = attributes.pitch;
+			sink->surface_width = attributes.width;
+			sink->surface_height = attributes.height;
+			sink->queue_tag(attributes.address);
 		}
 
 		static std::unique_ptr<vk::render_target> convert_pitch(

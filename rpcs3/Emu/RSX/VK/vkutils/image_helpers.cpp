@@ -218,17 +218,17 @@ namespace vk
 
 	void change_image_layout(const vk::command_buffer& cmd, vk::image* image, VkImageLayout new_layout, const VkImageSubresourceRange& range)
 	{
-		if (image->current_layout == new_layout) return;
+		if (image->layout() == new_layout) return;
 
-		change_image_layout(cmd, image->value, image->current_layout, new_layout, range);
-		image->current_layout = new_layout;
+		change_image_layout(cmd, image->value, image->layout(), new_layout, range);
+		image->layout() = new_layout;
 	}
 
 	void change_image_layout(const vk::command_buffer& cmd, vk::image* image, VkImageLayout new_layout)
 	{
-		if (image->current_layout == new_layout) return;
+		if (image->layout() == new_layout) return;
 
-		change_image_layout(cmd, image->value, image->current_layout, new_layout, { image->aspect(), 0, image->mipmaps(), 0, image->layers() });
-		image->current_layout = new_layout;
+		change_image_layout(cmd, image->value, image->layout(), new_layout, { image->aspect(), 0, image->mipmaps(), 0, image->layers() });
+		image->layout() = new_layout;
 	}
 }

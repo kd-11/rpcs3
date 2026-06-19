@@ -50,7 +50,7 @@ namespace vk
 		VkPipelineStageFlags dst_stage,
 		const rsx::sampled_image_descriptor_base* sampler_state)
 	{
-		switch (auto raw = view->image(); +raw->current_layout)
+		switch (auto raw = view->image(); raw->layout())
 		{
 		default:
 			//case VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:
@@ -94,12 +94,12 @@ namespace vk
 			vk::insert_image_memory_barrier(
 				cmd,
 				raw->value,
-				raw->current_layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+				raw->layout(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 				src_stage, dst_stage,
 				src_access, dst_access,
 				{ raw->aspect(), 0, 1, 0, 1 });
 
-			raw->current_layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+			raw->layout() = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 			break;
 		case VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL:
 		case VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL:
@@ -1190,7 +1190,7 @@ void VKGSRender::end()
 		ds->write_barrier(*m_current_command_buffer);
 
 		if (m_graphics_state.test(rsx::zeta_address_cyclic_barrier) &&
-			ds->current_layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+			ds->layout() != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
 		{
 			// We actually need to end the subpass as a minimum. Without this, early-Z optimiazations in following draws will clobber reads from previous draws and cause flickering.
 			// Since we're ending the subpass, might as well restore DCC/HiZ for extra performance

@@ -152,7 +152,7 @@ namespace vk
 			device_mem != VK_NULL_HANDLE) [[likely]]
 		{
 			CHECK_RESULT(vkBindImageMemory(m_device, value, device_mem, memory->get_vk_device_memory_offset()));
-			current_layout = info.initialLayout;
+			layout() = info.initialLayout;
 		}
 		else
 		{
@@ -226,7 +226,7 @@ namespace vk
 	{
 		ensure(current_queue_family == VK_QUEUE_FAMILY_IGNORED || current_queue_family == cmd.get_queue_family());
 
-		m_layout_stack.push(current_layout);
+		m_layout_stack.push(this->layout());
 		change_image_layout(cmd, this, layout);
 	}
 
@@ -234,7 +234,7 @@ namespace vk
 	{
 		ensure(current_queue_family == VK_QUEUE_FAMILY_IGNORED || current_queue_family == cmd.get_queue_family());
 
-		m_layout_stack.push(current_layout);
+		m_layout_stack.push(this->layout());
 		insert_texture_barrier(cmd, this, layout);
 	}
 
@@ -253,15 +253,15 @@ namespace vk
 		ensure(m_layout_stack.empty());
 		ensure(current_queue_family != cmd.get_queue_family());
 
-		if (info.sharingMode == VK_SHARING_MODE_EXCLUSIVE || current_layout != new_layout)
+		if (info.sharingMode == VK_SHARING_MODE_EXCLUSIVE || layout() != new_layout)
 		{
 			VkImageSubresourceRange range = { aspect(), 0, mipmaps(), 0, layers() };
 			const u32 src_queue_family = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? current_queue_family : VK_QUEUE_FAMILY_IGNORED;
 			const u32 dst_queue_family = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? cmd.get_queue_family() : VK_QUEUE_FAMILY_IGNORED;
-			change_image_layout(cmd, value, current_layout, new_layout, range, src_queue_family, dst_queue_family, 0u, ~0u);
+			change_image_layout(cmd, value, layout(), new_layout, range, src_queue_family, dst_queue_family, 0u, ~0u);
 		}
 
-		current_layout = new_layout;
+		layout() = new_layout;
 		current_queue_family = cmd.get_queue_family();
 	}
 
@@ -270,15 +270,15 @@ namespace vk
 		ensure(current_queue_family == src_queue_cmd.get_queue_family());
 		ensure(m_layout_stack.empty());
 
-		if (info.sharingMode == VK_SHARING_MODE_EXCLUSIVE || current_layout != new_layout)
+		if (info.sharingMode == VK_SHARING_MODE_EXCLUSIVE || layout() != new_layout)
 		{
 			VkImageSubresourceRange range = { aspect(), 0, mipmaps(), 0, layers() };
 			const u32 src_queue_family = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? current_queue_family : VK_QUEUE_FAMILY_IGNORED;
 			const u32 dst_queue_family2 = info.sharingMode == VK_SHARING_MODE_EXCLUSIVE ? dst_queue_family : VK_QUEUE_FAMILY_IGNORED;
-			change_image_layout(src_queue_cmd, value, current_layout, new_layout, range, src_queue_family, dst_queue_family2, ~0u, 0u);
+			change_image_layout(src_queue_cmd, value, layout(), new_layout, range, src_queue_family, dst_queue_family2, ~0u, 0u);
 		}
 
-		current_layout = new_layout;
+		layout() = new_layout;
 		current_queue_family = dst_queue_family;
 	}
 
@@ -296,7 +296,7 @@ namespace vk
 			return;
 		}
 
-		if (current_layout == new_layout)
+		if (layout() == new_layout)
 		{
 			return;
 		}

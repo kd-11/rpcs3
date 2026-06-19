@@ -43,7 +43,7 @@ namespace vk
 	texture_cache::cached_image_reference_t::~cached_image_reference_t()
 	{
 		// Erase layout information to force TOP_OF_PIPE transition next time.
-		data->current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+		data->layout() = VK_IMAGE_LAYOUT_UNDEFINED;
 		data->current_queue_family = VK_QUEUE_FAMILY_IGNORED;
 
 		// Move this object to the cached image pool
@@ -332,7 +332,7 @@ namespace vk
 			region.imageExtent = { transfer_width, transfer_height, 1 };
 
 			region.bufferOffset = dma_mapping.first;
-			vkCmdCopyImageToBuffer(cmd, src->value, src->current_layout, dma_mapping.second->value, 1, &region);
+			vkCmdCopyImageToBuffer(cmd, src->value, src->layout(), dma_mapping.second->value, 1, &region);
 		}
 
 		// Post-transfer barrier on dma layer
@@ -452,7 +452,7 @@ namespace vk
 			if (!processed_input_images.contains(section.src))
 			{
 				// Avoid inserting unnecessary barrier GENERAL->TRANSFER_SRC->GENERAL in active render targets
-				const auto preferred_layout = (section.src->current_layout != VK_IMAGE_LAYOUT_GENERAL) ?
+				const auto preferred_layout = (section.src->layout() != VK_IMAGE_LAYOUT_GENERAL) ?
 					VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL : VK_IMAGE_LAYOUT_GENERAL;
 
 				section.src->push_layout(cmd, preferred_layout);
@@ -512,13 +512,13 @@ namespace vk
 				src_w = convert_w;
 			}
 
-			ensure(src_image->current_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL || src_image->current_layout == VK_IMAGE_LAYOUT_GENERAL);
+			ensure(src_image->layout() == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL || src_image->layout() == VK_IMAGE_LAYOUT_GENERAL);
 			ensure(transform == rsx::surface_transform::identity);
 
 			if (src_w == section.dst_w && src_h == section.dst_h) [[likely]]
 			{
 				const auto copy_rgn = get_output_region(src_x, src_y, src_w, src_h, src_image);
-				vkCmdCopyImage(cmd, src_image->value, src_image->current_layout, dst->value, dst->current_layout, 1, &copy_rgn);
+				vkCmdCopyImage(cmd, src_image->value, src_image->layout(), dst->value, dst->layout(), 1, &copy_rgn);
 			}
 			else
 			{
@@ -553,7 +553,7 @@ namespace vk
 					// Casting comes after the scaling!
 					const auto copy_rgn = get_output_region(dst_x, dst_y, section.dst_w, section.dst_h, _dst);
 					_dst->change_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-					vkCmdCopyImage(cmd, _dst->value, _dst->current_layout, dst->value, dst->current_layout, 1, &copy_rgn);
+					vkCmdCopyImage(cmd, _dst->value, _dst->layout(), dst->value, dst->layout(), 1, &copy_rgn);
 				}
 			}
 		}
@@ -790,18 +790,18 @@ namespace vk
 		if (!(dst_aspect & VK_IMAGE_ASPECT_DEPTH_BIT))
 		{
 			VkClearColorValue clear = {};
-			vkCmdClearColorImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+			vkCmdClearColorImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 		}
 		else
 		{
 			VkClearDepthStencilValue clear = { 1.f, 0 };
-			vkCmdClearDepthStencilImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+			vkCmdClearDepthStencilImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 		}
 
 		vk::insert_image_memory_barrier(
 			cmd,
 			image->handle(),
-			image->current_layout, image->current_layout,
+			image->layout(), image->layout(),
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 			dst_range);
@@ -833,18 +833,18 @@ namespace vk
 		if (!(dst_aspect & VK_IMAGE_ASPECT_DEPTH_BIT))
 		{
 			VkClearColorValue clear = {};
-			vkCmdClearColorImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+			vkCmdClearColorImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 		}
 		else
 		{
 			VkClearDepthStencilValue clear = { 1.f, 0 };
-			vkCmdClearDepthStencilImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+			vkCmdClearDepthStencilImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 		}
 
 		vk::insert_image_memory_barrier(
 			cmd,
 			image->handle(),
-			image->current_layout, image->current_layout,
+			image->layout(), image->layout(),
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 			dst_range);
@@ -878,19 +878,19 @@ namespace vk
 			if (!(dst_aspect & VK_IMAGE_ASPECT_DEPTH_BIT))
 			{
 				VkClearColorValue clear = {};
-				vkCmdClearColorImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+				vkCmdClearColorImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 			}
 			else
 			{
 				VkClearDepthStencilValue clear = { 1.f, 0 };
-				vkCmdClearDepthStencilImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+				vkCmdClearDepthStencilImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 			}
 		}
 
 		vk::insert_image_memory_barrier(
 			cmd,
 			image->handle(),
-			image->current_layout, image->current_layout,
+			image->layout(), image->layout(),
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 			dst_range);
@@ -923,18 +923,18 @@ namespace vk
 		if (!(dst_aspect & VK_IMAGE_ASPECT_DEPTH_BIT))
 		{
 			VkClearColorValue clear = {};
-			vkCmdClearColorImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+			vkCmdClearColorImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 		}
 		else
 		{
 			VkClearDepthStencilValue clear = { 1.f, 0 };
-			vkCmdClearDepthStencilImage(cmd, image->value, image->current_layout, &clear, 1, &dst_range);
+			vkCmdClearDepthStencilImage(cmd, image->value, image->layout(), &clear, 1, &dst_range);
 		}
 
 		vk::insert_image_memory_barrier(
 			cmd,
 			image->handle(),
-			image->current_layout, image->current_layout,
+			image->layout(), image->layout(),
 			VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 			VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 			dst_range);
@@ -1052,18 +1052,18 @@ namespace vk
 					if (image->aspect() & VK_IMAGE_ASPECT_COLOR_BIT)
 					{
 						VkClearColorValue color = { {0.f, 0.f, 0.f, 1.f} };
-						vkCmdClearColorImage(cmd, image->value, image->current_layout, &color, 1, &range);
+						vkCmdClearColorImage(cmd, image->value, image->layout(), &color, 1, &range);
 					}
 					else
 					{
 						VkClearDepthStencilValue clear{ 1.f, 255 };
-						vkCmdClearDepthStencilImage(cmd, image->value, image->current_layout, &clear, 1, &range);
+						vkCmdClearDepthStencilImage(cmd, image->value, image->layout(), &clear, 1, &range);
 					}
 
 					vk::insert_image_memory_barrier(
 						cmd,
 						image->handle(),
-						image->current_layout, image->current_layout,
+						image->layout(), image->layout(),
 						VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 						VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 						range);
@@ -1295,7 +1295,7 @@ namespace vk
 				break;
 			}
 
-			if (preferred_layout != image->current_layout)
+			if (preferred_layout != image->layout())
 			{
 				image->change_layout(cmd, preferred_layout);
 			}
@@ -1303,7 +1303,7 @@ namespace vk
 			{
 				// Insert ordering barrier
 				ensure(preferred_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-				insert_image_memory_barrier(cmd, image->value, image->current_layout, preferred_layout,
+				insert_image_memory_barrier(cmd, image->value, image->layout(), preferred_layout,
 					VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
 					VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT,
 					{ image->aspect(), 0, image->mipmaps(), 0, image->layers() });
@@ -1330,7 +1330,7 @@ namespace vk
 
 	void texture_cache::insert_texture_barrier(vk::command_buffer& cmd, vk::image* tex, bool strong_ordering)
 	{
-		if (!strong_ordering && tex->current_layout == VK_IMAGE_LAYOUT_GENERAL)
+		if (!strong_ordering && tex->layout() == VK_IMAGE_LAYOUT_GENERAL)
 		{
 			// A previous barrier already exists, do nothing
 			return;

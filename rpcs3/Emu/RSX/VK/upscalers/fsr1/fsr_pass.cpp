@@ -320,7 +320,7 @@ namespace vk
 				// Prepare for EASU pass
 				src->push_layout(cmd, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-				if (m_intermediate_data->current_layout != VK_IMAGE_LAYOUT_GENERAL)
+				if (m_intermediate_data->layout() != VK_IMAGE_LAYOUT_GENERAL)
 				{
 					m_intermediate_data->change_layout(cmd, VK_IMAGE_LAYOUT_GENERAL);
 				}
@@ -329,7 +329,7 @@ namespace vk
 					// R/W CS-CS barrier in case of back-to-back upscales
 					vk::insert_image_memory_barrier(cmd,
 						m_intermediate_data->value,
-						m_intermediate_data->current_layout, m_intermediate_data->current_layout,
+						m_intermediate_data->layout(), m_intermediate_data->layout(),
 						VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 						VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 						VK_ACCESS_SHADER_READ_BIT,
@@ -346,7 +346,7 @@ namespace vk
 				// R/W CS-CS barrier before RCAS
 				vk::insert_image_memory_barrier(cmd,
 					m_intermediate_data->value,
-					m_intermediate_data->current_layout, m_intermediate_data->current_layout,
+					m_intermediate_data->layout(), m_intermediate_data->layout(),
 					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 					VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 					VK_ACCESS_SHADER_WRITE_BIT,
@@ -368,14 +368,14 @@ namespace vk
 					// Explicit CS-Transfer barrier
 					vk::insert_image_memory_barrier(cmd,
 						m_output_data->value,
-						m_output_data->current_layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+						m_output_data->layout(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 						VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
 						VK_PIPELINE_STAGE_TRANSFER_BIT,
 						VK_ACCESS_SHADER_WRITE_BIT,
 						VK_ACCESS_TRANSFER_READ_BIT,
 						{ VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 });
 
-					m_output_data->current_layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+					m_output_data->layout() = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
 
 					output_request.srcOffsets[0].x = 0;
 					output_request.srcOffsets[1].x = output_size.width;
@@ -399,7 +399,7 @@ namespace vk
 		if (mode & UPSCALE_AND_COMMIT)
 		{
 			src_image->push_layout(cmd, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
-			vkCmdBlitImage(cmd, src_image->value, src_image->current_layout, target_image, target_image_layout, 1, &output_request, VK_FILTER_LINEAR);
+			vkCmdBlitImage(cmd, src_image->value, src_image->layout(), target_image, target_image_layout, 1, &output_request, VK_FILTER_LINEAR);
 			src_image->pop_layout(cmd);
 			return nullptr;
 		}

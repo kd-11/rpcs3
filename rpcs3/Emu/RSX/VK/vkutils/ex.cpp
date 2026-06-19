@@ -11,17 +11,17 @@ namespace vk
 	{}
 
 	VkDescriptorImageInfoEx::VkDescriptorImageInfoEx(const vk::image_view& view, const vk::sampler& sampler)
-		: VkDescriptorImageInfo(sampler.value, view.value, view.image()->current_layout)
+		: VkDescriptorImageInfo(sampler.value, view.value, view.image()->layout())
 		, resourceId(view.image()->uid())
 	{}
 
 	VkDescriptorImageInfoEx::VkDescriptorImageInfoEx(const vk::image_view& view, VkSampler sampler)
-		: VkDescriptorImageInfo(sampler, view.value, view.image()->current_layout)
+		: VkDescriptorImageInfo(sampler, view.value, view.image()->layout())
 		, resourceId(view.image()->uid())
 	{}
 
 	VkDescriptorImageInfoEx::VkDescriptorImageInfoEx(const vk::image_view& view)
-		: VkDescriptorImageInfo(VK_NULL_HANDLE, view.value, view.image()->current_layout)
+		: VkDescriptorImageInfo(VK_NULL_HANDLE, view.value, view.image()->layout())
 		, resourceId(view.image()->uid())
 	{}
 

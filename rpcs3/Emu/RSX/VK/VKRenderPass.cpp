@@ -177,7 +177,7 @@ namespace vk
 		{
 			const auto& surface = images[i];
 			key.set_format(surface->format());
-			key.set_layout(i, surface->current_layout);
+			key.set_layout(i, surface->layout());
 		}
 
 		for (const auto& ref_id : input_attachment_ids)
@@ -197,7 +197,7 @@ namespace vk
 
 		for (u32 i = 0; i < ::size32(images); ++i)
 		{
-			key.set_layout(i, images[i]->current_layout);
+			key.set_layout(i, images[i]->layout());
 		}
 
 		return key.encoded;

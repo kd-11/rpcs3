@@ -30,11 +30,14 @@ namespace vk
 
 	class image : public unique_resource
 	{
+	protected:
 		std::stack<VkImageLayout> m_layout_stack;
 		VkImageAspectFlags m_storage_aspect = 0;
 
 		rsx::format_class m_format_class = RSX_FORMAT_CLASS_UNDEFINED;
 		std::string m_debug_name;
+
+		VkImageLayout m_current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 
 		void validate(const vk::render_device& dev, const VkImageCreateInfo& info) const;
 
@@ -45,7 +48,6 @@ namespace vk
 	public:
 		VkImage value = VK_NULL_HANDLE;
 		VkComponentMapping native_component_map = { VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_G, VK_COMPONENT_SWIZZLE_B, VK_COMPONENT_SWIZZLE_A };
-		VkImageLayout current_layout = VK_IMAGE_LAYOUT_UNDEFINED;
 		u32 current_queue_family = VK_QUEUE_FAMILY_IGNORED;
 		VkImageCreateInfo info = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 		std::shared_ptr<vk::memory_block> memory;
@@ -92,6 +94,9 @@ namespace vk
 		void push_barrier(const command_buffer& cmd, VkImageLayout layout);
 		void pop_layout(const command_buffer& cmd);
 		void change_layout(const command_buffer& cmd, VkImageLayout new_layout);
+
+		virtual VkImageLayout& layout() { return m_current_layout; }
+		virtual const VkImageLayout& layout() const { return m_current_layout; }
 
 		// Queue transfer
 		void queue_acquire(const command_buffer& cmd, VkImageLayout new_layout);

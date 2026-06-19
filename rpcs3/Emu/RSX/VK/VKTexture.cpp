@@ -53,7 +53,7 @@ namespace vk
 		const image_readback_options_t& options)
 	{
 		// Always validate
-		ensure(src->current_layout == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL || src->current_layout == VK_IMAGE_LAYOUT_GENERAL);
+		ensure(src->layout() == VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL || src->layout() == VK_IMAGE_LAYOUT_GENERAL);
 
 		if (vk::is_renderpass_open(cmd))
 		{
@@ -68,7 +68,7 @@ namespace vk
 		default:
 		{
 			ensure(!options.swap_bytes); // "Implicit byteswap option not supported for speficied format"
-			vkCmdCopyImageToBuffer(cmd, src->value, src->current_layout, dst->value, 1, &region);
+			vkCmdCopyImageToBuffer(cmd, src->value, src->layout(), dst->value, 1, &region);
 
 			if (options.sync_region)
 			{
@@ -100,7 +100,7 @@ namespace vk
 			VkBufferImageCopy region2;
 			region2 = region;
 			region2.bufferOffset = z32_offset;
-			vkCmdCopyImageToBuffer(cmd, src->value, src->current_layout, dst->value, 1, &region2);
+			vkCmdCopyImageToBuffer(cmd, src->value, src->layout(), dst->value, 1, &region2);
 
 			// 2. Pre-compute barrier
 			vk::insert_buffer_memory_barrier(cmd, dst->value, z32_offset, packed32_length,
@@ -158,7 +158,7 @@ namespace vk
 			sub_regions[0].imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 			sub_regions[1].bufferOffset = s_offset;
 			sub_regions[1].imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
-			vkCmdCopyImageToBuffer(cmd, src->value, src->current_layout, dst->value, 2, sub_regions);
+			vkCmdCopyImageToBuffer(cmd, src->value, src->layout(), dst->value, 2, sub_regions);
 
 			// 2. Interleave the separated data blocks with a compute job
 			vk::cs_interleave_task *job;
@@ -218,7 +218,7 @@ namespace vk
 	void copy_buffer_to_image(const vk::command_buffer& cmd, const vk::buffer* src, const vk::image* dst, const VkBufferImageCopy& region)
 	{
 		// Always validate
-		ensure(dst->current_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL || dst->current_layout == VK_IMAGE_LAYOUT_GENERAL);
+		ensure(dst->layout() == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL || dst->layout() == VK_IMAGE_LAYOUT_GENERAL);
 
 		if (vk::is_renderpass_open(cmd))
 		{
@@ -229,7 +229,7 @@ namespace vk
 		{
 		default:
 		{
-			vkCmdCopyBufferToImage(cmd, src->value, dst->value, dst->current_layout, 1, &region);
+			vkCmdCopyBufferToImage(cmd, src->value, dst->value, dst->layout(), 1, &region);
 			break;
 		}
 		case VK_FORMAT_D32_SFLOAT:
@@ -265,7 +265,7 @@ namespace vk
 			// 5. Copy the depth data to image
 			VkBufferImageCopy region2 = region;
 			region2.bufferOffset = z32_offset;
-			vkCmdCopyBufferToImage(cmd, src->value, dst->value, dst->current_layout, 1, &region2);
+			vkCmdCopyBufferToImage(cmd, src->value, dst->value, dst->layout(), 1, &region2);
 			break;
 		}
 		case VK_FORMAT_D24_UNORM_S8_UINT:
@@ -319,7 +319,7 @@ namespace vk
 			sub_regions[0].imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 			sub_regions[1].bufferOffset = s_offset;
 			sub_regions[1].imageSubresource.aspectMask = VK_IMAGE_ASPECT_STENCIL_BIT;
-			vkCmdCopyBufferToImage(cmd, src->value, dst->value, dst->current_layout, 2, sub_regions);
+			vkCmdCopyBufferToImage(cmd, src->value, dst->value, dst->layout(), 2, sub_regions);
 			break;
 		}
 		}
@@ -506,7 +506,7 @@ namespace vk
 
 		for (u32 mip_level = 0; mip_level < mipmaps; ++mip_level)
 		{
-			vkCmdCopyImage(cmd, src->value, src->current_layout, dst->value, dst->current_layout, 1, &rgn);
+			vkCmdCopyImage(cmd, src->value, src->layout(), dst->value, dst->layout(), 1, &rgn);
 
 			rgn.srcSubresource.mipLevel++;
 			rgn.dstSubresource.mipLevel++;
@@ -555,7 +555,7 @@ namespace vk
 			copy_rgn.srcSubresource = { src->aspect(), 0, 0, 1 };
 			copy_rgn.extent = { static_cast<u32>(src_rect.width()), static_cast<u32>(src_rect.height()), 1 };
 
-			vkCmdCopyImage(cmd, src->value, src->current_layout, dst->value, dst->current_layout, 1, &copy_rgn);
+			vkCmdCopyImage(cmd, src->value, src->layout(), dst->value, dst->layout(), 1, &copy_rgn);
 		}
 		else if ((src->aspect() & (VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT)) != 0)
 		{
@@ -609,7 +609,7 @@ namespace vk
 					info.imageExtent = { static_cast<u32>(src_w), static_cast<u32>(src_h), 1 };
 					info.imageSubresource = { aspect & transfer_flags, 0, 0, 1 };
 
-					vkCmdCopyImageToBuffer(cmd, src->value, src->current_layout, scratch_buf->value, 1, &info);
+					vkCmdCopyImageToBuffer(cmd, src->value, src->layout(), scratch_buf->value, 1, &info);
 					insert_buffer_memory_barrier(cmd, scratch_buf->value, 0, VK_WHOLE_SIZE, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
 
 					info.imageOffset = {};
@@ -642,7 +642,7 @@ namespace vk
 
 					info.imageOffset = { dst_rect.x1, dst_rect.y1, 0 };
 					info.imageSubresource = { aspect & transfer_flags, 0, 0, 1 };
-					vkCmdCopyBufferToImage(cmd, scratch_buf->value, dst->value, dst->current_layout, 1, &info);
+					vkCmdCopyBufferToImage(cmd, scratch_buf->value, dst->value, dst->layout(), 1, &info);
 				};
 
 				const u32 typeless_w = std::max(dst_rect.width(), src_rect.width());
@@ -743,7 +743,7 @@ namespace vk
 
 			for (u32 mip_level = 0; mip_level < mipmaps; ++mip_level)
 			{
-				vkCmdBlitImage(cmd, src->value, src->current_layout, dst->value, dst->current_layout, 1, &rgn, filter);
+				vkCmdBlitImage(cmd, src->value, src->layout(), dst->value, dst->layout(), 1, &rgn, filter);
 
 				rgn.srcSubresource.mipLevel++;
 				rgn.dstSubresource.mipLevel++;
@@ -902,15 +902,15 @@ namespace vk
 
 			// Queue transfer stuff. Must release from primary if owned and acquire in secondary.
 			// Ignore queue transfers when running in the hacky "fast" mode. We're already violating spec there.
-			if (dst_image->current_layout != VK_IMAGE_LAYOUT_UNDEFINED && async_scheduler->is_host_mode())
+			if (dst_image->layout() != VK_IMAGE_LAYOUT_UNDEFINED && async_scheduler->is_host_mode())
 			{
 				// Release barrier
-				dst_image->queue_release(primary_cb, pcmd->get_queue_family(), dst_image->current_layout);
+				dst_image->queue_release(primary_cb, pcmd->get_queue_family(), dst_image->layout());
 
 				// Acquire barrier. This is not needed if we're going to be changing layouts later anyway (implicit acquire)
 				if (!(flags & image_upload_options::initialize_image_layout))
 				{
-					dst_image->queue_acquire(*pcmd, dst_image->current_layout);
+					dst_image->queue_acquire(*pcmd, dst_image->layout());
 				}
 			}
 		}
@@ -1246,7 +1246,7 @@ namespace vk
 		if (cmd2.get_queue_family() != cmd.get_queue_family())
 		{
 			// Release from async chain, the primary chain will acquire later
-			dst_image->queue_release(cmd2, cmd.get_queue_family(), dst_image->current_layout);
+			dst_image->queue_release(cmd2, cmd.get_queue_family(), dst_image->layout());
 		}
 
 		if (auto rsxthr = static_cast<VKGSRender*>(rsx::get_current_renderer()))
@@ -1329,7 +1329,7 @@ namespace vk
 		vk::image* real_src = src;
 		vk::image* real_dst = dst;
 
-		if (dst->current_layout == VK_IMAGE_LAYOUT_UNDEFINED)
+		if (dst->layout() == VK_IMAGE_LAYOUT_UNDEFINED)
 		{
 			// Watch out for lazy init
 			ensure(src != dst);

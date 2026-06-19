@@ -164,8 +164,20 @@ namespace rsx
 		{
 			rsx::surface_color_format gcm_color_format;
 			rsx::surface_depth_format2 gcm_depth_format;
+
+			void from_gcm_format(u32 gcm_format)
+			{
+				if (rsx::classify_format(gcm_format) == RSX_FORMAT_CLASS_COLOR)
+				{
+					gcm_color_format = rsx::get_compatible_surface_color_format(gcm_format);
+				}
+				else
+				{
+					gcm_depth_format = rsx::get_compatible_surface_depth_format(gcm_format);
+				}
+			}
 		}
-		format_info;
+		format_info{};
 
 		struct
 		{

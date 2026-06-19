@@ -46,8 +46,11 @@ namespace rsx
 
 namespace gl
 {
-	class render_target : public viewable_image, public rsx::render_target_descriptor<texture*>
+	class render_target
+		: public viewable_image
+		, public rsx::render_target_descriptor<texture*>
 	{
+	protected:
 		void clear_memory(gl::command_context& cmd, gl::texture* surface = nullptr);
 		void load_memory(gl::command_context& cmd);
 		void initialize_memory(gl::command_context& cmd, rsx::surface_access access);
@@ -59,6 +62,9 @@ namespace gl
 		void resolve(gl::command_context& cmd);
 		// Unresolve the linear data into planar MSAA data
 		void unresolve(gl::command_context& cmd);
+
+		using viewable_image::viewable_image;
+		render_target() = default;
 
 	public:
 		render_target(GLuint width, GLuint height, GLubyte samples, GLenum sized_format, rsx::format_class format_class)
@@ -107,7 +113,40 @@ namespace gl
 		void write_barrier(gl::command_context& cmd) { memory_barrier(cmd, rsx::surface_access::shader_write); }
 	};
 
-	struct framebuffer_holder : public gl::fbo, public rsx::ref_counted
+	class render_target_ex_ref
+		: public render_target
+	{
+	public:
+		render_target_ex_ref(viewable_image* ref)
+		{
+			m_external_ref = ref;
+			m_id = ref->id();
+			m_width = ref->width();
+			m_height = ref->height();
+			m_depth = 1;
+			m_mipmaps = 1;
+			m_samples = ref->samples();
+			m_pitch = ref->pitch();
+			m_compressed = ref->compressed();
+			m_aspect_flags = ref->aspect();
+			m_component_layout = ref->get_native_component_layout();
+			m_target = ref->get_target();
+			m_internal_format = ref->get_internal_format();
+			m_format_class = ref->format_class();
+		}
+
+		~render_target_ex_ref()
+		{
+			m_id = GL_NONE;
+		}
+
+	private:
+		viewable_image* m_external_ref = nullptr;
+	};
+
+	struct framebuffer_holder
+		: public gl::fbo
+		, public rsx::ref_counted
 	{
 		using gl::fbo::fbo;
 	};
@@ -277,6 +316,27 @@ struct gl_render_target_traits
 
 		prev.target = sink.get();
 		sink->set_old_contents_region(prev, false);
+	}
+
+	static
+	std::unique_ptr<gl::render_target> clone_external_ref(
+		gl::command_context& /*cmd*/,
+		std::unique_ptr<gl::viewable_image>& src,
+		const rsx::image_section_attributes_t& attributes)
+	{
+		std::unique_ptr<gl::render_target> sink = std::make_unique<gl::render_target_ex_ref>(src.get());
+		sink->set_resolution_scaling_config({});
+		sink->add_ref();
+
+		sink->sample_layout = rsx::surface_sample_layout::ps3;
+		sink->set_spp(1);
+		sink->format_info.from_gcm_format(attributes.gcm_format);
+		sink->memory_usage_flags = rsx::surface_usage_flags::storage;
+		sink->native_pitch = src->pitch();
+		sink->rsx_pitch = attributes.pitch;
+		sink->surface_width = attributes.width;
+		sink->surface_height = attributes.height;
+		sink->queue_tag(attributes.address);
 	}
 
 	static

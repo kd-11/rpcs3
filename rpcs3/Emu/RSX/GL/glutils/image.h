@@ -219,6 +219,8 @@ namespace gl
 
 		rsx::format_class m_format_class = RSX_FORMAT_CLASS_UNDEFINED;
 
+		texture() = default;
+
 	public:
 		texture(const texture&) = delete;
 		texture(texture&& texture_) = delete;

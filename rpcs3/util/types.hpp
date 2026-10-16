@@ -55,6 +55,8 @@ using namespace std::literals;
 #define CHECK_MAX_SIZE(type, size) static_assert(sizeof(type) <= size, #type " type size is too big")
 #define CHECK_SIZE_ALIGN(type, size, align) CHECK_SIZE(type, size); CHECK_ALIGN(type, align)
 
+#define CHECK_MEMBER_OFFSET(type, member, offset) static_assert(offsetof(type, member) == offset, "Offset of " #member " in struct/class " #type " is invalid")
+
 #define DECLARE(...) decltype(__VA_ARGS__) __VA_ARGS__
 
 #define STR_CASE(...) case __VA_ARGS__: return #__VA_ARGS__

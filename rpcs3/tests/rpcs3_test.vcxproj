@@ -96,6 +96,7 @@
   <ItemGroup>
     <ClCompile Include="test.cpp" />
     <ClCompile Include="test_adec_queue.cpp" />
+    <ClCompile Include="test_atracxdec.cpp" />
     <ClCompile Include="test_bit_set.cpp" />
     <ClCompile Include="test_cctype.cpp" />
     <ClCompile Include="test_dmux_pamf.cpp">

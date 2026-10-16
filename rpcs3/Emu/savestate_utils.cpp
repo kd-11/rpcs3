@@ -40,7 +40,7 @@ static std::array<serial_ver_t, 34> s_serial_versions;
 		return ::s_serial_versions[identifier].current_version;\
 	}
 
-SERIALIZATION_VER(global_version, 0,                            25) // For stuff not listed here
+SERIALIZATION_VER(global_version, 0,                            26) // For stuff not listed here
 SERIALIZATION_VER(ppu, 1,                                       1, 2/*PPU sleep order*/, 3/*PPU FNID and module*/)
 SERIALIZATION_VER(spu, 2,                                       1)
 SERIALIZATION_VER(lv2_sync, 3,                                  1)
@@ -91,10 +91,9 @@ SERIALIZATION_VER(HLE, 25,                                      1)
 
 SERIALIZATION_VER(cellSysutil, 26,                              1, 2/*AVC2 Muting,Volume*/)
 SERIALIZATION_VER(cellDmuxPamf, 27,                             1)
+SERIALIZATION_VER(cellAtracXdec, 28,                            1)
 
 // For future modules
-SERIALIZATION_VER(cellReserved1, 27,                             1)
-SERIALIZATION_VER(cellReserved2, 28,                             1)
 SERIALIZATION_VER(cellReserved3, 29,                             1)
 SERIALIZATION_VER(cellReserved4, 30,                             1)
 SERIALIZATION_VER(cellReserved6, 31,                             1)

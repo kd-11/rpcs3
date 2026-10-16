@@ -237,18 +237,21 @@ void fmt_class_string<CellAdecError>::format(std::string& out, u64 arg)
 
 vm::gvar<CellAdecCoreOps> g_cell_adec_core_ops_lpcm;
 
-// See _CellAdecCoreOpGetMemSize_lpcm()
-constexpr u32 LPCM_DEC_PARAM_OFFSET = utils::align(static_cast<u32>(sizeof(LpcmDecContext)), 0x80);
-constexpr u32 LPCM_DEC_OUTPUT_OFFSET = LPCM_DEC_PARAM_OFFSET + utils::align(static_cast<u32>(sizeof(CellAdecParamLpcm)), 0x80) + 0x100;
+namespace adec_internal
+{
+	// See _CellAdecCoreOpGetMemSize_lpcm()
+	constexpr u32 LPCM_DEC_PARAM_OFFSET = utils::align(static_cast<u32>(sizeof(LpcmDecContext)), 0x80);
+	constexpr u32 LPCM_DEC_OUTPUT_OFFSET = LPCM_DEC_PARAM_OFFSET + utils::align(static_cast<u32>(sizeof(CellAdecParamLpcm)), 0x80) + 0x100;
+}
 
 vm::ptr<CellAdecParamLpcm> LpcmDecContext::get_lpcm_param() const
 {
-	return vm::ptr<CellAdecParamLpcm>::make(vm::get_addr(this) + LPCM_DEC_PARAM_OFFSET);
+	return vm::ptr<CellAdecParamLpcm>::make(vm::get_addr(this) + adec_internal::LPCM_DEC_PARAM_OFFSET);
 }
 
 vm::ptr<f32> LpcmDecContext::get_output() const
 {
-	return vm::ptr<f32>::make(vm::get_addr(this) + LPCM_DEC_OUTPUT_OFFSET);
+	return vm::ptr<f32>::make(vm::get_addr(this) + adec_internal::LPCM_DEC_OUTPUT_OFFSET);
 }
 
 namespace adec_internal

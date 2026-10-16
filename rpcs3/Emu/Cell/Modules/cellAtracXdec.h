@@ -22,6 +22,9 @@ constexpr int averror_eof = AVERROR_EOF; // Workaround for old-style-cast error
 
 #include "cellPamf.h"
 #include "cellAdec.h"
+#include "util/asm.hpp"
+
+#include <optional>
 
 enum CellAtracXdecError : u32
 {
@@ -177,42 +180,36 @@ CHECK_SIZE(AtracXdecCmd, 0x34);
 
 struct AtracXdecDecoder
 {
-	be_t<u32> sampling_freq;
-	be_t<u32> ch_config_idx;
-	be_t<u32> nch_in;
-	be_t<u32> nch_blocks;
-	be_t<u32> nbytes;
-	be_t<u32> nch_out;
-	be_t<u32> bw_pcm;
-	be_t<u32> nbytes_128_aligned;
-	be_t<u32> status;
-	be_t<u32> pcm_output_size;
+	// Unused on HLE, the configuration is stored in AtracXdecHost
+	be_t<u32> sampling_freq{};
+	be_t<u32> ch_config_idx{};
+	be_t<u32> nch_in{};
+	be_t<u32> nch_blocks{};
+	be_t<u32> nbytes{};
+	be_t<u32> nch_out{};
+	be_t<u32> bw_pcm{};
+	be_t<u32> nbytes_128_aligned{};
+	be_t<u32> status{};
+	be_t<u32> pcm_output_size{};
 
 	const vm::bptr<u8> work_mem;
 
 	// HLE exclusive
-	b8 config_is_set = false; // For savestates
-	const AVCodec* codec = nullptr;
-	AVCodecContext* ctx = nullptr;
-	AVPacket* packet = nullptr;
-	AVFrame* frame = nullptr;
+	u8 reserved1[4]{};
+	be_t<u32> host_id; // ID of the AtracXdecHost. The guest can modify it, so it's only used to look up the host object, which is then verified
+	u8 reserved2[28]{};
 
-	u8 spurs_stuff[84]; // 120 bytes on LLE, pointers to CellSpurs, CellSpursTaskset, etc.
+	u8 spurs_stuff[84]{}; // 120 bytes on LLE, pointers to CellSpurs, CellSpursTaskset, etc.
 
-	be_t<u32> spurs_task_id;  // CellSpursTaskId
+	be_t<u32> spurs_task_id{};  // CellSpursTaskId
 
-	AtracXdecDecoder(vm::ptr<u8> work_mem) : work_mem(work_mem) {}
-
-	void alloc_avcodec();
-	void free_avcodec();
-	void init_avcodec();
-
-	error_code set_config_info(u32 sampling_freq, u32 ch_config_idx, u32 nbytes);
-	error_code init_decode(u32 bw_pcm, u32 nch_out);
-	error_code parse_ats_header(vm::cptr<u8> au_start_addr);
+	AtracXdecDecoder(vm::ptr<u8> work_mem, u32 host_id) : work_mem(work_mem), host_id(host_id) {}
 };
 
 CHECK_SIZE(AtracXdecDecoder, 0xa8);
+CHECK_MEMBER_OFFSET(AtracXdecDecoder, work_mem, 0x28);
+CHECK_MEMBER_OFFSET(AtracXdecDecoder, host_id, 0x30);
+CHECK_MEMBER_OFFSET(AtracXdecDecoder, spurs_task_id, 0xa4);
 
 // HLE exclusive, for savestates
 enum class atracxdec_state : u8
@@ -226,20 +223,22 @@ enum class atracxdec_state : u8
 	decoding
 };
 
+class AtracXdecHost;
+
 struct AtracXdecContext
 {
-	be_t<u64> thread_id; // sys_ppu_thread_t
+	be_t<u64> thread_id{};                         // sys_ppu_thread_t
 
-	be_t<u32> queue_mutex;     // sys_mutex_t
-	be_t<u32> queue_not_empty; // sys_cond_t
-	AdecCmdQueue<AtracXdecCmd> cmd_queue;
+	be_t<u32> queue_mutex{};                       // sys_mutex_t
+	be_t<u32> queue_not_empty{};                   // sys_cond_t
+	AdecCmdQueue<AtracXdecCmd> cmd_queue{};
 
-	be_t<u32> output_mutex;    // sys_mutex_t
-	be_t<u32> output_consumed; // sys_cond_t
+	be_t<u32> output_mutex{};                      // sys_mutex_t
+	be_t<u32> output_consumed{};                   // sys_cond_t
 	be_t<u32> output_locked = false;
 
-	be_t<u32> run_thread_mutex; // sys_mutex_t
-	be_t<u32> run_thread_cond;  // sys_cond_t
+	be_t<u32> run_thread_mutex{};                  // sys_mutex_t
+	be_t<u32> run_thread_cond{};                   // sys_cond_t
 	be_t<u32> run_thread = true;
 
 	const AdecCb<AdecNotifyAuDone> notify_au_done;
@@ -251,31 +250,31 @@ struct AtracXdecContext
 
 	// HLE exclusive
 	u64 cmd_counter = 0;         // For debugging
-	AtracXdecCmd cmd;            // For savestates; if savestate was created while processing a decode command, we need to save the current command
+	AtracXdecCmd cmd{};          // For savestates; if savestate was created while processing a decode command, we need to save the current command
 	atracxdec_state savestate{}; // For savestates
-	b8 skip_next_frame;          // Needed to emulate behavior of LLE SPU program, it doesn't output the first frame after a sequence reset or error
+	b8 skip_next_frame{};        // Needed to emulate behavior of LLE SPU program, it doesn't output the first frame after a sequence reset or error
 
-	u8 spurs_stuff[58]; // 120 bytes on LLE, pointers to CellSpurs, CellSpursTaskset, etc.
+	u8 spurs_stuff[58]{};        // 120 bytes on LLE, pointers to CellSpurs, CellSpursTaskset, etc.
 
-	CellAdecParamAtracX atracx_param;
+	CellAdecParamAtracX atracx_param{};
 
-	u8 reserved;
-	b8 first_decode;
+	u8 reserved{};
+	b8 first_decode{};
 
 	AtracXdecDecoder decoder;
 
 	AtracXdecContext(vm::ptr<AdecNotifyAuDone> notifyAuDone, vm::ptr<void> notifyAuDoneArg, vm::ptr<AdecNotifyPcmOut> notifyPcmOut, vm::ptr<void> notifyPcmOutArg,
-		vm::ptr<AdecNotifyError> notifyError, vm::ptr<void> notifyErrorArg, vm::ptr<AdecNotifySeqDone> notifySeqDone, vm::ptr<void> notifySeqDoneArg, vm::bptr<u8> work_mem)
+		vm::ptr<AdecNotifyError> notifyError, vm::ptr<void> notifyErrorArg, vm::ptr<AdecNotifySeqDone> notifySeqDone, vm::ptr<void> notifySeqDoneArg, vm::bptr<u8> work_mem, u32 host_id)
 		: notify_au_done{ notifyAuDone, notifyAuDoneArg }
 		, notify_pcm_out{ notifyPcmOut, notifyPcmOutArg }
 		, notify_error{ notifyError, notifyErrorArg }
 		, notify_seq_done{ notifySeqDone, notifySeqDoneArg }
 		, work_mem(work_mem)
-		, decoder(work_mem)
+		, decoder(work_mem, host_id)
 	{
 	}
 
-	void exec(ppu_thread& ppu);
+	void exec(ppu_thread& ppu, AtracXdecHost& host);
 
 	template <AtracXdecCmdType type>
 	error_code send_command(ppu_thread& ppu, auto&&... args);
@@ -283,6 +282,11 @@ struct AtracXdecContext
 
 static_assert(std::is_standard_layout_v<AtracXdecContext>);
 CHECK_SIZE_ALIGN(AtracXdecContext, 0x268, 8);
+CHECK_MEMBER_OFFSET(AtracXdecContext, cmd_queue, 0x10);
+CHECK_MEMBER_OFFSET(AtracXdecContext, work_mem, 0x124);
+CHECK_MEMBER_OFFSET(AtracXdecContext, cmd, 0x130);
+CHECK_MEMBER_OFFSET(AtracXdecContext, atracx_param, 0x1a0);
+CHECK_MEMBER_OFFSET(AtracXdecContext, decoder, 0x1c0);
 
 constexpr u32 ATXDEC_SPURS_STRUCTS_SIZE = 0x1cf00; // CellSpurs, CellSpursTaskset, context, etc.
 constexpr u16 ATXDEC_SAMPLES_PER_FRAME = 0x800;
@@ -310,4 +314,131 @@ constexpr u8 ATXDEC_AVCODEC_CH_MAP[7][8] =
 	{ 0, 2, 1, 4, 5, 6, 3 },
 	{ 0, 1, 2, 3, 4, 5, 6, 7 }
 #endif
+};
+
+namespace atracxdec_internal
+{
+	constexpr u32 get_spurs_mem_size(u32 nch_in)
+	{
+		switch (nch_in)
+		{
+		case 1: return 0x6000;
+		case 2: return 0x6000;
+		case 3: return 0x12880;
+		case 4: return 0x19c80;
+		case 5: return -1;
+		case 6: return 0x23080;
+		case 7: return 0x2a480;
+		case 8: return 0x2c480;
+		default: return -1;
+		}
+	}
+
+	// Offset of the work memory from the start of the context
+	constexpr u32 WORK_MEM_OFFSET = utils::align(static_cast<u32>(sizeof(AtracXdecContext)), 0x80) + ATXDEC_SPURS_STRUCTS_SIZE;
+
+	// End of the PCM output buffer relative to the start of the context, for a decoder supporting up to max_nch channels
+	constexpr u32 get_work_mem_end(u32 max_nch)
+	{
+		return WORK_MEM_OFFSET + get_spurs_mem_size(max_nch) + ATXDEC_SAMPLES_PER_FRAME * static_cast<u32>(sizeof(f32)) * max_nch;
+	}
+
+	// Validation of guest-supplied parameters. These functions don't access guest memory
+	constexpr u32 get_nch_in(u32 ch_config_idx)
+	{
+		return ch_config_idx <= 4 ? ch_config_idx : ch_config_idx + 1;
+	}
+
+	// max_nch is the maximum number of channels the work memory of the decoder was allocated for
+	constexpr bool check_config_info(u32 max_nch, u32 sampling_freq, u32 ch_config_idx, u32 nbytes)
+	{
+		return ch_config_idx >= 1 && ch_config_idx <= 7 && get_nch_in(ch_config_idx) <= max_nch
+			&& (sampling_freq == 48000 || sampling_freq == 44100) // 32kHz is not supported, even though official docs claim it is
+			&& nbytes != 0 && nbytes <= ATXDEC_MAX_FRAME_LENGTH;
+	}
+
+	// LLE doesn't check nch_out. HLE rejects values that would exceed the output buffer. Downmixing is not implemented, the output always contains nch_in channels
+	constexpr bool check_output_format(u32 max_nch, u32 bw_pcm, u32 nch_out)
+	{
+		const bool valid_bw_pcm = bw_pcm == CELL_ADEC_ATRACX_WORD_SZ_16BIT || bw_pcm == CELL_ADEC_ATRACX_WORD_SZ_24BIT || bw_pcm == CELL_ADEC_ATRACX_WORD_SZ_32BIT || bw_pcm == CELL_ADEC_ATRACX_WORD_SZ_FLOAT;
+		return valid_bw_pcm && nch_out >= 1 && nch_out <= max_nch;
+	}
+
+	// Size of a decoded frame in the output buffer. 24-bit samples are stored as 32-bit integers
+	constexpr u32 get_pcm_output_size(u32 bw_pcm, u32 nch_in)
+	{
+		return (bw_pcm == CELL_ADEC_ATRACX_WORD_SZ_16BIT ? static_cast<u32>(sizeof(s16)) : static_cast<u32>(sizeof(f32))) * nch_in * ATXDEC_SAMPLES_PER_FRAME;
+	}
+
+	struct ats_header_info
+	{
+		u32 sampling_freq;
+		u32 ch_config_idx;
+		u32 nbytes;
+	};
+
+	// Returns std::nullopt if the sync word, the channel configuration, or the sample rate index is invalid
+	std::optional<ats_header_info> parse_ats_header(const AtracXdecAtsHeader& ats);
+}
+
+// HLE exclusive, owns the FFmpeg decoder and the validated configuration of an AtracXdecContext.
+// The guest context only ever sees an opaque ID that decodes to this object.
+class AtracXdecHost
+{
+public:
+	static constexpr u32 id_base = 1;
+	static constexpr u32 id_step = 1;
+	static constexpr u32 id_count = 1023;
+	SAVESTATE_INIT_POS(36);
+
+	AtracXdecHost(u32 owner_addr, u32 max_nch);
+	AtracXdecHost(utils::serial& ar);
+	AtracXdecHost(const AtracXdecHost&) = delete;
+	AtracXdecHost& operator=(const AtracXdecHost&) = delete;
+	~AtracXdecHost();
+
+	void save(utils::serial& ar);
+
+	const u32 owner_addr;    // Address of the AtracXdecContext
+	const u32 max_nch;       // Maximum number of channels the work memory was allocated for
+	const u32 work_mem_addr;
+
+	atomic_t<u32> worker_thread_id = 0; // ID of the PPU thread running atracXdecEntry(), the first thread to run it is bound to this object
+	atomic_t<bool> closed = false;      // Set when the decoder is closed or retired, no new operations are accepted
+
+	// Validated configuration, only modified by the decoder thread
+	u32 sampling_freq = 0;
+	u32 ch_config_idx = 0;
+	u32 nch_in = 0;
+	u32 nbytes = 0;
+	u32 bw_pcm = 0;
+	u32 nch_out = 0;
+	atomic_t<u32> pcm_output_size = 0; // Read by _CellAdecCoreOpRealign_atracx()
+	bool config_is_set = false;
+	bool decoder_ready = false;        // FFmpeg was initialized with the current configuration
+
+	bool is_valid() const { return codec && packet && frame; }
+	bool bind_worker(u32 ppu_id) { return worker_thread_id.compare_and_swap_test(0, ppu_id) || worker_thread_id == ppu_id; }
+
+	error_code set_config_info(u32 sampling_freq, u32 ch_config_idx, u32 nbytes);
+	error_code init_decode(u32 bw_pcm, u32 nch_out);
+	error_code parse_ats_header(u32 au_start_addr);
+
+	// Decodes nbytes from input_addr, which must have been checked. Returns the number of decoded samples per channel
+	u32 decode(u32 input_addr, u32& error);
+
+	// Channel planes of the last decoded frame
+	const f32* get_samples(u32 channel) const { return reinterpret_cast<const f32*>(frame->extended_data[channel]); }
+
+private:
+	const AVCodec* codec = nullptr;
+	AVCodecContext* ctx = nullptr;
+	AVPacket* packet = nullptr;
+	AVFrame* frame = nullptr;
+
+	// Compressed input, FFmpeg requires zeroed padding after the data
+	std::array<u8, ATXDEC_MAX_FRAME_LENGTH + AV_INPUT_BUFFER_PADDING_SIZE> input{};
+
+	void alloc_avcodec();
+	bool init_avcodec();
 };

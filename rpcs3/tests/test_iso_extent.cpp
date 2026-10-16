@@ -2,61 +2,65 @@
 
 namespace Loader
 {
-	class counted_file final : public fs::file_base
+	// Helpers have internal linkage
+	namespace
 	{
-		fs::file m_file;
-		u64& m_reads;
-
-	public:
-		counted_file(fs::file file, u64& reads)
-			: m_file(std::move(file)), m_reads(reads)
+		class counted_file final : public fs::file_base
 		{
-		}
+			fs::file m_file;
+			u64& m_reads;
 
-		bool trunc(u64 length) override
-		{
-			return m_file.trunc(length);
-		}
+		public:
+			counted_file(fs::file file, u64& reads)
+				: m_file(std::move(file)), m_reads(reads)
+			{
+			}
 
-		u64 read(void* buffer, u64 size) override
-		{
-			++m_reads;
-			return m_file.read(buffer, size);
-		}
+			bool trunc(u64 length) override
+			{
+				return m_file.trunc(length);
+			}
 
-		u64 read_at(u64 offset, void* buffer, u64 size) override
-		{
-			++m_reads;
-			return m_file.read_at(offset, buffer, size);
-		}
+			u64 read(void* buffer, u64 size) override
+			{
+				++m_reads;
+				return m_file.read(buffer, size);
+			}
 
-		u64 write(const void* buffer, u64 size) override
-		{
-			return m_file.write(buffer, size);
-		}
+			u64 read_at(u64 offset, void* buffer, u64 size) override
+			{
+				++m_reads;
+				return m_file.read_at(offset, buffer, size);
+			}
 
-		u64 seek(s64 offset, fs::seek_mode whence) override
-		{
-			return m_file.seek(offset, whence);
-		}
+			u64 write(const void* buffer, u64 size) override
+			{
+				return m_file.write(buffer, size);
+			}
 
-		u64 size() override
-		{
-			return m_file.size();
-		}
-	};
+			u64 seek(s64 offset, fs::seek_mode whence) override
+			{
+				return m_file.seek(offset, whence);
+			}
 
-	template <typename Base>
-	class observed_iso_file final : public Base
-	{
-	public:
-		template <typename... Args>
-		observed_iso_file(u64& reads, Args&&... args)
-			: Base(std::forward<Args>(args)...)
+			u64 size() override
+			{
+				return m_file.size();
+			}
+		};
+
+		template <typename Base>
+		class observed_iso_file final : public Base
 		{
-			this->m_file = fs::file(std::make_unique<counted_file>(std::move(this->m_file), reads));
-		}
-	};
+		public:
+			template <typename... Args>
+			observed_iso_file(u64& reads, Args&&... args)
+				: Base(std::forward<Args>(args)...)
+			{
+				this->m_file = fs::file(std::make_unique<counted_file>(std::move(this->m_file), reads));
+			}
+		};
+	}
 
 	TEST_F(iso_test, ExtentEofDoesNotReadBackingFile)
 	{

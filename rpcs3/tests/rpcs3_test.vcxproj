@@ -32,7 +32,7 @@
   <PropertyGroup>
     <PreferredToolArchitecture>x64</PreferredToolArchitecture>
     <IntDir>$(SolutionDir)build\tmp\$(ProjectName)-$(Configuration)-$(Platform)\</IntDir>
-    <IncludePath>.\;$(SolutionDir);$(SolutionDir)rpcs3;$(SolutionDir)3rdparty\ffmpeg\include;$(VC_IncludePath);$(WindowsSDK_IncludePath);$(UniversalCRT_IncludePath);</IncludePath>
+    <IncludePath>.\;$(SolutionDir);$(SolutionDir)rpcs3;$(SolutionDir)3rdparty\ffmpeg\include;$(SolutionDir)3rdparty\libpng\libpng;$(VC_IncludePath);$(WindowsSDK_IncludePath);$(UniversalCRT_IncludePath);</IncludePath>
     <LibraryPath>$(SolutionDir)build\lib\$(Configuration)-$(Platform)\;$(UniversalCRT_LibraryPath_x64);$(LibraryPath)</LibraryPath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -105,6 +105,7 @@
     </ClCompile>
     <ClCompile Include="test_spu_analyser.cpp" />
     <ClCompile Include="test_fmt.cpp" />
+    <ClCompile Include="test_pngdec.cpp" />
     <ClCompile Include="test_rsx_cfg.cpp" />
     <ClCompile Include="test_rsx_fp_asm.cpp" />
     <ClCompile Include="test_rsx_mm_queue.cpp" />

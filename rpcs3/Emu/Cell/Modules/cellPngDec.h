@@ -4,6 +4,8 @@
 
 #include "png.h"
 
+#include <optional>
+
 enum : u32
 {
 	PNGDEC_CODEC_VERSION = 0x00420000,
@@ -262,56 +264,184 @@ struct CellPngDecCbCtrlDisp
 };
 
 // Custom structs
+
+// Main handle, allocated with the user's malloc callback. The guest can modify it, the decoder only uses PngDecMainHost
 struct PngHandle
 {
-	vm::ptr<CellPngDecCbControlMalloc> malloc_;
-	vm::ptr<void> malloc_arg;
-	vm::ptr<CellPngDecCbControlFree> free_;
-	vm::ptr<void> free_arg;
+	vm::bptr<CellPngDecCbControlMalloc> malloc_;
+	vm::bptr<void> malloc_arg;
+	vm::bptr<CellPngDecCbControlFree> free_;
+	vm::bptr<void> free_arg;
+	be_t<u32> host_id; // ID of the PngDecMainHost. Only used to look up the host object, which is then verified
 };
 
-// For reading from a buffer using libpng
-struct PngBuffer
-{
-	// The cursor location and data pointer for reading from a buffer
-	usz cursor;
-	usz length;
-	vm::bptr<void> data;
-
-	// The file descriptor, and whether we need to read from a file descriptor
-	bool file;
-	u32 fd;
-};
-
+// Sub handle, allocated with the user's malloc callback. The decoder state is located in PngDecStreamHost
 struct PngStream
 {
-	// PNG decoding structures
-	CellPngDecInfo info;
-	CellPngDecOutParam out_param;
-	CellPngDecSrc source;
+	be_t<u32> host_id; // ID of the PngDecStreamHost. Only used to look up the host object, which is then verified
+	u8 reserved[0x7c];
+};
+
+// Second allocation of a sub handle, unused. It used to contain the state of the input buffer
+struct PngBuffer
+{
+	u8 reserved[0x20];
+};
+
+class ppu_thread;
+
+// HLE exclusive, state of a main handle
+class PngDecMainHost
+{
+public:
+	static constexpr u32 id_base = 1;
+	static constexpr u32 id_step = 1;
+	static constexpr u32 id_count = 1023;
+	SAVESTATE_INIT_POS(46);
+
+	PngDecMainHost(u32 handle_addr, vm::ptr<CellPngDecCbControlMalloc> malloc_func, vm::ptr<void> malloc_arg, vm::ptr<CellPngDecCbControlFree> free_func, vm::ptr<void> free_arg)
+		: handle_addr(handle_addr), malloc_func(malloc_func), malloc_arg(malloc_arg), free_func(free_func), free_arg(free_arg)
+	{
+	}
+
+	PngDecMainHost(utils::serial& ar);
+	void save(utils::serial& ar);
+
+	const u32 handle_addr; // Address of the PngHandle
+
+	// The callbacks set when the handle was created
+	const vm::ptr<CellPngDecCbControlMalloc> malloc_func;
+	const vm::ptr<void> malloc_arg;
+	const vm::ptr<CellPngDecCbControlFree> free_func;
+	const vm::ptr<void> free_arg;
+};
+
+// HLE exclusive, state of a sub handle. libpng only accesses this object, never guest memory directly
+class PngDecStreamHost
+{
+public:
+	static constexpr u32 id_base = 1;
+	static constexpr u32 id_step = 1;
+	static constexpr u32 id_count = 1023;
+	SAVESTATE_INIT_POS(47);
+
+	PngDecStreamHost(u32 handle_addr, u32 stream_addr, const PngDecMainHost& main)
+		: handle_addr(handle_addr), stream_addr(stream_addr), malloc_func(main.malloc_func), malloc_arg(main.malloc_arg), free_func(main.free_func), free_arg(main.free_arg)
+	{
+	}
+
+	PngDecStreamHost(utils::serial& ar);
+	PngDecStreamHost(const PngDecStreamHost&) = delete;
+	PngDecStreamHost& operator=(const PngDecStreamHost&) = delete;
+	~PngDecStreamHost();
+
+	void save(utils::serial& ar);
+
+	// Bookkeeping, saved in savestates
+	const u32 handle_addr; // Address of the PngHandle the stream belongs to
+	const u32 stream_addr; // Address of the PngStream
+	u32 buffer_addr = 0;   // Address of the PngBuffer
+	const vm::ptr<CellPngDecCbControlMalloc> malloc_func;
+	const vm::ptr<void> malloc_arg;
+	const vm::ptr<CellPngDecCbControlFree> free_func;
+	const vm::ptr<void> free_arg;
+	bool file = false;
+	u32 fd = 0;
+
+	// The state of libpng can't be saved. Streams that were open when a savestate was created can only be closed
+	bool lost = false;
+
+	// Set while libpng is used. The guest callbacks can call the decoder functions again, which is not allowed
+	atomic_t<bool> busy = false;
+
+	CellPngDecInfo info{};
+	CellPngDecOutParam out_param{};
+	CellPngDecSrc source{};
 
 	// Partial decoding
-	CellPngDecCbCtrlStrm cbCtrlStream;
-	CellPngDecCbCtrlDisp cbCtrlDisp;
-	vm::ptr<CellPngDecDispInfo> cbDispInfo;
-	vm::ptr<CellPngDecDispParam> cbDispParam;
-	ppu_thread* ppuContext;
+	CellPngDecCbCtrlStrm cb_ctrl_stream{};
+	CellPngDecCbCtrlDisp cb_ctrl_disp{};
+	vm::ptr<CellPngDecDispInfo> disp_info{};
+	vm::ptr<CellPngDecDispParam> disp_param{};
+	ppu_thread* ppu = nullptr; // Only set while decoding
+	bool progressive = false;
+	u32 output_counts = 0;
+	u32 next_row = 0;
+	bool end_of_file = false;
 
-	u32 outputCounts = 0;
-	u32 nextRow = 0;
-	bool endOfFile = false;
+	s32 packing = 0;
+	u32 passes = 0;
+	bool parameters_set = false; // The output parameters were set, the row buffer is allocated
 
-	// Pixel packing value
-	be_t<s32> packing;
-	u32 passes;
+	// Input buffer for decoding from memory
+	u32 data_addr = 0;
+	u32 length = 0;
+	u32 cursor = 0;
+	u32 push_size = 0;           // Size of the data pushed to libpng in progressive mode
+	bool pushing_source = false; // The data pushed to libpng is located at data_addr + cursor
 
-	// PNG custom read function structure, for decoding from a buffer
-	vm::ptr<PngBuffer> buffer;
+	// libpng never writes to guest memory directly, rows are decoded here and then copied
+	std::vector<u8> row_buffer;
 
-	// libpng structures for reading and decoding the PNG file
-	png_structp png_ptr;
-	png_infop info_ptr;
+	png_structp png_ptr = nullptr;
+	png_infop info_ptr = nullptr;
 };
+
+// Validation of guest-supplied sizes and addresses. These functions don't access guest memory
+namespace png_dec_internal
+{
+	// Size of the output buffer needed for an image with these parameters, or std::nullopt if it doesn't fit in the guest address space
+	constexpr std::optional<u32> get_output_size(u32 height, u64 bytes_per_line, u64 row_bytes)
+	{
+		if (height == 0)
+		{
+			return 0;
+		}
+
+		if (row_bytes > bytes_per_line || bytes_per_line > u32{umax})
+		{
+			return std::nullopt;
+		}
+
+		const u64 size = u64{height - 1} * bytes_per_line + row_bytes;
+
+		if (size > u32{umax})
+		{
+			return std::nullopt;
+		}
+
+		return static_cast<u32>(size);
+	}
+
+	// Address of a row written by the progressive decoder, or std::nullopt if the output parameters set by the guest are invalid
+	constexpr std::optional<u32> get_progressive_row_addr(u32 next_output_image, u32 row_num, u32 output_start_y, u64 frame_width_byte, u32 pass, u64 row_bytes)
+	{
+		u64 addr = next_output_image;
+
+		if (pass == 0)
+		{
+			if (row_num < output_start_y || frame_width_byte > u32{umax})
+			{
+				return std::nullopt;
+			}
+
+			addr += u64{row_num - output_start_y} * frame_width_byte;
+		}
+
+		if (addr + row_bytes > u64{u32{umax}} + 1)
+		{
+			return std::nullopt;
+		}
+
+		return static_cast<u32>(addr);
+	}
+
+	// Whether size bytes can be read from an input buffer of the given length at the cursor
+	constexpr bool can_read(u32 cursor, u32 length, u64 size)
+	{
+		return cursor <= length && size <= u64{length - cursor};
+	}
+}
 
 // Converts libpng colour type to cellPngDec colour type
 static s32 getPngDecColourType(u8 type)

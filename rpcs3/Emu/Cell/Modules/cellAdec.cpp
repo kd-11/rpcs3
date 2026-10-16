@@ -251,6 +251,91 @@ vm::ptr<f32> LpcmDecContext::get_output() const
 	return vm::ptr<f32>::make(vm::get_addr(this) + LPCM_DEC_OUTPUT_OFFSET);
 }
 
+namespace adec_internal
+{
+	lpcm_au_layout get_lpcm_au_layout(bool dvd_packing, const CellAdecParamLpcm& param, u32 au_size)
+	{
+		s64 output_size = au_size;
+		s32 sample_num = static_cast<s32>(utils::align(+param.audioPayloadSize, 0x10));
+		s32 channel_num = 0;
+		u32 input_overread = 0;
+		bool valid = true;
+
+		if (!dvd_packing)
+		{
+			switch (param.sizeOfWord)
+			{
+			case CELL_ADEC_BIT_LENGTH_16: output_size = output_size * 32 / 16; sample_num /= 2; break;
+			case CELL_ADEC_BIT_LENGTH_20: // Same as below
+			case CELL_ADEC_BIT_LENGTH_24: output_size = output_size * 32 / 24; sample_num /= 3; break;
+			default: ; // LLE skips decoding entirely, the output buffer isn't written to, and it outputs whatever was there before
+			}
+
+			// LPCM streams with an odd number of channels contain an empty dummy channel
+			switch (param.channelNumber)
+			{
+			case CELL_ADEC_CH_MONO:    channel_num = 1; output_size = output_size * 1 / 2; break;
+			case CELL_ADEC_CH_STEREO:  channel_num = 2; break;
+			case CELL_ADEC_CH_3_0:     // Same as below
+			case CELL_ADEC_CH_2_1:     channel_num = 3; output_size = output_size * 3 / 4; break;
+			case CELL_ADEC_CH_3_1:     // Same as below
+			case CELL_ADEC_CH_2_2:     channel_num = 4; break;
+			case CELL_ADEC_CH_3_2:     channel_num = 5; output_size = output_size * 5 / 6; break;
+			case CELL_ADEC_CH_3_2_LFE: channel_num = 6; break;
+			case CELL_ADEC_CH_3_4:     channel_num = 7; output_size = output_size * 7 / 8; break;
+			case CELL_ADEC_CH_3_4_LFE: channel_num = 8; break;
+			default: ; // Don't do anything, LLE simply skips reordering channels
+			}
+
+			// Conversion writes every sample of the access unit, including dummy channels
+			const s64 conversion_size = param.sizeOfWord == CELL_ADEC_BIT_LENGTH_16 ? s64{au_size / 2} * static_cast<s64>(sizeof(f32))
+				: param.sizeOfWord == CELL_ADEC_BIT_LENGTH_20 || param.sizeOfWord == CELL_ADEC_BIT_LENGTH_24 ? s64{au_size / 3} * static_cast<s64>(sizeof(f32))
+				: 0;
+
+			// LLE doesn't check the output size
+			valid = output_size <= LPCM_DEC_OUTPUT_BUFFER_SIZE
+				&& conversion_size <= LPCM_DEC_OUTPUT_BUFFER_SIZE
+				&& sample_num >= 0
+				&& sample_num <= LPCM_DEC_OUTPUT_BUFFER_SIZE / static_cast<s32>(sizeof(f32));
+		}
+		else
+		{
+			switch (param.sizeOfWord)
+			{
+			case CELL_ADEC_BIT_LENGTH_16: output_size = output_size * 32 / 16; break;
+			case CELL_ADEC_BIT_LENGTH_20: output_size = output_size * 32 / 20; break;
+			case CELL_ADEC_BIT_LENGTH_24: output_size = output_size * 32 / 24; break;
+			default: valid = false; break; // Parameters get verified in adecSetLpcmDvdParams(), but the guest can modify them afterwards
+			}
+
+			// Only the front left and right channels are decoded, all other channels are ignored
+			switch (param.channelNumber)
+			{
+			case CELL_ADEC_LPCM_DVD_CH_MONO: // Set channel_num to two for mono as well
+			case CELL_ADEC_LPCM_DVD_CH_STEREO:  channel_num = 2; break;
+			case 4:                             channel_num = 3; output_size = output_size * 2 / 3; break;
+			case 5:                             channel_num = 4; output_size = output_size * 2 / 4; break;
+			case CELL_ADEC_LPCM_DVD_CH_3_2:     channel_num = 5; output_size = output_size * 2 / 5; break;
+			case CELL_ADEC_LPCM_DVD_CH_3_2_LFE: channel_num = 6; output_size = output_size * 2 / 6; break;
+			case CELL_ADEC_LPCM_DVD_CH_3_4:     channel_num = 7; output_size = output_size * 2 / 7; break;
+			case CELL_ADEC_LPCM_DVD_CH_3_4_LFE: channel_num = 8; output_size = output_size * 2 / 8; break;
+			default: valid = false; break; // Same as above
+			}
+
+			// LLE doesn't check the output size
+			valid = valid && output_size <= LPCM_DEC_OUTPUT_BUFFER_SIZE;
+
+			// The last iteration of the 20-bit conversion loop reads the low bits of samples three and four from up to two bytes past the end of the access unit
+			if (param.sizeOfWord == CELL_ADEC_BIT_LENGTH_20)
+			{
+				input_overread = channel_num & 1 ? 1 : 2;
+			}
+		}
+
+		return { output_size, sample_num, channel_num, input_overread, valid };
+	}
+}
+
 void LpcmDecContext::exec(ppu_thread& ppu)
 {
 	perf_meter<"LPCMDEC"_u64> perf0;
@@ -364,10 +449,11 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 
 		case LpcmDecCmdType::decode_au:
 		{
-			// NOTE: The parameters and the command are now always guest memory addresses
+			// The parameters, the command and dvd_packing are located in guest memory and can be modified by the guest at any time, so they are only read once
 			const CellAdecParamLpcm param = *get_lpcm_param();
 			const u32 au_addr = cmd.au_start_addr.addr();
 			const u32 au_size = cmd.au_size;
+			const bool dvd = dvd_packing != 0u;
 
 			// For 20 and 24-bit samples
 			const u8* const input_u8 = static_cast<const u8*>(vm::base(au_addr));
@@ -377,52 +463,21 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 			const be_t<s16, 1>* const input_s16 = static_cast<const be_t<s16, 1>*>(vm::base(au_addr));
 			const s64 au_size_s16 = static_cast<s64>(au_size_u8 / sizeof(s16));
 
-			be_t<f32>* const _output = std::assume_aligned<0x80>(get_output().get_ptr());
-			s64 output_size = au_size;
+			// The context address is not necessarily aligned if the guest calls lpcmDecEntry() directly, so no alignment is assumed
+			be_t<f32>* const _output = get_output().get_ptr();
 
-			s32 sample_num = static_cast<s32>(utils::align(+param.audioPayloadSize, 0x10));
-			s32 channel_num = 0;
+			const adec_internal::lpcm_au_layout layout = adec_internal::get_lpcm_au_layout(dvd, param, au_size);
+			s64 output_size = layout.output_size;
+			const s32 sample_num = layout.sample_num;
+			const s32 channel_num = layout.channel_num;
 
 			// LLE checks neither the input nor the output size. HLE doesn't decode invalid access units
-			bool au_error = !vm::check_addr(au_addr, vm::page_readable, au_size);
+			const bool au_error = !layout.valid
+				|| !vm::check_addr(au_addr, vm::page_readable, au_size)
+				|| (layout.input_overread != 0u && !vm::check_addr(u64{au_addr} + au_size, vm::page_readable, layout.input_overread));
 
-			if (!dvd_packing)
+			if (!dvd)
 			{
-				switch (param.sizeOfWord)
-				{
-				case CELL_ADEC_BIT_LENGTH_16: output_size = output_size * 32 / 16; sample_num /= 2; break;
-				case CELL_ADEC_BIT_LENGTH_20: // Same as below
-				case CELL_ADEC_BIT_LENGTH_24: output_size = output_size * 32 / 24; sample_num /= 3; break;
-				default: ; // LLE skips decoding entirely, the output buffer isn't written to, and it outputs whatever was there before
-				}
-
-				// LPCM streams with an odd number of channels contain an empty dummy channel
-				switch (param.channelNumber)
-				{
-				case CELL_ADEC_CH_MONO:    channel_num = 1; output_size = output_size * 1 / 2; break;
-				case CELL_ADEC_CH_STEREO:  channel_num = 2; break;
-				case CELL_ADEC_CH_3_0:     // Same as below
-				case CELL_ADEC_CH_2_1:     channel_num = 3; output_size = output_size * 3 / 4; break;
-				case CELL_ADEC_CH_3_1:     // Same as below
-				case CELL_ADEC_CH_2_2:     channel_num = 4; break;
-				case CELL_ADEC_CH_3_2:     channel_num = 5; output_size = output_size * 5 / 6; break;
-				case CELL_ADEC_CH_3_2_LFE: channel_num = 6; break;
-				case CELL_ADEC_CH_3_4:     channel_num = 7; output_size = output_size * 7 / 8; break;
-				case CELL_ADEC_CH_3_4_LFE: channel_num = 8; break;
-				default: ; // Don't do anything, LLE simply skips reordering channels
-				}
-
-				// Conversion writes every sample of the access unit, including dummy channels
-				const s64 conversion_size = param.sizeOfWord == CELL_ADEC_BIT_LENGTH_16 ? au_size_s16 * static_cast<s64>(sizeof(f32))
-					: param.sizeOfWord == CELL_ADEC_BIT_LENGTH_20 || param.sizeOfWord == CELL_ADEC_BIT_LENGTH_24 ? au_size_u8 / 3 * static_cast<s64>(sizeof(f32))
-					: 0;
-
-				au_error = au_error ||
-					output_size > LPCM_DEC_OUTPUT_BUFFER_SIZE ||
-					conversion_size > LPCM_DEC_OUTPUT_BUFFER_SIZE ||
-					sample_num < 0 ||
-					sample_num > LPCM_DEC_OUTPUT_BUFFER_SIZE / static_cast<s32>(sizeof(f32));
-
 				if (!au_error)
 				{
 					// Convert to float
@@ -571,31 +626,6 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 			}
 			else
 			{
-				switch (param.sizeOfWord)
-				{
-				case CELL_ADEC_BIT_LENGTH_16: output_size = output_size * 32 / 16; break;
-				case CELL_ADEC_BIT_LENGTH_20: output_size = output_size * 32 / 20; break;
-				case CELL_ADEC_BIT_LENGTH_24: output_size = output_size * 32 / 24; break;
-				default: au_error = true; break; // Parameters get verified in adecSetLpcmDvdParams(), but the guest can modify them afterwards
-				}
-
-				// Only the front left and right channels are decoded, all other channels are ignored
-				switch (param.channelNumber)
-				{
-				case CELL_ADEC_LPCM_DVD_CH_MONO: // Set channel_num to two for mono as well
-				case CELL_ADEC_LPCM_DVD_CH_STEREO:  channel_num = 2; break;
-				case 4:                             channel_num = 3; output_size = output_size * 2 / 3; break;
-				case 5:                             channel_num = 4; output_size = output_size * 2 / 4; break;
-				case CELL_ADEC_LPCM_DVD_CH_3_2:     channel_num = 5; output_size = output_size * 2 / 5; break;
-				case CELL_ADEC_LPCM_DVD_CH_3_2_LFE: channel_num = 6; output_size = output_size * 2 / 6; break;
-				case CELL_ADEC_LPCM_DVD_CH_3_4:     channel_num = 7; output_size = output_size * 2 / 7; break;
-				case CELL_ADEC_LPCM_DVD_CH_3_4_LFE: channel_num = 8; output_size = output_size * 2 / 8; break;
-				default: au_error = true; break; // Same as above
-				}
-
-				// LLE doesn't check the output size. We soft-fail instead.
-				au_error = au_error || output_size > LPCM_DEC_OUTPUT_BUFFER_SIZE;
-
 				if (!au_error)
 				{
 					// Convert to float
@@ -806,7 +836,7 @@ error_code LpcmDecContext::send_command(ppu_thread& ppu, auto&&... args)
 		// Only possible if the guest modified the queue after it was checked above
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK); // Error code isn't checked on LLE
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_size_mutex) == CELL_OK); // Error code isn't checked on LLE
-		return CELL_ADEC_ERROR_BUSY; // Return same error as if queue is full. FIXME: Should we fatal here instead?
+		return CELL_ADEC_ERROR_BUSY; // emplace() only fails if the size is exactly 4, a corrupted size resets the queue instead. So the queue really is full
 	}
 
 	if (error_code ret = lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex); ret != CELL_OK
@@ -1157,12 +1187,23 @@ error_code AdecContext::set_pcm_item(s32 pcm_handle, vm::ptr<void> pcm_addr, u32
 		return CELL_ADEC_ERROR_FATAL;
 	}
 
+	// The size and both addresses are located in guest memory, so they are only read once
+	const u32 bsi_size = bitstream_info_size;
+	const vm::ptr<void> bsi_dst = frames[pcm_handle].pcm_item.pcmAttr.bsiInfo;
+	const vm::cptr<void> bsi_src = *bitstream_info;
+
+	if (!vm::check_addr(bsi_dst.addr(), vm::page_writable, bsi_size) || !vm::check_addr(bsi_src.addr(), vm::page_readable, bsi_size))
+	{
+		cellAdec.error("AdecContext::set_pcm_item(): Invalid bitstream info (dst=*0x%x, src=*0x%x, size=0x%x)", bsi_dst, bsi_src, bsi_size);
+		return CELL_ADEC_ERROR_FATAL;
+	}
+
 	frames[pcm_handle].pcm_item.pcmHandle = pcm_handle;
 	frames[pcm_handle].pcm_item.status = CELL_OK;
 	frames[pcm_handle].pcm_item.startAddr = pcm_addr;
 	frames[pcm_handle].pcm_item.size = pcm_size;
 	frames[pcm_handle].pcm_item.auInfo = frames[pcm_handle].au_info;
-	std::memcpy(frames[pcm_handle].pcm_item.pcmAttr.bsiInfo.get_ptr(), bitstream_info->get_ptr(), bitstream_info_size);
+	std::memcpy(bsi_dst.get_ptr(), bsi_src.get_ptr(), bsi_size);
 
 	return CELL_OK;
 }

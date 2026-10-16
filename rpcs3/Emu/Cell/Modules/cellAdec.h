@@ -963,6 +963,21 @@ CHECK_SIZE_ALIGN(LpcmDecContext, 0x1c8, 8);
 
 constexpr s32 LPCM_DEC_OUTPUT_BUFFER_SIZE = 0x40000;
 
+namespace adec_internal
+{
+	struct lpcm_au_layout
+	{
+		s64 output_size;    // Size of the decoded PCM data reported to the user
+		s32 sample_num;     // Number of samples processed when reordering channels
+		s32 channel_num;
+		u32 input_overread; // Number of bytes read past the end of the access unit
+		bool valid;         // False if the parameters are invalid or decoding would exceed the output buffer
+	};
+
+	// Sizes used for decoding an LPCM access unit. Doesn't access guest memory
+	lpcm_au_layout get_lpcm_au_layout(bool dvd_packing, const CellAdecParamLpcm& param, u32 au_size);
+}
+
 // CELP Excitation Mode
 enum CELP_ExcitationMode : s32
 {

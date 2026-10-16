@@ -2,24 +2,34 @@
 
 #include "Emu/savestate_utils.hpp"
 #include "Utilities/Thread.h"
+#include "Utilities/mutex.h"
 #include "cellPamf.h"
 #include "cellDmux.h"
 #include <span>
 
-// Replacement for CellSpursQueue
-template <typename T, u32 max_num_of_entries> requires(std::is_trivial_v<T> && max_num_of_entries > 0)
-class alignas(0x80) dmux_pamf_hle_spurs_queue
-{
-	T* buffer;
+constexpr s32 DMUX_PAMF_MAX_ENABLED_ES_NUM = 0x40;
 
-	alignas(atomic_t<u32>) std::array<std::byte, sizeof(atomic_t<u32>)> _size; // Stored in a byte array since the PPU context needs to be trivial
-	u32 front;
-	u32 back;
+// Replacement for CellSpursQueue.
+// NOTE: The real queues are located on the host in dmux_pamf_spu_context, so that the guest can't modify the indices, the size or the elements.
+template <typename T, u32 max_num_of_entries> requires(std::is_trivially_copyable_v<T> && max_num_of_entries > 0)
+class dmux_pamf_hle_spurs_queue
+{
+public:
+	// The elements are stored as bytes, since they are aligned to 0x80 bytes, which the HLE SPU thread object can't be
+	using buffer_type = std::array<std::array<u8, sizeof(T)>, max_num_of_entries>;
+
+private:
+	mutable shared_mutex mutex;
+	buffer_type buffer{};
+	atomic_t<u32> _size = 0;
+	u32 front = 0;
+	u32 back = 0;
+	atomic_t<bool> aborted = false;
 
 	template <bool is_peek>
 	bool _pop(T* lhs)
 	{
-		atomic_t<u32>& _size = *std::launder(reinterpret_cast<atomic_t<u32>*>(this->_size.data()));
+		std::lock_guard lock(mutex);
 
 		if (_size == 0)
 		{
@@ -28,7 +38,7 @@ class alignas(0x80) dmux_pamf_hle_spurs_queue
 
 		if (lhs)
 		{
-			*lhs = buffer[front];
+			std::memcpy(lhs, buffer[front].data(), sizeof(T));
 		}
 
 		if constexpr (!is_peek)
@@ -42,27 +52,20 @@ class alignas(0x80) dmux_pamf_hle_spurs_queue
 	}
 
 public:
-	void init(T (&buffer)[max_num_of_entries])
-	{
-		this->buffer = buffer;
-		new (_size.data()) atomic_t<u32>(0);
-		front = 0;
-		back = 0;
-	}
-
 	bool pop(T& lhs) { return _pop<false>(&lhs); }
 	bool pop() { return _pop<false>(nullptr); }
 	bool peek(T& lhs) const { return const_cast<dmux_pamf_hle_spurs_queue*>(this)->_pop<true>(&lhs); }
 	bool emplace(auto&&... args)
 	{
-		atomic_t<u32>& _size = *std::launder(reinterpret_cast<atomic_t<u32>*>(this->_size.data()));
+		std::lock_guard lock(mutex);
 
 		if (_size >= max_num_of_entries)
 		{
 			return false;
 		}
 
-		new (&buffer[back]) T(std::forward<decltype(args)>(args)...);
+		const T value(std::forward<decltype(args)>(args)...);
+		std::memcpy(buffer[back].data(), &value, sizeof(T));
 
 		back = (back + 1) % max_num_of_entries;
 		_size++;
@@ -71,18 +74,56 @@ public:
 		return true;
 	}
 
-	[[nodiscard]] u32 size() const { return std::launder(reinterpret_cast<const atomic_t<u32>*>(this->_size.data()))->observe(); }
+	[[nodiscard]] u32 size() const { return _size.observe(); }
 
+	// Returns once the queue is not empty, the calling thread is aborting or the queue was aborted
 	void wait() const
 	{
-		const atomic_t<u32>& _size = *std::launder(reinterpret_cast<const atomic_t<u32>*>(this->_size.data()));
-
-		while (_size == 0 && thread_ctrl::state() != thread_state::aborting)
+		while (_size == 0 && !aborted && thread_ctrl::state() != thread_state::aborting)
 		{
 			thread_ctrl::wait_on(_size, 0);
 		}
 	}
+
+	// Permanently wakes up all threads waiting on the queue
+	void abort()
+	{
+		aborted = true;
+		_size.notify_all();
+	}
+
+	void save(utils::serial& ar) const
+	{
+		std::lock_guard lock(mutex);
+		ar(buffer, front, back, _size.load());
+	}
+
+	void load(utils::serial& ar)
+	{
+		ar(buffer);
+		front = ar.pop<u32>();
+		back = ar.pop<u32>();
+		const u32 size = ar.pop<u32>();
+
+		// The savestate is not trusted
+		if (front >= max_num_of_entries || back >= max_num_of_entries || size > max_num_of_entries || (front + size) % max_num_of_entries != back)
+		{
+			front = back = 0;
+			_size = 0;
+			return;
+		}
+
+		_size = size;
+	}
 };
+
+// The queues are located in the context on LLE. On HLE, the queues are located in dmux_pamf_spu_context, this keeps the layout of the context
+struct alignas(0x80) DmuxPamfQueueReserved
+{
+	u8 reserved[0x80];
+};
+
+CHECK_SIZE_ALIGN(DmuxPamfQueueReserved, 0x80, 0x80);
 
 enum class DmuxPamfCommandType : u32
 {
@@ -283,7 +324,7 @@ public:
 
 	bool enable_es(u32 stream_id, u32 private_stream_id, bool is_avc, std::span<u8> au_queue_buffer, u32 au_max_size, bool raw_es, u32 user_data);
 	bool disable_es(u32 stream_id, u32 private_stream_id);
-	bool release_au(u32 stream_id, u32 private_stream_id, u32 au_size) const;
+	bool release_au(u32 stream_id, u32 private_stream_id, u32 au_size);
 	bool flush_es(u32 stream_id, u32 private_stream_id);
 	void set_stream(std::span<const u8> stream, bool continuity);
 	void reset_stream();
@@ -334,14 +375,22 @@ private:
 			, front(vm::_ptr<u8>(ar.pop<vm::addr_t>()))
 			, wrap_pos(vm::_ptr<u8>(ar.pop<vm::addr_t>()))
 		{
+			// The savestate is not trusted
+			const auto in_buffer = [this](const u8* ptr) { return ptr >= buffer.data() && ptr <= std::to_address(buffer.end()); };
+
+			if (!in_buffer(back) || !in_buffer(front) || !in_buffer(wrap_pos))
+			{
+				clear();
+			}
 		}
 
 		void save(utils::serial& ar) const { ar(vm::get_addr(buffer.data()), static_cast<u32>(buffer.size()), vm::get_addr(back), vm::get_addr(front), vm::get_addr(wrap_pos)); }
 
 		// The queue itself doesn't keep track of the location of each access unit, so the pop and access operations need the size or address of the access unit to remove/return
+		// The size or address can be set by the guest. If it is invalid, the queue isn't modified and false is returned
 		void pop_back(u32 au_size);
-		void pop_back(u8* au_addr);
-		void pop_front(u32 au_size);
+		[[nodiscard]] bool pop_back(u8* au_addr);
+		[[nodiscard]] bool pop_front(u32 au_size);
 		[[nodiscard]] const u8* peek_back(u32 au_size) const { return back - au_size; }
 
 		void clear() { wrap_pos = front = back = buffer.data(); }
@@ -409,9 +458,9 @@ private:
 		// Processes the current PES packet. Returns true if it has been entirely consumed
 		bool process_pes_packet_data();
 
-		void release_au(u32 au_size) { au_queue.pop_front(au_size); }
+		[[nodiscard]] bool release_au(u32 au_size) { return au_queue.pop_front(au_size); }
 		void flush_es();
-		void reset_es(u8* au_addr);
+		[[nodiscard]] bool reset_es(u8* au_addr);
 		void discard_access_unit();
 
 	protected:
@@ -604,34 +653,33 @@ public:
 	static constexpr u32 id_count = 0x400;
 	SAVESTATE_INIT_POS(std::numeric_limits<f64>::max()); // Doesn't depend on or is a dependency of anything
 
-	dmux_pamf_spu_context(vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1>> cmd_queue, vm::ptr<dmux_pamf_hle_spurs_queue<be_t<u32>, 1>> cmd_result_queue,
-		vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfStreamInfo, 1>> stream_info_queue, vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfEvent, 132>> event_queue)
-		: cmd_queue(cmd_queue), cmd_result_queue(cmd_result_queue), stream_info_queue(stream_info_queue), event_queue(event_queue)
-	{
-	}
-
-	explicit dmux_pamf_spu_context(utils::serial& ar)
-		: cmd_queue(ar.pop<vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1>>>())
-		, cmd_result_queue(vm::ptr<dmux_pamf_hle_spurs_queue<be_t<u32>, 1>>::make(cmd_queue.addr() + sizeof(dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1>)))
-		, stream_info_queue(vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfStreamInfo, 1>>::make(cmd_result_queue.addr() + sizeof(dmux_pamf_hle_spurs_queue<be_t<u32>, 1>)))
-		, event_queue(vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfEvent, 132>>::make(stream_info_queue.addr() + sizeof(dmux_pamf_hle_spurs_queue<DmuxPamfStreamInfo, 1>)))
-		, new_stream(ar.pop<bool>())
-	{
-		save_base(ar);
-		max_enqueued_events += 2 * get_enabled_es_count();
-	}
+	explicit dmux_pamf_spu_context(u32 owner_addr) : owner_addr(owner_addr) {}
+	explicit dmux_pamf_spu_context(utils::serial& ar);
 
 	void save(utils::serial& ar);
 
 	void operator()(); // cellSpursMain()
 	static constexpr auto thread_name = "HLE PAMF demuxer SPU thread"sv;
 
+	const u32 owner_addr; // Address of the DmuxPamfContext this thread belongs to
+
+	// Queues between the PPU thread and this thread. These are globals in the SPU thread
+	dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1> cmd_queue;
+	dmux_pamf_hle_spurs_queue<be_t<u32>, 1> cmd_result_queue;
+	dmux_pamf_hle_spurs_queue<DmuxPamfStreamInfo, 1> stream_info_queue;
+	dmux_pamf_hle_spurs_queue<DmuxPamfEvent, 4 + 2 * DMUX_PAMF_MAX_ENABLED_ES_NUM> event_queue;
+
+	// Permanently wakes up all threads waiting on the queues, used when the demuxer is retired
+	void abort_queues()
+	{
+		cmd_queue.abort();
+		cmd_result_queue.abort();
+		stream_info_queue.abort();
+		event_queue.abort();
+	}
+
 private:
 	// These are globals in the SPU thread
-	const vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1>> cmd_queue;
-	const vm::ptr<dmux_pamf_hle_spurs_queue<be_t<u32>, 1>> cmd_result_queue;
-	const vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfStreamInfo, 1>> stream_info_queue;
-	const vm::ptr<dmux_pamf_hle_spurs_queue<DmuxPamfEvent, 132>> event_queue;
 	bool wait_for_au_queue = false;
 	bool wait_for_event_queue = false;
 	bool event_queue_was_too_full = false; // Sent to the PPU thread
@@ -640,8 +688,8 @@ private:
 	// This is a local variable in cellSpursMain(), needs to be saved for savestates
 	bool new_stream = false;
 
-	bool get_next_cmd(DmuxPamfCommand& lhs, bool new_stream) const;
-	bool send_event(auto&&... args) const;
+	bool get_next_cmd(DmuxPamfCommand& lhs, bool new_stream);
+	bool send_event(auto&&... args);
 
 	// The events are sent to the PPU thread via the event_queue
 	bool on_au_found(u8 stream_id, u8 private_stream_id, u32 user_data, std::span<const u8> au, u64 pts, u64 dts, bool rap, u8 au_specific_info_size, std::array<u8, 0x10> au_specific_info_buf) override
@@ -816,7 +864,6 @@ struct DmuxPamfAuInfo
 CHECK_SIZE(DmuxPamfAuInfo, 0x30);
 
 constexpr u32 DMUX_PAMF_VERSION = 0x280000;
-constexpr s32 DMUX_PAMF_MAX_ENABLED_ES_NUM = 0x40;
 
 // HLE exclusive, for savestates
 enum class dmux_pamf_state : u8
@@ -903,20 +950,20 @@ class DmuxPamfContext
 	be_t<u32> mutex; // sys_mutex_t
 	be_t<u32> cond;  // sys_cond_t
 
-	vm::bptr<dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1>> cmd_queue_addr_; // Same as cmd_queue_addr, unused
+	vm::bptr<DmuxPamfQueueReserved> cmd_queue_addr_;                         // Same as cmd_queue_addr, unused
 	vm::bptr<DmuxPamfCommand[1]> cmd_queue_buffer_addr_;                     // Same as cmd_queue_buffer_addr, unused
 
-	vm::bptr<dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1>> cmd_queue_addr;                                    // CellSpursQueue*
-	vm::bptr<dmux_pamf_hle_spurs_queue<be_t<u32>, 1>> cmd_result_queue_addr;                                   // CellSpursQueue*
-	vm::bptr<dmux_pamf_hle_spurs_queue<DmuxPamfStreamInfo, 1>> stream_info_queue_addr;                         // CellSpursQueue*
-	vm::bptr<dmux_pamf_hle_spurs_queue<DmuxPamfEvent, 4 + 2 * DMUX_PAMF_MAX_ENABLED_ES_NUM>> event_queue_addr; // CellSpursQueue*
+	vm::bptr<DmuxPamfQueueReserved> cmd_queue_addr;         // CellSpursQueue*
+	vm::bptr<DmuxPamfQueueReserved> cmd_result_queue_addr;  // CellSpursQueue*
+	vm::bptr<DmuxPamfQueueReserved> stream_info_queue_addr; // CellSpursQueue*
+	vm::bptr<DmuxPamfQueueReserved> event_queue_addr;       // CellSpursQueue*
 
 	vm::bptr<DmuxPamfCommand[1]> cmd_queue_buffer_addr;
 	vm::bptr<be_t<u32>[1]> cmd_result_queue_buffer_addr;
 	vm::bptr<DmuxPamfEvent[4 + 2 * DMUX_PAMF_MAX_ENABLED_ES_NUM]> event_queue_buffer_addr;
 	vm::bptr<DmuxPamfStreamInfo[1]> stream_info_queue_buffer_addr;
 
-	vm::bptr<dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1>> cmd_queue_addr__; // Same as cmd_queue_addr, unused
+	vm::bptr<DmuxPamfQueueReserved> cmd_queue_addr__; // Same as cmd_queue_addr, unused
 
 	be_t<u64> user_data;
 
@@ -928,10 +975,11 @@ class DmuxPamfContext
 
 	[[maybe_unused]] u8 reserved2[928]; // Unused
 
-	dmux_pamf_hle_spurs_queue<DmuxPamfCommand, 1> cmd_queue;                                    // CellSpursQueue
-	dmux_pamf_hle_spurs_queue<be_t<u32>, 1> cmd_result_queue;                                   // CellSpursQueue
-	dmux_pamf_hle_spurs_queue<DmuxPamfStreamInfo, 1> stream_info_queue;                         // CellSpursQueue
-	dmux_pamf_hle_spurs_queue<DmuxPamfEvent, 4 + 2 * DMUX_PAMF_MAX_ENABLED_ES_NUM> event_queue; // CellSpursQueue
+	// CellSpursQueues and their buffers on LLE, unused on HLE. The queues are located in dmux_pamf_spu_context
+	DmuxPamfQueueReserved cmd_queue;
+	DmuxPamfQueueReserved cmd_result_queue;
+	DmuxPamfQueueReserved stream_info_queue;
+	DmuxPamfQueueReserved event_queue;
 
 	DmuxPamfCommand cmd_queue_buffer[1];
 	alignas(0x80) be_t<u32> cmd_result_queue_buffer[1];
@@ -941,8 +989,12 @@ class DmuxPamfContext
 	alignas(0x80) u8 spurs_context[0x36400];
 
 
+	// Returns the HLE SPU thread of this demuxer. The ID is located in guest memory, so it is verified that the thread belongs to this demuxer
+	stx::shared_ptr<dmux_pamf_spu_thread> get_spu_thread() const;
+
+	// Returns false if the command couldn't be sent or the SPU thread sent an invalid result, which is only possible if the guest interfered
 	template <DmuxPamfCommandType type>
-	void send_spu_command_and_wait(ppu_thread& ppu, bool waiting_for_spu_state, auto&&... cmd_params);
+	[[nodiscard]] bool send_spu_command_and_wait(ppu_thread& ppu, bool waiting_for_spu_state, auto&&... cmd_params);
 
 	error_code wait_au_released_or_stream_reset(ppu_thread& ppu, u64 au_queue_full_bitset, b8& stream_reset_started, dmux_pamf_state& savestate);
 
@@ -955,7 +1007,7 @@ class DmuxPamfContext
 	friend struct DmuxPamfElementaryStream;
 
 public:
-	void run_spu_thread();
+	[[nodiscard]] bool run_spu_thread();
 
 	DmuxPamfElementaryStream* find_es(u16 stream_id, u16 private_stream_id);
 

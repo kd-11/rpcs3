@@ -90,7 +90,7 @@ SERIALIZATION_VER(LLE, 24,                                      1)
 SERIALIZATION_VER(HLE, 25,                                      1)
 
 SERIALIZATION_VER(cellSysutil, 26,                              1, 2/*AVC2 Muting,Volume*/)
-SERIALIZATION_VER(cellDmuxPamf, 27,                             1)
+SERIALIZATION_VER(cellDmuxPamf, 27,                             2/*Host queues*/)
 SERIALIZATION_VER(cellAtracXdec, 28,                            1)
 
 // For future modules

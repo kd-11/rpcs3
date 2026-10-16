@@ -302,7 +302,7 @@ void AtracXdecContext::exec(ppu_thread& ppu)
 				return;
 			}
 
-			if (!cmd_queue.empty())
+			if (cmd_queue.pop(cmd))
 			{
 				break;
 			}
@@ -319,8 +319,6 @@ void AtracXdecContext::exec(ppu_thread& ppu)
 
 			ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK);
 		}
-
-		cmd_queue.pop(cmd);
 
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK);
 
@@ -666,7 +664,21 @@ void AtracXdecContext::exec(ppu_thread& ppu)
 			break;
 		}
 		default:
-			fmt::throw_exception("Invalid command");
+		{
+			// The guest overwrote the command
+			std::unique_lock savestate_lock{g_fxo->get<hle_locks_t>(), std::try_to_lock};
+
+			if (!savestate_lock.owns_lock())
+			{
+				ppu.state += cpu_flag::again;
+				return;
+			}
+
+			cellAtracXdec.error("AtracXdecContext::exec(): Invalid command type: 0x%x", static_cast<u32>(cmd.type.get()));
+
+			notify_error.cbFunc(ppu, CELL_ADEC_ERROR_ATX_FATAL, notify_error.cbArg);
+			break;
+		}
 		}
 	}
 }
@@ -697,13 +709,11 @@ error_code AtracXdecContext::send_command(ppu_thread& ppu, auto&&... args)
 			}
 		}
 
-		if (cmd_queue.full())
+		if (!cmd_queue.emplace(std::forward<AtracXdecCmdType>(type), std::forward<decltype(args)>(args)...))
 		{
 			ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK);
 			return CELL_ADEC_ERROR_ATX_BUSY;
 		}
-
-		cmd_queue.emplace(std::forward<AtracXdecCmdType>(type), std::forward<decltype(args)>(args)...);
 
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK);
 	}

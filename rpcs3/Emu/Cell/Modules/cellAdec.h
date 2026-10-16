@@ -4,6 +4,19 @@
 #include "../lv2/sys_mutex.h"
 #include "../lv2/sys_cond.h"
 
+// Utils
+namespace adec_internal
+{
+	// The queues below are located in guest memory, so the guest can modify any of their members at any time.
+	// Indices are therefore normalized every time an element is accessed.
+	constexpr u32 queue_index(s32 index)
+	{
+		return static_cast<u32>(index) & 3;
+	}
+
+	void on_corrupted_queue(std::string_view queue, s32 front, s32 back, s32 size);
+}
+
 // Error Codes
 enum CellAdecError : u32
 {
@@ -433,31 +446,65 @@ struct AdecCmdQueue
 	be_t<s32> back = 0;
 	be_t<s32> size = 0;
 
-	template <bool is_peek = false>
-	void pop(T& cmd)
+	// LLE returns uninitialized stack memory if the queue is empty, HLE returns false instead
+	bool pop(T& cmd)
 	{
-		// LLE returns uninitialized stack memory if the queue is empty
-		cmd = elements[front];
+		const u32 _size = checked_size();
 
-		if constexpr (!is_peek)
+		if (_size == 0)
 		{
-			elements[front].pcm_handle = 0xff;
-			front = (front + 1) & 3;
-			size--;
+			return false;
 		}
+
+		const u32 _front = adec_internal::queue_index(front);
+
+		cmd = elements[_front];
+		elements[_front].pcm_handle = 0xff;
+
+		front = static_cast<s32>((_front + 1) & 3);
+		size = static_cast<s32>(_size - 1);
+		return true;
 	}
 
-	void emplace(auto&&... args)
+	bool emplace(auto&&... args)
 	{
-		new (&elements[back]) T(std::forward<decltype(args)>(args)...);
+		const u32 _size = checked_size();
 
-		back = (back + 1) & 3;
-		size++;
+		if (_size >= 4)
+		{
+			return false;
+		}
+
+		const u32 _back = adec_internal::queue_index(back);
+
+		new (&elements[_back]) T(std::forward<decltype(args)>(args)...);
+
+		back = static_cast<s32>((_back + 1) & 3);
+		size = static_cast<s32>(_size + 1);
+		return true;
 	}
 
-	void peek(T& cmd) const { return pop<true>(cmd); }
-	bool empty() const { return size == 0; }
-	bool full() const { return size >= 4; }
+	bool empty() { return checked_size() == 0; }
+	bool full() { return checked_size() >= 4; }
+
+private:
+	// Resets the queue if the guest set an invalid size
+	u32 checked_size()
+	{
+		const s32 _size = size;
+
+		if (_size < 0 || _size > 4) [[unlikely]]
+		{
+			adec_internal::on_corrupted_queue("AdecCmdQueue", front, back, _size);
+
+			front = 0;
+			back = 0;
+			size = 0;
+			return 0;
+		}
+
+		return static_cast<u32>(_size);
+	}
 };
 
 struct AdecFrame
@@ -554,24 +601,27 @@ public:
 	{
 		ensure(lv2_syscall<sys_mutex_lock>(ppu, mutex, 0) == CELL_OK); // Error code isn't checked on LLE
 
-		if (entries[back].state != 0xff)
+		const u32 _back = adec_internal::queue_index(back);
+
+		if (entries[_back].state != 0xff)
 		{
 			ensure(lv2_syscall<sys_mutex_unlock>(ppu, mutex) == CELL_OK); // Error code isn't checked on LLE
 			return true; // LLE returns the result of the comparison above
 		}
 
-		entries[back].state = 0x10;
-		entries[back].pcm_item = pcm_item;
-		entries[back].pcm_handle = pcm_handle;
+		entries[_back].state = 0x10;
+		entries[_back].pcm_item = pcm_item;
+		entries[_back].pcm_handle = pcm_handle;
 
-		back = (back + 1) & 3;
-		size++;
+		back = static_cast<s32>((_back + 1) & 3);
+		size = static_cast<s32>(static_cast<u32>(+size) + 1); // Unused
 
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, mutex) == CELL_OK); // Error code isn't checked on LLE
 		return CELL_OK;
 	}
 
-	const entry* pop(ppu_thread& ppu)
+	// Returns a copy, the entry in guest memory can be modified as soon as the mutex is unlocked
+	std::optional<entry> pop(ppu_thread& ppu)
 	{
 		ensure(lv2_syscall<sys_mutex_lock>(ppu, mutex, 0) == CELL_OK); // Error code isn't checked on LLE
 
@@ -580,28 +630,30 @@ public:
 			return {};
 		}
 
-		if (entries[front].state == 0xff)
+		const u32 _front = adec_internal::queue_index(front);
+
+		if (entries[_front].state == 0xff)
 		{
 			ensure(lv2_syscall<sys_mutex_unlock>(ppu, mutex) == CELL_OK); // Error code isn't checked on LLE
-			return nullptr;
+			return std::nullopt;
 		}
 
-		const entry* const ret = &entries[front];
+		const entry ret = entries[_front];
 
-		entries[front].state = 0xff;
-		entries[front].pcm_handle = -1;
+		entries[_front].state = 0xff;
+		entries[_front].pcm_handle = -1;
 
-		front = (front + 1) & 3;
-		size--;
+		front = static_cast<s32>((_front + 1) & 3);
+		size = static_cast<s32>(static_cast<u32>(+size) - 1); // Unused
 
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, mutex) == CELL_OK); // Error code isn't checked on LLE
 		return ret;
 	}
 
-	const entry& peek(ppu_thread& ppu) const
+	entry peek(ppu_thread& ppu) const
 	{
 		ensure(lv2_syscall<sys_mutex_lock>(ppu, mutex, 0) == CELL_OK); // Error code isn't checked on LLE
-		const entry& ret = entries[front];
+		const entry ret = entries[adec_internal::queue_index(front)];
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, mutex) == CELL_OK); // Error code isn't checked on LLE
 		return ret;
 	}
@@ -899,6 +951,11 @@ struct LpcmDecContext
 	error_code send_command(ppu_thread& ppu, auto&&... args);
 
 	inline error_code release_output(ppu_thread& ppu);
+
+	// Guest memory wrappers.
+	// The parameters and the output buffer are located after the context in the work memory.
+	vm::ptr<CellAdecParamLpcm> get_lpcm_param() const;
+	vm::ptr<f32> get_output() const;
 };
 
 static_assert(std::is_standard_layout_v<LpcmDecContext>);

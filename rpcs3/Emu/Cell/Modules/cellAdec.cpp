@@ -13,6 +13,15 @@
 
 LOG_CHANNEL(cellAdec);
 
+namespace adec_internal
+{
+	void on_corrupted_queue(std::string_view queue, s32 front, s32 back, s32 size)
+	{
+		// Just log for now
+		cellAdec.error("%s was corrupted by the guest (front=%d, back=%d, size=%d), resetting it", queue, front, back, size);
+	}
+}
+
 // These need to be defined somewhere to access the LLE functions
 vm::gvar<CellAdecCoreOps> g_cell_adec_core_ops_ac3;
 vm::gvar<CellAdecCoreOps> g_cell_adec_core_ops_atrac3;
@@ -228,6 +237,20 @@ void fmt_class_string<CellAdecError>::format(std::string& out, u64 arg)
 
 vm::gvar<CellAdecCoreOps> g_cell_adec_core_ops_lpcm;
 
+// See _CellAdecCoreOpGetMemSize_lpcm()
+constexpr u32 LPCM_DEC_PARAM_OFFSET = utils::align(static_cast<u32>(sizeof(LpcmDecContext)), 0x80);
+constexpr u32 LPCM_DEC_OUTPUT_OFFSET = LPCM_DEC_PARAM_OFFSET + utils::align(static_cast<u32>(sizeof(CellAdecParamLpcm)), 0x80) + 0x100;
+
+vm::ptr<CellAdecParamLpcm> LpcmDecContext::get_lpcm_param() const
+{
+	return vm::ptr<CellAdecParamLpcm>::make(vm::get_addr(this) + LPCM_DEC_PARAM_OFFSET);
+}
+
+vm::ptr<f32> LpcmDecContext::get_output() const
+{
+	return vm::ptr<f32>::make(vm::get_addr(this) + LPCM_DEC_OUTPUT_OFFSET);
+}
+
 void LpcmDecContext::exec(ppu_thread& ppu)
 {
 	perf_meter<"LPCMDEC"_u64> perf0;
@@ -294,7 +317,15 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 			return;
 		}
 
-		cmd_queue.pop(cmd);
+		if (!cmd_queue.pop(cmd))
+		{
+			// Only possible if the guest modified the queue, since the semaphore counts the enqueued commands
+			ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK); // Error code isn't checked on LLE
+
+			cellAdec.error("LpcmDecContext::exec(): The command queue is empty");
+			error_occurred |= static_cast<u32>(lv2_syscall<sys_mutex_unlock>(ppu, output_mutex) != CELL_OK);
+			continue;
+		}
 
 		ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK); // Error code isn't checked on LLE
 
@@ -333,23 +364,31 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 
 		case LpcmDecCmdType::decode_au:
 		{
+			// NOTE: The parameters and the command are now always guest memory addresses
+			const CellAdecParamLpcm param = *get_lpcm_param();
+			const u32 au_addr = cmd.au_start_addr.addr();
+			const u32 au_size = cmd.au_size;
+
 			// For 20 and 24-bit samples
-			const u8* const input_u8 = static_cast<const u8*>(cmd.au_start_addr.get_ptr());
-			const s64 au_size_u8 = cmd.au_size;
+			const u8* const input_u8 = static_cast<const u8*>(vm::base(au_addr));
+			const s64 au_size_u8 = au_size;
 
 			// For 16-bit samples
-			const be_t<s16, 1>* const input_s16 = static_cast<const be_t<s16, 1>*>(cmd.au_start_addr.get_ptr());
+			const be_t<s16, 1>* const input_s16 = static_cast<const be_t<s16, 1>*>(vm::base(au_addr));
 			const s64 au_size_s16 = static_cast<s64>(au_size_u8 / sizeof(s16));
 
-			be_t<f32>* const _output = std::assume_aligned<0x80>(output.get_ptr());
-			s64 output_size = cmd.au_size;
+			be_t<f32>* const _output = std::assume_aligned<0x80>(get_output().get_ptr());
+			s64 output_size = au_size;
 
-			s32 sample_num = static_cast<s32>(utils::align(+lpcm_param->audioPayloadSize, 0x10));
+			s32 sample_num = static_cast<s32>(utils::align(+param.audioPayloadSize, 0x10));
 			s32 channel_num = 0;
+
+			// LLE checks neither the input nor the output size. HLE doesn't decode invalid access units
+			bool au_error = !vm::check_addr(au_addr, vm::page_readable, au_size);
 
 			if (!dvd_packing)
 			{
-				switch (lpcm_param->sizeOfWord)
+				switch (param.sizeOfWord)
 				{
 				case CELL_ADEC_BIT_LENGTH_16: output_size = output_size * 32 / 16; sample_num /= 2; break;
 				case CELL_ADEC_BIT_LENGTH_20: // Same as below
@@ -358,7 +397,7 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 				}
 
 				// LPCM streams with an odd number of channels contain an empty dummy channel
-				switch (lpcm_param->channelNumber)
+				switch (param.channelNumber)
 				{
 				case CELL_ADEC_CH_MONO:    channel_num = 1; output_size = output_size * 1 / 2; break;
 				case CELL_ADEC_CH_STEREO:  channel_num = 2; break;
@@ -373,165 +412,175 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 				default: ; // Don't do anything, LLE simply skips reordering channels
 				}
 
-				// LLE doesn't check the output size
-				ensure(output_size <= LPCM_DEC_OUTPUT_BUFFER_SIZE);
-				ensure(sample_num * sizeof(f32) <= LPCM_DEC_OUTPUT_BUFFER_SIZE);
+				// Conversion writes every sample of the access unit, including dummy channels
+				const s64 conversion_size = param.sizeOfWord == CELL_ADEC_BIT_LENGTH_16 ? au_size_s16 * static_cast<s64>(sizeof(f32))
+					: param.sizeOfWord == CELL_ADEC_BIT_LENGTH_20 || param.sizeOfWord == CELL_ADEC_BIT_LENGTH_24 ? au_size_u8 / 3 * static_cast<s64>(sizeof(f32))
+					: 0;
 
-				// Convert to float
-				if (lpcm_param->sizeOfWord == CELL_ADEC_BIT_LENGTH_16)
+				au_error = au_error ||
+					output_size > LPCM_DEC_OUTPUT_BUFFER_SIZE ||
+					conversion_size > LPCM_DEC_OUTPUT_BUFFER_SIZE ||
+					sample_num < 0 ||
+					sample_num > LPCM_DEC_OUTPUT_BUFFER_SIZE / static_cast<s32>(sizeof(f32));
+
+				if (!au_error)
 				{
-					s64 i = 0;
-					for (; i <= au_size_s16 - 8; i += 8)
+					// Convert to float
+					if (param.sizeOfWord == CELL_ADEC_BIT_LENGTH_16)
 					{
-						const v128 s16be = v128::loadu(&input_s16[i]);
+						s64 i = 0;
+						for (; i <= au_size_s16 - 8; i += 8)
+						{
+							const v128 s16be = v128::loadu(&input_s16[i]);
 
-						// Convert endianess if necessary and shift left by 16
-#if defined(ARCH_X64) && !defined(__SSSE3__)
-						const v128 s16le = gv_rol16<8>(s16be);
-						const v128 s32_1 = gv_unpacklo16(gv_bcst16(0), s16le);
-						const v128 s32_2 = gv_unpackhi16(gv_bcst16(0), s16le);
-#else
-						const v128 s32_1 = std::endian::native == std::endian::little
-							? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 1, 0, -1, -1, 3, 2, -1, -1, 5, 4, -1, -1, 7, 6 })
-							: gv_unpacklo16(s16be, gv_bcst16(0));
+							// Convert endianess if necessary and shift left by 16
+	#if defined(ARCH_X64) && !defined(__SSSE3__)
+							const v128 s16le = gv_rol16<8>(s16be);
+							const v128 s32_1 = gv_unpacklo16(gv_bcst16(0), s16le);
+							const v128 s32_2 = gv_unpackhi16(gv_bcst16(0), s16le);
+	#else
+							const v128 s32_1 = std::endian::native == std::endian::little
+								? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 1, 0, -1, -1, 3, 2, -1, -1, 5, 4, -1, -1, 7, 6 })
+								: gv_unpacklo16(s16be, gv_bcst16(0));
 
-						const v128 s32_2 = std::endian::native == std::endian::little
-							? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 9, 8, -1, -1, 11, 10, -1, -1, 13, 12, -1, -1, 15, 14 })
-							: gv_unpackhi16(s16be, gv_bcst16(0));
-#endif
-						// Convert to float and divide by INT32_MAX + 1
-						const v128 f32_1 = gv_mulfs(gv_cvts32_tofs(s32_1), 1.f / static_cast<f32>(0x80000000u));
-						const v128 f32_2 = gv_mulfs(gv_cvts32_tofs(s32_2), 1.f / static_cast<f32>(0x80000000u));
+							const v128 s32_2 = std::endian::native == std::endian::little
+								? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 9, 8, -1, -1, 11, 10, -1, -1, 13, 12, -1, -1, 15, 14 })
+								: gv_unpackhi16(s16be, gv_bcst16(0));
+	#endif
+							// Convert to float and divide by INT32_MAX + 1
+							const v128 f32_1 = gv_mulfs(gv_cvts32_tofs(s32_1), 1.f / static_cast<f32>(0x80000000u));
+							const v128 f32_2 = gv_mulfs(gv_cvts32_tofs(s32_2), 1.f / static_cast<f32>(0x80000000u));
 
-						v128::storeu(gv_to_be32(f32_1), &_output[i]);
-						v128::storeu(gv_to_be32(f32_2), &_output[i + 4]);
+							v128::storeu(gv_to_be32(f32_1), &_output[i]);
+							v128::storeu(gv_to_be32(f32_2), &_output[i + 4]);
+						}
+
+						for (; i < au_size_s16; i++)
+						{
+							_output[i] = static_cast<f32>(input_s16[i]) / 0x8000u;
+						}
+					}
+					else if (param.sizeOfWord == CELL_ADEC_BIT_LENGTH_20 || param.sizeOfWord == CELL_ADEC_BIT_LENGTH_24)
+					{
+						s64 i = 0;
+						for (; i * 3 <= au_size_u8 - static_cast<s64>(sizeof(v128)); i += 4)
+						{
+							// Load four samples, convert endianness if necessary and shift left by 8
+							const v128 _s32 = std::endian::native == std::endian::little
+								? gv_shuffle8(v128::loadu(&input_u8[i * 3]), v128::normal_array_t<s8>{ -1, 2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9 })
+								: gv_shuffle8(v128::loadu(&input_u8[i * 3]), v128::normal_array_t<s8>{ 0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8, -1, 9, 10, 11, -1 });
+
+							// Convert to float and divide by INT32_MAX + 1
+							const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
+
+							v128::storeu(gv_to_be32(_f32), &_output[i]);
+						}
+
+						for (; i * 3 <= au_size_u8 - 3; i++)
+						{
+							alignas(alignof(s32)) const u8 s32le[4] = { 0, input_u8[i * 3 + 2], input_u8[i * 3 + 1], input_u8[i * 3] };
+
+							_output[i] = static_cast<f32>(std::bit_cast<le_t<s32>>(s32le)) / static_cast<f32>(0x80000000u);
+						}
 					}
 
-					for (; i < au_size_s16; i++)
+					// Reorder channels and remove the dummy channel
+
+					// Input channel order:
+					// Front Left, Front Right, Center, Side Left, Rear Left, Rear Right, Side Right, LFE
+
+					// Output channel order:
+					// - up to 3_4: Front Left, Center, Front Right, Side Left, Side Right, Rear Left, Rear Right, LFE
+					// - 3_4_LFE: Front Left, Front Right, Center, LFE, Side Left, Side Right, Rear Left, Rear Right
+
+					// The following loops can access sample_num % channel_num * sizeof(f32) bytes more than LPCM_DEC_OUTPUT_BUFFER_SIZE (up to 28 bytes).
+					// This is intended, LLE does something similar. The buffer is much larger than LPCM_DEC_OUTPUT_BUFFER_SIZE (see _CellAdecCoreOpGetMemSize_lpcm())
+					switch (param.channelNumber)
 					{
-						_output[i] = static_cast<f32>(input_s16[i]) / 0x8000u;
+					case CELL_ADEC_CH_MONO:
+						for (s32 i = 0; i < sample_num / 2; i += 4)
+						{
+							const v128 tmp1 = v128::loadu(&_output[i * 2]);
+							const v128 tmp2 = v128::loadu(&_output[i * 2 + 4]);
+							v128::storeu(gv_shufflefs<0, 2, 0, 2>(tmp1, tmp2), &_output[i]); // Remove every other sample
+						}
+						break;
+
+					case CELL_ADEC_CH_STEREO:
+					case CELL_ADEC_CH_2_2:
+						// Input order == output order, no need to do anything
+						break;
+
+					case CELL_ADEC_CH_3_0:
+						for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 4, i_out += 3)
+						{
+							const v128 tmp = gv_shuffle32<0, 2, 1, 3>(v128::loadu(&_output[i_in])); // Swap Front Right and Center
+							v128::storeu(tmp, &_output[i_out]);
+						}
+						break;
+
+					case CELL_ADEC_CH_2_1:
+						for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 4, i_out += 3)
+						{
+							v128::storeu(v128::loadu(&_output[i_in]), &_output[i_out]);
+						}
+						break;
+
+					case CELL_ADEC_CH_3_1:
+					case CELL_ADEC_CH_3_2_LFE:
+						for (s32 i = 0; i < sample_num; i += channel_num)
+						{
+							const u64 tmp = std::rotl(read_from_ptr_unsafe<u64>(_output, i + 1), 0x20); // Swap Front Right and Center
+							std::memcpy(&_output[i + 1], &tmp, sizeof(u64));
+						}
+						break;
+
+					case CELL_ADEC_CH_3_2:
+						for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 6, i_out += 5)
+						{
+							const v128 tmp = gv_shuffle32<0, 2, 1, 3>(v128::loadu(&_output[i_in])); // Swap Front Right and Center
+							v128::storeu(tmp, &_output[i_out]);
+							_output[i_out + 4] = _output[i_in + 4];
+						}
+						break;
+
+					case CELL_ADEC_CH_3_4:
+						for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 8, i_out += 7)
+						{
+							const v128 tmp1 = gv_shuffle32<0, 2, 1, 3>(v128::loadu(&_output[i_in])); // Swap Front Right and Center
+							const v128 tmp2 = gv_shuffle32<2, 0, 1, 3>(v128::loadu(&_output[i_in + 4])); // Reorder Rear Left, Rear Right, Side Right -> Side Right, Rear Left, Rear Right
+							v128::storeu(tmp1, &_output[i_out]);
+							v128::storeu(tmp2, &_output[i_out + 4]);
+						}
+						break;
+
+					case CELL_ADEC_CH_3_4_LFE:
+						for (s32 i = 0; i < sample_num; i += 8)
+						{
+							const v128 tmp1 = gv_shuffle32<3, 2, 0, 1>(v128::loadu(&_output[i + 4])); // Reorder Rear Left, Rear Right, Side Right, LFE -> LFE, Side Right, Rear Left, Rear Right
+							v128::storeu(tmp1, &_output[i + 4]);
+							const u64 tmp2 = std::rotl(read_from_ptr_unsafe<u64>(_output, i + 3), 0x20); // Swap Side Left and LFE
+							std::memcpy(&_output[i + 3], &tmp2, sizeof(u64));
+						}
+						break;
+
+					default:
+						; // Don't do anything
 					}
-				}
-				else if (lpcm_param->sizeOfWord == CELL_ADEC_BIT_LENGTH_20 || lpcm_param->sizeOfWord == CELL_ADEC_BIT_LENGTH_24)
-				{
-					s64 i = 0;
-					for (; i * 3 <= au_size_u8 - static_cast<s64>(sizeof(v128)); i += 4)
-					{
-						// Load four samples, convert endianness if necessary and shift left by 8
-						const v128 _s32 = std::endian::native == std::endian::little
-							? gv_shuffle8(v128::loadu(&input_u8[i * 3]), v128::normal_array_t<s8>{ -1, 2, 1, 0, -1, 5, 4, 3, -1, 8, 7, 6, -1, 11, 10, 9 })
-							: gv_shuffle8(v128::loadu(&input_u8[i * 3]), v128::normal_array_t<s8>{ 0, 1, 2, -1, 3, 4, 5, -1, 6, 7, 8, -1, 9, 10, 11, -1 });
-
-						// Convert to float and divide by INT32_MAX + 1
-						const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
-
-						v128::storeu(gv_to_be32(_f32), &_output[i]);
-					}
-
-					for (; i * 3 <= au_size_u8 - 3; i++)
-					{
-						alignas(alignof(s32)) const u8 s32le[4] = { 0, input_u8[i * 3 + 2], input_u8[i * 3 + 1], input_u8[i * 3] };
-
-						_output[i] = static_cast<f32>(std::bit_cast<le_t<s32>>(s32le)) / static_cast<f32>(0x80000000u);
-					}
-				}
-
-				// Reorder channels and remove the dummy channel
-
-				// Input channel order:
-				// Front Left, Front Right, Center, Side Left, Rear Left, Rear Right, Side Right, LFE
-
-				// Output channel order:
-				// - up to 3_4: Front Left, Center, Front Right, Side Left, Side Right, Rear Left, Rear Right, LFE
-				// - 3_4_LFE: Front Left, Front Right, Center, LFE, Side Left, Side Right, Rear Left, Rear Right
-
-				// The following loops can access sample_num % channel_num * sizeof(f32) bytes more than LPCM_DEC_OUTPUT_BUFFER_SIZE (up to 28 bytes).
-				// This is intended, LLE does something similar. The buffer is much larger than LPCM_DEC_OUTPUT_BUFFER_SIZE (see _CellAdecCoreOpGetMemSize_lpcm())
-				switch (lpcm_param->channelNumber)
-				{
-				case CELL_ADEC_CH_MONO:
-					for (s32 i = 0; i < sample_num / 2; i += 4)
-					{
-						const v128 tmp1 = v128::loadu(&_output[i * 2]);
-						const v128 tmp2 = v128::loadu(&_output[i * 2 + 4]);
-						v128::storeu(gv_shufflefs<0, 2, 0, 2>(tmp1, tmp2), &_output[i]); // Remove every other sample
-					}
-					break;
-
-				case CELL_ADEC_CH_STEREO:
-				case CELL_ADEC_CH_2_2:
-					// Input order == output order, no need to do anything
-					break;
-
-				case CELL_ADEC_CH_3_0:
-					for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 4, i_out += 3)
-					{
-						const v128 tmp = gv_shuffle32<0, 2, 1, 3>(v128::loadu(&_output[i_in])); // Swap Front Right and Center
-						v128::storeu(tmp, &_output[i_out]);
-					}
-					break;
-
-				case CELL_ADEC_CH_2_1:
-					for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 4, i_out += 3)
-					{
-						v128::storeu(v128::loadu(&_output[i_in]), &_output[i_out]);
-					}
-					break;
-
-				case CELL_ADEC_CH_3_1:
-				case CELL_ADEC_CH_3_2_LFE:
-					for (s32 i = 0; i < sample_num; i += channel_num)
-					{
-						const u64 tmp = std::rotl(read_from_ptr_unsafe<u64>(_output, i + 1), 0x20); // Swap Front Right and Center
-						std::memcpy(&_output[i + 1], &tmp, sizeof(u64));
-					}
-					break;
-
-				case CELL_ADEC_CH_3_2:
-					for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 6, i_out += 5)
-					{
-						const v128 tmp = gv_shuffle32<0, 2, 1, 3>(v128::loadu(&_output[i_in])); // Swap Front Right and Center
-						v128::storeu(tmp, &_output[i_out]);
-						_output[i_out + 4] = _output[i_in + 4];
-					}
-					break;
-
-				case CELL_ADEC_CH_3_4:
-					for (s32 i_in = 0, i_out = 0; i_in < sample_num; i_in += 8, i_out += 7)
-					{
-						const v128 tmp1 = gv_shuffle32<0, 2, 1, 3>(v128::loadu(&_output[i_in])); // Swap Front Right and Center
-						const v128 tmp2 = gv_shuffle32<2, 0, 1, 3>(v128::loadu(&_output[i_in + 4])); // Reorder Rear Left, Rear Right, Side Right -> Side Right, Rear Left, Rear Right
-						v128::storeu(tmp1, &_output[i_out]);
-						v128::storeu(tmp2, &_output[i_out + 4]);
-					}
-					break;
-
-				case CELL_ADEC_CH_3_4_LFE:
-					for (s32 i = 0; i < sample_num; i += 8)
-					{
-						const v128 tmp1 = gv_shuffle32<3, 2, 0, 1>(v128::loadu(&_output[i + 4])); // Reorder Rear Left, Rear Right, Side Right, LFE -> LFE, Side Right, Rear Left, Rear Right
-						v128::storeu(tmp1, &_output[i + 4]);
-						const u64 tmp2 = std::rotl(read_from_ptr_unsafe<u64>(_output, i + 3), 0x20); // Swap Side Left and LFE
-						std::memcpy(&_output[i + 3], &tmp2, sizeof(u64));
-					}
-					break;
-
-				default:
-					; // Don't do anything
 				}
 			}
 			else
 			{
-				switch (lpcm_param->sizeOfWord)
+				switch (param.sizeOfWord)
 				{
 				case CELL_ADEC_BIT_LENGTH_16: output_size = output_size * 32 / 16; break;
 				case CELL_ADEC_BIT_LENGTH_20: output_size = output_size * 32 / 20; break;
 				case CELL_ADEC_BIT_LENGTH_24: output_size = output_size * 32 / 24; break;
-				default: fmt::throw_exception("Unreachable"); // Parameters get verified in adecSetLpcmDvdParams()
+				default: au_error = true; break; // Parameters get verified in adecSetLpcmDvdParams(), but the guest can modify them afterwards
 				}
 
 				// Only the front left and right channels are decoded, all other channels are ignored
-				switch (lpcm_param->channelNumber)
+				switch (param.channelNumber)
 				{
 				case CELL_ADEC_LPCM_DVD_CH_MONO: // Set channel_num to two for mono as well
 				case CELL_ADEC_LPCM_DVD_CH_STEREO:  channel_num = 2; break;
@@ -541,131 +590,142 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 				case CELL_ADEC_LPCM_DVD_CH_3_2_LFE: channel_num = 6; output_size = output_size * 2 / 6; break;
 				case CELL_ADEC_LPCM_DVD_CH_3_4:     channel_num = 7; output_size = output_size * 2 / 7; break;
 				case CELL_ADEC_LPCM_DVD_CH_3_4_LFE: channel_num = 8; output_size = output_size * 2 / 8; break;
-				default: fmt::throw_exception("Unreachable"); // Parameters get verified in adecSetLpcmDvdParams()
+				default: au_error = true; break; // Same as above
 				}
 
-				// LLE doesn't check the output size
-				ensure(output_size <= LPCM_DEC_OUTPUT_BUFFER_SIZE);
+				// LLE doesn't check the output size. We soft-fail instead.
+				au_error = au_error || output_size > LPCM_DEC_OUTPUT_BUFFER_SIZE;
 
-				// Convert to float
-				switch (lpcm_param->sizeOfWord)
+				if (!au_error)
 				{
-				case CELL_ADEC_BIT_LENGTH_16:
-				{
-					s64 i_in = 0;
-					s64 i_out = 0;
-					for (; i_in <= au_size_s16 - channel_num - 2; i_in += channel_num * 2, i_out += 4)
+					// Convert to float
+					switch (param.sizeOfWord)
 					{
-						// Load four samples
-						const v128 tmp1 = gv_loadu32(&input_s16[i_in]);
-						const v128 tmp2 = gv_loadu32(&input_s16[i_in + channel_num]);
-						const v128 s16be = gv_unpacklo32(tmp1, tmp2);
-
-						// Convert endianess if necessary and shift left by 16
-						const v128 _s32 = std::endian::native == std::endian::little
-							? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 1, 0, -1, -1, 3, 2, -1, -1, 5, 4, -1, -1, 7, 6 })
-							: gv_unpacklo16(s16be, gv_bcst16(0));
-
-						// Convert to float and divide by INT32_MAX + 1
-						const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
-
-						v128::storeu(gv_to_be32(_f32), &_output[i_out]);
-					}
-
-					for (; i_in <= au_size_s16 - 2; i_in += channel_num, i_out += 2)
+					case CELL_ADEC_BIT_LENGTH_16:
 					{
-						const v128 s16be = gv_loadu32(&input_s16[i_in]);
+						s64 i_in = 0;
+						s64 i_out = 0;
+						for (; i_in <= au_size_s16 - channel_num - 2; i_in += channel_num * 2, i_out += 4)
+						{
+							// Load four samples
+							const v128 tmp1 = gv_loadu32(&input_s16[i_in]);
+							const v128 tmp2 = gv_loadu32(&input_s16[i_in + channel_num]);
+							const v128 s16be = gv_unpacklo32(tmp1, tmp2);
 
-						const v128 _s32 = std::endian::native == std::endian::little
-							? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 1, 0, -1, -1, 3, 2, -1, -1, 5, 4, -1, -1, 7, 6 })
-							: gv_unpacklo16(s16be, gv_bcst16(0));
+							// Convert endianess if necessary and shift left by 16
+							const v128 _s32 = std::endian::native == std::endian::little
+								? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 1, 0, -1, -1, 3, 2, -1, -1, 5, 4, -1, -1, 7, 6 })
+								: gv_unpacklo16(s16be, gv_bcst16(0));
 
-						const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
+							// Convert to float and divide by INT32_MAX + 1
+							const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
 
-						std::memcpy(&_output[i_out], &gv_to_be32(_f32)._u64[0], sizeof(u64));
+							v128::storeu(gv_to_be32(_f32), &_output[i_out]);
+						}
+
+						for (; i_in <= au_size_s16 - 2; i_in += channel_num, i_out += 2)
+						{
+							const v128 s16be = gv_loadu32(&input_s16[i_in]);
+
+							const v128 _s32 = std::endian::native == std::endian::little
+								? gv_shuffle8(s16be, v128::normal_array_t<s8>{ -1, -1, 1, 0, -1, -1, 3, 2, -1, -1, 5, 4, -1, -1, 7, 6 })
+								: gv_unpacklo16(s16be, gv_bcst16(0));
+
+							const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
+
+							std::memcpy(&_output[i_out], &gv_to_be32(_f32)._u64[0], sizeof(u64));
+						}
+						break;
 					}
-					break;
-				}
-				case CELL_ADEC_BIT_LENGTH_20:
-				{
-					const s64 high_bytes_3_4_offset = lpcm_param->channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 5 : channel_num * 2;
-					const s64 low_bits_1_2_offset = lpcm_param->channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 4 : channel_num * 4;
-					const s64 low_bits_3_4_offset = channel_num * 4 + channel_num / 2 - !(channel_num & 1);
-					const s64 next_samples_offset = channel_num * 5;
-
-					// If channel_num is odd, the low bits of samples three and four are in different bytes
-					alignas(alignof(v128)) static constexpr auto shuffle_ctrl_same_offset = std::endian::native == std::endian::little
-						? v128::normal_array_t<s8>{ -1, 8, 1, 0, -1, 8, 3, 2, -1, 11, 5, 4, -1, 11, 7, 6 }
-						: v128::normal_array_t<s8>{ 0, 1, 8, -1, 2, 3, 8, -1, 4, 5, 11, -1, 6, 7, 11, -1 };
-
-					alignas(alignof(v128)) static constexpr auto shuffle_ctrl_different_offset = std::endian::native == std::endian::little
-						? v128::normal_array_t<s8>{ -1, 8, 1, 0, -1, 8, 3, 2, -1, 10, 5, 4, -1, 11, 7, 6 }
-						: v128::normal_array_t<s8>{ 0, 1, 8, -1, 2, 3, 8, -1, 4, 5, 10, -1, 6, 7, 11, -1 };
-
-					const v128 shuffle_ctrl = channel_num & 1 ? v128::loadu(&shuffle_ctrl_different_offset) : v128::loadu(&shuffle_ctrl_same_offset);
-
-					alignas(alignof(v128)) static constexpr auto low_bits_mask_same_offset = std::endian::native == std::endian::little
-						? v128::normal_array_t<u8>{ 0x00, 0xf0, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00, 0xf0, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff }
-						: v128::normal_array_t<u8>{ 0xff, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x0f, 0x00, 0xff, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x0f, 0x00 };
-
-					alignas(alignof(v128)) static constexpr auto low_bits_mask_different_offset = std::endian::native == std::endian::little
-						? v128::normal_array_t<u8>{ 0x00, 0xf0, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00, 0xf0, 0xff, 0xff }
-						: v128::normal_array_t<u8>{ 0xff, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x0f, 0x00, 0xff, 0xff, 0x0f, 0x00, 0xff, 0xff, 0xf0, 0x00 };
-
-					const v128 low_bits_mask = channel_num & 1 ? v128::loadu(&low_bits_mask_different_offset) : v128::loadu(&low_bits_mask_same_offset);
-
-					for (s64 i_in = 0, i_out = 0; i_in <= au_size_u8 - low_bits_3_4_offset - (channel_num & 1); i_in += next_samples_offset, i_out += 4)
+					case CELL_ADEC_BIT_LENGTH_20:
 					{
-						// Load all the high and low bits of four samples
-						const v128 tmp1 = gv_loadu32(&input_u8[i_in]);
-						const v128 tmp2 = gv_loadu32(&input_u8[i_in + high_bytes_3_4_offset]);
-						v128 s20be = gv_unpacklo32(tmp1, tmp2);
-						s20be = gv_insert16<4>(s20be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bits_1_2_offset));
-						s20be = gv_insert16<5>(s20be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bits_3_4_offset));
+						const s64 high_bytes_3_4_offset = param.channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 5 : channel_num * 2;
+						const s64 low_bits_1_2_offset = param.channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 4 : channel_num * 4;
+						const s64 low_bits_3_4_offset = channel_num * 4 + channel_num / 2 - !(channel_num & 1);
+						const s64 next_samples_offset = channel_num * 5;
 
-						// Reorder bytes to form four 32-bit integer samples
-						v128 _s32 = gv_shuffle8(s20be, shuffle_ctrl);
+						// If channel_num is odd, the low bits of samples three and four are in different bytes
+						alignas(alignof(v128)) static constexpr auto shuffle_ctrl_same_offset = std::endian::native == std::endian::little
+							? v128::normal_array_t<s8>{ -1, 8, 1, 0, -1, 8, 3, 2, -1, 11, 5, 4, -1, 11, 7, 6 }
+							: v128::normal_array_t<s8>{ 0, 1, 8, -1, 2, 3, 8, -1, 4, 5, 11, -1, 6, 7, 11, -1 };
 
-						// Set low 12 bits to zero for each sample
-						_s32 = _s32 & low_bits_mask;
+						alignas(alignof(v128)) static constexpr auto shuffle_ctrl_different_offset = std::endian::native == std::endian::little
+							? v128::normal_array_t<s8>{ -1, 8, 1, 0, -1, 8, 3, 2, -1, 10, 5, 4, -1, 11, 7, 6 }
+							: v128::normal_array_t<s8>{ 0, 1, 8, -1, 2, 3, 8, -1, 4, 5, 10, -1, 6, 7, 11, -1 };
 
-						// LLE is missing a step: each byte that was ANDed with 0x0f would still need to be shifted left by 4
+						const v128 shuffle_ctrl = channel_num & 1 ? v128::loadu(&shuffle_ctrl_different_offset) : v128::loadu(&shuffle_ctrl_same_offset);
 
-						// Convert to float and divide by INT32_MAX + 1
-						const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
+						alignas(alignof(v128)) static constexpr auto low_bits_mask_same_offset = std::endian::native == std::endian::little
+							? v128::normal_array_t<u8>{ 0x00, 0xf0, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00, 0xf0, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff }
+							: v128::normal_array_t<u8>{ 0xff, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x0f, 0x00, 0xff, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x0f, 0x00 };
 
-						v128::storeu(gv_to_be32(_f32), &_output[i_out]);
+						alignas(alignof(v128)) static constexpr auto low_bits_mask_different_offset = std::endian::native == std::endian::little
+							? v128::normal_array_t<u8>{ 0x00, 0xf0, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00, 0x0f, 0xff, 0xff, 0x00, 0xf0, 0xff, 0xff }
+							: v128::normal_array_t<u8>{ 0xff, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x0f, 0x00, 0xff, 0xff, 0x0f, 0x00, 0xff, 0xff, 0xf0, 0x00 };
+
+						const v128 low_bits_mask = channel_num & 1 ? v128::loadu(&low_bits_mask_different_offset) : v128::loadu(&low_bits_mask_same_offset);
+
+						for (s64 i_in = 0, i_out = 0; i_in <= au_size_u8 - low_bits_3_4_offset - (channel_num & 1); i_in += next_samples_offset, i_out += 4)
+						{
+							// Load all the high and low bits of four samples
+							const v128 tmp1 = gv_loadu32(&input_u8[i_in]);
+							const v128 tmp2 = gv_loadu32(&input_u8[i_in + high_bytes_3_4_offset]);
+							v128 s20be = gv_unpacklo32(tmp1, tmp2);
+							s20be = gv_insert16<4>(s20be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bits_1_2_offset));
+							s20be = gv_insert16<5>(s20be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bits_3_4_offset));
+
+							// Reorder bytes to form four 32-bit integer samples
+							v128 _s32 = gv_shuffle8(s20be, shuffle_ctrl);
+
+							// Set low 12 bits to zero for each sample
+							_s32 = _s32 & low_bits_mask;
+
+							// LLE is missing a step: each byte that was ANDed with 0x0f would still need to be shifted left by 4
+
+							// Convert to float and divide by INT32_MAX + 1
+							const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
+
+							v128::storeu(gv_to_be32(_f32), &_output[i_out]);
+						}
+						break;
 					}
-					break;
-				}
-				case CELL_ADEC_BIT_LENGTH_24:
-				{
-					const s64 high_bytes_3_4_offset = lpcm_param->channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 6 : channel_num * 2;
-					const s64 low_bytes_1_2_offset = lpcm_param->channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 4 : channel_num * 4;
-					const s64 low_bytes_3_4_offset = channel_num * 5;
-					const s64 next_samples_offset = channel_num * 6;
-
-					for (s64 i_in = 0, i_out = 0; i_in <= au_size_u8 - low_bytes_3_4_offset - 2; i_in += next_samples_offset, i_out += 4)
+					case CELL_ADEC_BIT_LENGTH_24:
 					{
-						// Load all the high and low bytes of four samples
-						const v128 tmp1 = gv_loadu32(&input_u8[i_in]);
-						const v128 tmp2 = gv_loadu32(&input_u8[i_in + high_bytes_3_4_offset]);
-						v128 s24be = gv_unpacklo32(tmp1, tmp2);
-						s24be = gv_insert16<4>(s24be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bytes_1_2_offset));
-						s24be = gv_insert16<5>(s24be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bytes_3_4_offset));
+						const s64 high_bytes_3_4_offset = param.channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 6 : channel_num * 2;
+						const s64 low_bytes_1_2_offset = param.channelNumber == CELL_ADEC_LPCM_DVD_CH_MONO ? 4 : channel_num * 4;
+						const s64 low_bytes_3_4_offset = channel_num * 5;
+						const s64 next_samples_offset = channel_num * 6;
 
-						// Reorder bytes to form four 32-bit integer samples
-						const v128 _s32 = std::endian::native == std::endian::little
-							? gv_shuffle8(s24be, v128::normal_array_t<s8>{ -1, 8, 1, 0, -1, 9, 3, 2, -1, 10, 5, 4, -1, 11, 7, 6 })
-							: gv_shuffle8(s24be, v128::normal_array_t<s8>{ 0, 1, 8, -1, 2, 3, 9, -1, 4, 5, 10, -1, 6, 7, 11, -1 });
+						for (s64 i_in = 0, i_out = 0; i_in <= au_size_u8 - low_bytes_3_4_offset - 2; i_in += next_samples_offset, i_out += 4)
+						{
+							// Load all the high and low bytes of four samples
+							const v128 tmp1 = gv_loadu32(&input_u8[i_in]);
+							const v128 tmp2 = gv_loadu32(&input_u8[i_in + high_bytes_3_4_offset]);
+							v128 s24be = gv_unpacklo32(tmp1, tmp2);
+							s24be = gv_insert16<4>(s24be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bytes_1_2_offset));
+							s24be = gv_insert16<5>(s24be, read_from_ptr_unsafe<u16>(input_u8, i_in + low_bytes_3_4_offset));
 
-						// Convert to float and divide by INT32_MAX + 1
-						const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
+							// Reorder bytes to form four 32-bit integer samples
+							const v128 _s32 = std::endian::native == std::endian::little
+								? gv_shuffle8(s24be, v128::normal_array_t<s8>{ -1, 8, 1, 0, -1, 9, 3, 2, -1, 10, 5, 4, -1, 11, 7, 6 })
+								: gv_shuffle8(s24be, v128::normal_array_t<s8>{ 0, 1, 8, -1, 2, 3, 9, -1, 4, 5, 10, -1, 6, 7, 11, -1 });
 
-						v128::storeu(gv_to_be32(_f32), &_output[i_out]);
+							// Convert to float and divide by INT32_MAX + 1
+							const v128 _f32 = gv_mulfs(gv_cvts32_tofs(_s32), 1.f / static_cast<f32>(0x80000000u));
+
+							v128::storeu(gv_to_be32(_f32), &_output[i_out]);
+						}
+					}
 					}
 				}
-				}
+			}
+
+			if (au_error)
+			{
+				cellAdec.error("LpcmDecContext::exec(): Invalid access unit or parameters (au_start_addr=0x%x, au_size=0x%x, channelNumber=%d, sizeOfWord=%d, audioPayloadSize=0x%x)",
+					au_addr, au_size, param.channelNumber, param.sizeOfWord, param.audioPayloadSize);
+
+				output_size = 0;
 			}
 
 			// Block savestate creation during callbacks
@@ -677,7 +737,7 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 				return;
 			}
 
-			if (error_occurred)
+			if (error_occurred || au_error)
 			{
 				notify_error.cbFunc(ppu, CELL_ADEC_ERROR_FATAL, notify_error.cbArg);
 			}
@@ -687,13 +747,28 @@ void LpcmDecContext::exec(ppu_thread& ppu)
 			output_locked = true;
 			error_occurred |= static_cast<u32>(lv2_syscall<sys_mutex_unlock>(ppu, output_mutex) != CELL_OK);
 
-			const vm::var<CellAdecLpcmInfo> bsi_info{{ lpcm_param->channelNumber, lpcm_param->sampleRate, static_cast<u32>(output_size) }};
+			const vm::var<CellAdecLpcmInfo> bsi_info{{ param.channelNumber, param.sampleRate, static_cast<u32>(output_size) }};
 
-			notify_pcm_out.cbFunc(ppu, cmd.pcm_handle, output, static_cast<u32>(output_size), notify_pcm_out.cbArg, vm::make_var<vm::bcptr<void>>(bsi_info), ADEC_CORRECT_PTS_VALUE_TYPE_LPCM_HDMV, error_occurred ? static_cast<s32>(CELL_ADEC_ERROR_FATAL) : CELL_OK);
+			notify_pcm_out.cbFunc(ppu, cmd.pcm_handle, get_output(), static_cast<u32>(output_size), notify_pcm_out.cbArg, vm::make_var<vm::bcptr<void>>(bsi_info), ADEC_CORRECT_PTS_VALUE_TYPE_LPCM_HDMV,
+				error_occurred || au_error ? static_cast<s32>(CELL_ADEC_ERROR_FATAL) : CELL_OK);
 			break;
 		}
 		default:
-			fmt::throw_exception("Invalid command");
+		{
+			// The guest overwrote the command?
+			std::unique_lock savestate_lock{g_fxo->get<hle_locks_t>(), std::try_to_lock};
+			if (!savestate_lock.owns_lock())
+			{
+				ppu.state += cpu_flag::again;
+				return;
+			}
+
+			cellAdec.error("LpcmDecContext::exec(): Invalid command type: 0x%x", static_cast<u32>(cmd.type.get()));
+			notify_error.cbFunc(ppu, CELL_ADEC_ERROR_FATAL, notify_error.cbArg);
+
+			error_occurred |= static_cast<u32>(lv2_syscall<sys_mutex_unlock>(ppu, output_mutex) != CELL_OK);
+			break;
+		}
 		}
 	}
 }
@@ -717,7 +792,7 @@ error_code LpcmDecContext::send_command(ppu_thread& ppu, auto&&... args)
 	// LLE copies the parameters directly into the context
 	if constexpr (type == LpcmDecCmdType::start_seq)
 	{
-		*lpcm_param = { args... };
+		*get_lpcm_param() = { args... };
 	}
 
 	if (error_code ret = lv2_syscall<sys_mutex_lock>(ppu, queue_mutex, 0); ret != CELL_OK)
@@ -726,7 +801,13 @@ error_code LpcmDecContext::send_command(ppu_thread& ppu, auto&&... args)
 		return ret;
 	}
 
-	cmd_queue.emplace(type, std::forward<decltype(args)>(args)...);
+	if (!cmd_queue.emplace(type, std::forward<decltype(args)>(args)...))
+	{
+		// Only possible if the guest modified the queue after it was checked above
+		ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex) == CELL_OK); // Error code isn't checked on LLE
+		ensure(lv2_syscall<sys_mutex_unlock>(ppu, queue_size_mutex) == CELL_OK); // Error code isn't checked on LLE
+		return CELL_ADEC_ERROR_BUSY; // Return same error as if queue is full. FIXME: Should we fatal here instead?
+	}
 
 	if (error_code ret = lv2_syscall<sys_mutex_unlock>(ppu, queue_mutex); ret != CELL_OK
 		|| (ret = cmd_available.release(ppu)) != CELL_OK)
@@ -801,8 +882,6 @@ error_code _CellAdecCoreOpOpenExt_lpcm(ppu_thread& ppu, vm::ptr<LpcmDecContext> 
 	ensure(handle.aligned(0x80)); // LLE doesn't check the alignment or aligns the address itself
 	ensure(!!notifyAuDone && !!notifyAuDoneArg && !!notifyPcmOut && !!notifyPcmOutArg && !!notifyError && !!notifyErrorArg && !!notifySeqDone && !!notifySeqDoneArg); // These should always be set
 
-	const u32 end_of_context_addr = handle.addr() + utils::align(static_cast<u32>(sizeof(LpcmDecContext)), 0x80);
-
 	handle->cmd_queue.front = 0;
 	handle->cmd_queue.back = 0;
 	handle->cmd_queue.size = 0;
@@ -811,8 +890,8 @@ error_code _CellAdecCoreOpOpenExt_lpcm(ppu_thread& ppu, vm::ptr<LpcmDecContext> 
 	handle->notify_pcm_out = { notifyPcmOut, notifyPcmOutArg };
 	handle->notify_error = { notifyError, notifyErrorArg };
 	handle->notify_seq_done = { notifySeqDone, notifySeqDoneArg };
-	handle->output = vm::bptr<f32>::make(end_of_context_addr + 0x180);
-	handle->lpcm_param.set(end_of_context_addr);
+	handle->output = handle->get_output();
+	handle->lpcm_param = handle->get_lpcm_param();
 	handle->error_occurred = false;
 
 	const vm::var<sys_mutex_attribute_t> mutex_attr{{ SYS_SYNC_PRIORITY, SYS_SYNC_NOT_RECURSIVE, SYS_SYNC_NOT_PROCESS_SHARED, SYS_SYNC_NOT_ADAPTIVE, 0, 0, 0, { "_adem04"_u64 } }};
@@ -1028,9 +1107,8 @@ error_code AdecContext::get_new_pcm_handle(vm::ptr<CellAdecAuInfo> au_info) cons
 
 error_code AdecContext::verify_pcm_handle(s32 pcm_handle) const
 {
-	ensure(pcm_handle >= 0 && pcm_handle < frames_num); // Not properly checked on LLE, see below
-
-	if ((pcm_handle < 0 && /* LLE uses && instead of || */ pcm_handle >= frames_num) || !frames[pcm_handle].in_use)
+	// LLE uses && instead of || in the range check, so it doesn't reject any handle
+	if (pcm_handle < 0 || pcm_handle >= frames_num || !frames[pcm_handle].in_use)
 	{
 		return CELL_ADEC_ERROR_FATAL;
 	}
@@ -1710,14 +1788,16 @@ error_code cellAdecEndSeq(ppu_thread& ppu, vm::ptr<AdecContext> handle)
 
 error_code adecSetLpcmBlurayParams(vm::ptr<LpcmDecContext> handle, u64 userData)
 {
+	const auto lpcm_param = handle->get_lpcm_param();
+
 	const u8 channel_number = static_cast<u8>(userData >> 32);
 	const u8 sample_rate = static_cast<u8>(userData >> 40);
 	const u8 size_of_word = static_cast<u8>(userData >> 48);
 	const u8 unk = static_cast<u8>(userData >> 56);
 
-	handle->lpcm_param->channelNumber = channel_number;
-	handle->lpcm_param->sampleRate = sample_rate;
-	handle->lpcm_param->sizeOfWord = size_of_word;
+	lpcm_param->channelNumber = channel_number;
+	lpcm_param->sampleRate = sample_rate;
+	lpcm_param->sizeOfWord = size_of_word;
 
 	u32 allocated_channels;
 
@@ -1769,21 +1849,23 @@ error_code adecSetLpcmBlurayParams(vm::ptr<LpcmDecContext> handle, u64 userData)
 	default: return CELL_ADEC_ERROR_FATAL;
 	}
 
-	handle->lpcm_param->audioPayloadSize = allocated_bytes_per_sample * allocated_channels * samples_per_frame * unk;
+	lpcm_param->audioPayloadSize = allocated_bytes_per_sample * allocated_channels * samples_per_frame * unk;
 
 	return CELL_OK;
 }
 
 error_code adecSetLpcmDvdParams(vm::ptr<LpcmDecContext> handle, u64 userData)
 {
+	const auto lpcm_param = handle->get_lpcm_param();
+
 	const u8 channel_layout = static_cast<u8>(userData >> 32);
 	const u8 sample_rate = static_cast<u8>(userData >> 40);
 	const u8 size_of_word = static_cast<u8>(userData >> 48);
 	const u8 unk = static_cast<u8>(userData >> 56);
 
-	handle->lpcm_param->channelNumber = channel_layout;
-	handle->lpcm_param->sampleRate = sample_rate;
-	handle->lpcm_param->sizeOfWord = size_of_word;
+	lpcm_param->channelNumber = channel_layout;
+	lpcm_param->sampleRate = sample_rate;
+	lpcm_param->sizeOfWord = size_of_word;
 
 	u32 samples_per_frame;
 
@@ -1874,7 +1956,7 @@ error_code adecSetLpcmDvdParams(vm::ptr<LpcmDecContext> handle, u64 userData)
 		return CELL_ADEC_ERROR_FATAL;
 	}
 
-	handle->lpcm_param->audioPayloadSize = bits_per_sample * channel_number * samples_per_frame / 8 * unk;
+	lpcm_param->audioPayloadSize = bits_per_sample * channel_number * samples_per_frame / 8 * unk;
 
 	return CELL_OK;
 }

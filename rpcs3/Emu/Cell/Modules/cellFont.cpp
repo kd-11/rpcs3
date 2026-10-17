@@ -5,6 +5,7 @@
 #include "Emu/savestate_utils.hpp"
 
 #include <stb_truetype.h>
+#include <cmath>
 
 #include "cellFont.h"
 
@@ -12,6 +13,40 @@ LOG_CHANNEL(cellFont);
 
 namespace font_internal
 {
+	// WARN: stb_truetype does no range checking and trusts its input font (see the warning at the top of stb_truetype.h)
+	// All guest-controlled inputs are therefore suspect.
+
+	// Clamp stb font scale because stb doesn't verify it either.
+	static constexpr f32 MAX_FONT_PIXEL_HEIGHT = 1024.0f;
+	static f32 sane_scale(f32 scale)
+	{
+		// Rejects NaN (every comparison with NaN is false) and non-positive heights
+		if (!(scale > 0.0f))
+		{
+			return 0.0f;
+		}
+
+		return std::min(scale, MAX_FONT_PIXEL_HEIGHT);
+	}
+
+	// Upper bound on a single rendered glyph bitmap, an independent cap on the host allocation stb makes for one glyph regardless of the font's declared glyph extents.
+	static constexpr s64 MAX_GLYPH_PIXELS = 4096 * 4096;
+
+	// Checks that the table offsets stb will dereference lie within the font buffer.
+	static bool validate_font(const stbtt_fontinfo& info, usz size)
+	{
+		// An offset of 0 means stb did not find that (optional) table, which it then does not read
+		const auto in_bounds = [&](int offset)
+		{
+			return offset >= 0 && static_cast<usz>(offset) <= size;
+		};
+
+		return info.numGlyphs >= 0 &&
+			in_bounds(info.loca) && in_bounds(info.head) && in_bounds(info.glyf) &&
+			in_bounds(info.hhea) && in_bounds(info.hmtx) && in_bounds(info.kern) &&
+			in_bounds(info.gpos) && in_bounds(info.svg) && in_bounds(info.index_map);
+	}
+
 	// HLE-exclusive font state.
 	// stb_truetype's stbtt_fontinfo carries native pointers so it must never cross into guest memory.
 	class CellFontInstance
@@ -30,19 +65,42 @@ namespace font_internal
 		CellFontInstance(utils::serial& ar);
 		void save(utils::serial& ar);
 
-		// Builds the stbtt_fontinfo from the guest-resident font data. Returns false if stb rejects it.
-		bool init()
+		// Copies the font out of guest memory into the host-owned buffer, then builds stb's state from it
+		bool copy_from_guest(u32 addr, u32 size)
+		{
+			data.clear();
+
+			if (!addr || !size || !vm::check_addr(addr, vm::page_readable, size))
+			{
+				return build();
+			}
+
+			data.resize(size);
+			std::memcpy(data.data(), vm::base(addr), size);
+			return build();
+		}
+
+		// Builds the stbtt_fontinfo from the already-populated host-owned buffer.
+		bool build()
 		{
 			info = {};
-			initialized = fontdata_addr && vm::check_addr(fontdata_addr, vm::page_readable) &&
-				stbtt_InitFont(&info, vm::_ptr<unsigned char>(fontdata_addr), 0) != 0;
+			initialized = !data.empty() &&
+				stbtt_InitFont(&info, data.data(), 0) != 0 &&
+				validate_font(info, data.size());
+
+			if (!initialized)
+			{
+				info = {};
+			}
+
 			return initialized;
 		}
 
 		const u32 font_addr;       // Address of the guest CellFont object, used to verify ownership
-		const u32 fontdata_addr;   // Address of the font file in guest memory
+		const u32 fontdata_addr;   // Address of the font file in guest memory (only used to free it on close)
 		const bool owns_fontdata;  // Whether closing this font should free fontdata_addr (false for instances)
 
+		std::vector<u8> data;      // Host-owned copy of the font file; stb's data pointer only ever aims here
 		stbtt_fontinfo info{};     // Host-owned; never exposed to the guest
 		bool initialized = false;
 	};
@@ -52,13 +110,14 @@ namespace font_internal
 		, fontdata_addr(ar.pop<u32>())
 		, owns_fontdata(ar.pop<bool>())
 	{
-		// The font data lives in guest memory, which is restored with the savestate, so rebuild stb's state
-		init();
+		// The host-owned copy is serialized, so stb's state can be rebuilt without touching guest memory
+		ar(data);
+		build();
 	}
 
 	void CellFontInstance::save(utils::serial& ar)
 	{
-		ar(font_addr, fontdata_addr, owns_fontdata);
+		ar(font_addr, fontdata_addr, owns_fontdata, data);
 	}
 
 	// Returns the host object of a font handle.
@@ -91,8 +150,8 @@ namespace font_internal
 		return { found_id, std::move(found.ptr) };
 	}
 
-	// Creates a host font object for a handle, replacing any previous object bound to the same handle address.
-	static stx::shared_ptr<CellFontInstance> open_font(vm::ptr<CellFont> font, u32 fontdata_addr, bool owns_fontdata)
+	// Removes any host object already bound to this handle address, then creates and registers a fresh one
+	static std::pair<u32, stx::shared_ptr<CellFontInstance>> make_font(vm::ptr<CellFont> font, u32 fontdata_addr, bool owns_fontdata)
 	{
 		if (const auto [old_id, old_instance] = get_font(font); old_instance)
 		{
@@ -105,15 +164,48 @@ namespace font_internal
 			return {};
 		}
 
-		auto instance = idm::get_unlocked<CellFontInstance>(host_id);
-		if (!instance->init())
+		return { host_id, idm::get_unlocked<CellFontInstance>(host_id) };
+	}
+
+	// Opens a font from guest memory, copying the font bytes into host memory.
+	static bool open_font(vm::ptr<CellFont> font, u32 fontdata_addr, u32 fontdata_size, bool owns_fontdata)
+	{
+		const auto [host_id, instance] = make_font(font, fontdata_addr, owns_fontdata);
+		if (!instance)
+		{
+			return false;
+		}
+
+		if (!instance->copy_from_guest(fontdata_addr, fontdata_size))
 		{
 			idm::remove<CellFontInstance>(host_id);
-			return {};
+			return false;
+		}
+
+		// Write the verified ID into the guest handle on success.
+		font->host_id = host_id;
+		return true;
+	}
+
+	// Opens an instance that shares a source font.
+	// The already-validated host bytes are only copied on the host side so the instance never depends on the guest's memory.
+	static bool open_instance(vm::ptr<CellFont> font, const CellFontInstance& src)
+	{
+		const auto [host_id, instance] = make_font(font, src.fontdata_addr, false);
+		if (!instance)
+		{
+			return false;
+		}
+
+		instance->data = src.data;
+		if (!instance->build())
+		{
+			idm::remove<CellFontInstance>(host_id);
+			return false;
 		}
 
 		font->host_id = host_id;
-		return instance;
+		return true;
 	}
 }
 
@@ -244,7 +336,7 @@ error_code cellFontOpenFontMemory(vm::ptr<CellFontLibrary> library, u32 fontAddr
 
 	// TODO
 
-	if (!font_internal::open_font(font, fontAddr, true))
+	if (!font_internal::open_font(font, fontAddr, fontSize, true))
 	{
 		return CELL_FONT_ERROR_FONT_OPEN_FAILED;
 	}
@@ -432,7 +524,7 @@ error_code cellFontOpenFontInstance(vm::ptr<CellFont> openedFont, vm::ptr<CellFo
 		return CELL_FONT_ERROR_INVALID_PARAMETER;
 	}
 
-	if (!font_internal::open_font(font, src->fontdata_addr, false))
+	if (!font_internal::open_instance(font, *src))
 	{
 		return CELL_FONT_ERROR_FONT_OPEN_FAILED;
 	}
@@ -674,7 +766,7 @@ error_code cellFontGetHorizontalLayout(vm::ptr<CellFont> font, vm::ptr<CellFontH
 	}
 
 	s32 ascent, descent, lineGap;
-	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font->scale_y);
+	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font_internal::sane_scale(font->scale_y));
 	stbtt_GetFontVMetrics(&instance->info, &ascent, &descent, &lineGap);
 
 	layout->baseLineY = ascent * scale;
@@ -837,9 +929,52 @@ error_code cellFontRenderCharGlyphImage(vm::ptr<CellFont> font, u32 code, vm::pt
 		return CELL_FONT_ERROR_INVALID_PARAMETER;
 	}
 
+	if (!surface)
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
+	// WARN: The output surface is described entirely by the guest.
+	// Clamp guest-provided dimensions and confirm the whole buffer is guest-addressable before writing anything into it.
+	const s32 surf_width = surface->width;
+	const s32 surf_height = surface->height;
+
+	if (surf_width <= 0 || surf_height <= 0)
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
+	const u64 surf_pixels = static_cast<u64>(surf_width) * static_cast<u64>(surf_height);
+	const u32 surf_addr = surface->buffer.addr();
+
+	if (surf_pixels > font_internal::MAX_GLYPH_PIXELS || !surf_addr ||
+		!vm::check_addr(surf_addr, vm::page_writable, static_cast<u32>(surf_pixels)))
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
+	// The glyph origin comes from the guest as floats; reject non-finite values before casting to int
+	if (!std::isfinite(x) || !std::isfinite(y) || x < 0.0f || y < 0.0f)
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
+	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font_internal::sane_scale(font->scale_y));
+
+	// Size and clamp the glyph bitmap before stb allocates it. The same computation is done internally by stb.
+	s32 ix0, iy0, ix1, iy1;
+	stbtt_GetCodepointBitmapBox(&instance->info, code, scale, scale, &ix0, &iy0, &ix1, &iy1);
+
+	const s64 glyph_w = ix1 - ix0;
+	const s64 glyph_h = iy1 - iy0;
+
+	if (glyph_w <= 0 || glyph_h <= 0 || glyph_w * glyph_h > font_internal::MAX_GLYPH_PIXELS)
+	{
+		return CELL_OK;
+	}
+
 	// Render the character
 	s32 width, height, xoff, yoff;
-	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font->scale_y);
 	unsigned char* box = stbtt_GetCodepointBitmap(&instance->info, scale, scale, code, &width, &height, &xoff, &yoff);
 
 	if (!box)
@@ -852,20 +987,27 @@ error_code cellFontRenderCharGlyphImage(vm::ptr<CellFont> font, u32 code, vm::pt
 	stbtt_GetFontVMetrics(&instance->info, &ascent, &descent, &lineGap);
 	const s32 baseLineY = static_cast<int>(ascent * scale); // ???
 
-	// Move the rendered character to the surface
-	unsigned char* buffer = vm::_ptr<unsigned char>(surface->buffer.addr());
-	for (u32 ypos = 0; ypos < static_cast<u32>(height); ypos++)
-	{
-		if (static_cast<u32>(y) + ypos + yoff + baseLineY >= static_cast<u32>(surface->height))
-			break;
+	// Move the rendered character to the surface. Buffer range is already checked before this point.
+	unsigned char* buffer = vm::_ptr<unsigned char>(surf_addr);
+	const u64 base_x = static_cast<u64>(x);
+	const u64 base_y = static_cast<u64>(y);
 
-		for (u32 xpos = 0; xpos < static_cast<u32>(width); xpos++)
+	for (s32 ypos = 0; ypos < height; ypos++)
+	{
+		const u64 row = base_y + ypos + yoff + baseLineY;
+
+		if (row >= static_cast<u64>(surf_height))
+			continue;
+
+		for (s32 xpos = 0; xpos < width; xpos++)
 		{
-			if (static_cast<u32>(x) + xpos >= static_cast<u32>(surface->width))
+			const u64 col = base_x + xpos;
+
+			if (col >= static_cast<u64>(surf_width))
 				break;
 
 			// TODO: There are some oddities in the position of the character in the final buffer
-			buffer[(static_cast<s32>(y) + ypos + yoff + baseLineY) * surface->width + static_cast<s32>(x) + xpos] = box[ypos * width + xpos];
+			buffer[row * surf_width + col] = box[ypos * width + xpos];
 		}
 	}
 	stbtt_FreeBitmap(box, nullptr);
@@ -1027,7 +1169,7 @@ error_code cellFontGetCharGlyphMetrics(vm::ptr<CellFont> font, u32 code, vm::ptr
 
 	s32 x0, y0, x1, y1;
 	s32 advanceWidth, leftSideBearing;
-	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font->scale_y);
+	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font_internal::sane_scale(font->scale_y));
 	stbtt_GetCodepointBox(&instance->info, code, &x0, &y0, &x1, &y1);
 	stbtt_GetCodepointHMetrics(&instance->info, code, &advanceWidth, &leftSideBearing);
 

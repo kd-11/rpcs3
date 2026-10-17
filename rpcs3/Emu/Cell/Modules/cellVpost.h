@@ -2,7 +2,6 @@
 
 #include "Utilities/mutex.h"
 
-#include <optional>
 #include <vector>
 
 #ifdef _MSC_VER
@@ -353,10 +352,28 @@ namespace vpost_internal
 		u32 out_max_height;
 	};
 
+	// Extents of the input and output pictures. A default constructed layout is invalid.
 	struct picture_layout
 	{
-		u32 in_size;  // YUV420 planar input: the Y plane followed by the quarter-size U and V planes
-		u32 out_size; // RGBA output
+		u32 in_size = 0;  // YUV420 planar input: the Y plane followed by the quarter-size U and V planes
+		u32 out_size = 0; // RGBA output
+
+		picture_layout() = default;
+
+		picture_layout(u32 in_size, u32 out_size)
+			: in_size(in_size)
+			, out_size(out_size)
+			, m_invalid(false)
+		{
+		}
+
+		explicit operator bool() const
+		{
+			return !m_invalid;
+		}
+
+	private:
+		bool m_invalid = true;
 	};
 
 	constexpr bool is_valid_max_size(u32 width, u32 height)
@@ -364,31 +381,8 @@ namespace vpost_internal
 		return width && height && width <= MAX_PICTURE_DIMENSION && height <= MAX_PICTURE_DIMENSION;
 	}
 
-	// Returns the extents of the input and output pictures, or nothing if the sizes don't fit the limits
-	constexpr std::optional<picture_layout> get_picture_layout(const picture_limits& limits, u32 in_width, u32 in_height, u32 out_width, u32 out_height)
-	{
-		if (!is_valid_max_size(in_width, in_height) || !is_valid_max_size(out_width, out_height))
-		{
-			return std::nullopt;
-		}
-
-		if (in_width > limits.in_max_width || in_height > limits.in_max_height || out_width > limits.out_max_width || out_height > limits.out_max_height)
-		{
-			return std::nullopt;
-		}
-
-		// The chroma planes are subsampled by 2 in both directions
-		if (in_width % 2 || in_height % 2)
-		{
-			return std::nullopt;
-		}
-
-		// Both fit in 32 bits because of the dimension cap
-		const u64 in_size = u64{in_width} * in_height * 3 / 2;
-		const u64 out_size = u64{out_width} * out_height * 4;
-
-		return picture_layout{static_cast<u32>(in_size), static_cast<u32>(out_size)};
-	}
+	// Returns the extents of the input and output pictures, or an invalid layout if the sizes don't fit the limits
+	picture_layout get_picture_layout(const picture_limits& limits, u32 in_width, u32 in_height, u32 out_width, u32 out_height);
 }
 
 class VpostInstance

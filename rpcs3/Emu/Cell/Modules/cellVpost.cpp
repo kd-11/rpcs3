@@ -24,6 +24,75 @@ extern "C"
 
 LOG_CHANNEL(cellVpost);
 
+namespace vpost_internal
+{
+	error_code open_instance(vm::cptr<CellVpostCfgParam> cfgParam, vm::ptr<u32> handle)
+	{
+		if (!cfgParam)
+		{
+			return CELL_VPOST_ERROR_O_ARG_CFG_NULL;
+		}
+
+		if (!handle)
+		{
+			return CELL_VPOST_ERROR_O_ARG_HDL_NULL;
+		}
+
+		const CellVpostCfgParam cfg = *cfgParam;
+
+		if (!is_valid_max_size(cfg.inMaxWidth, cfg.inMaxHeight) || !is_valid_max_size(cfg.outMaxWidth, cfg.outMaxHeight) ||
+			cfg.inDepth != CELL_VPOST_PIC_DEPTH_8 || cfg.outDepth != CELL_VPOST_PIC_DEPTH_8 || cfg.inPicFmt != CELL_VPOST_PIC_FMT_IN_YUV420_PLANAR ||
+			(cfg.outPicFmt != CELL_VPOST_PIC_FMT_OUT_RGBA_ILV && cfg.outPicFmt != CELL_VPOST_PIC_FMT_OUT_YUV420_PLANAR))
+		{
+			return { CELL_VPOST_ERROR_O_ARG_CFG_INVALID, "in=%dx%d (depth=%d, fmt=%d), out=%dx%d (depth=%d, fmt=%d)",
+				cfg.inMaxWidth, cfg.inMaxHeight, cfg.inDepth, cfg.inPicFmt, cfg.outMaxWidth, cfg.outMaxHeight, cfg.outDepth, cfg.outPicFmt };
+		}
+
+		if (cfg.outPicFmt != CELL_VPOST_PIC_FMT_OUT_RGBA_ILV)
+		{
+			cellVpost.todo("YUV420 output is not implemented, RGBA is written instead");
+		}
+
+		const u32 id = idm::make<VpostInstance>(cfg.outPicFmt == CELL_VPOST_PIC_FMT_OUT_RGBA_ILV,
+			picture_limits{cfg.inMaxWidth, cfg.inMaxHeight, cfg.outMaxWidth, cfg.outMaxHeight});
+
+		if (!id)
+		{
+			return CELL_VPOST_ERROR_O_FATAL_CREATEMON_FAIL;
+		}
+
+		*handle = id;
+		return CELL_OK;
+	}
+
+	picture_layout get_picture_layout(const picture_limits& limits, u32 in_width, u32 in_height, u32 out_width, u32 out_height)
+	{
+		if (!is_valid_max_size(in_width, in_height) || !is_valid_max_size(out_width, out_height))
+		{
+			return {};
+		}
+
+		if (in_width > limits.in_max_width || in_height > limits.in_max_height || out_width > limits.out_max_width || out_height > limits.out_max_height)
+		{
+			return {};
+		}
+
+		// The chroma planes are subsampled by 2 in both directions
+		if (in_width % 2 || in_height % 2)
+		{
+			return {};
+		}
+
+		// Both fit in 32 bits because of the dimension cap
+		const u64 in_size = u64{in_width} * in_height * 3 / 2;
+		const u64 out_size = u64{out_width} * out_height * 4;
+
+		return picture_layout(static_cast<u32>(in_size), static_cast<u32>(out_size));
+	}
+}
+
+using namespace vpost_internal;
+
 template<>
 void fmt_class_string<CellVpostError>::format(std::string& out, u64 arg)
 {
@@ -169,50 +238,6 @@ void fmt_class_string<CellVpostError>::format(std::string& out, u64 arg)
 	});
 }
 
-namespace vpost_internal
-{
-	error_code open_instance(vm::cptr<CellVpostCfgParam> cfgParam, vm::ptr<u32> handle)
-	{
-		if (!cfgParam)
-		{
-			return CELL_VPOST_ERROR_O_ARG_CFG_NULL;
-		}
-
-		if (!handle)
-		{
-			return CELL_VPOST_ERROR_O_ARG_HDL_NULL;
-		}
-
-		const CellVpostCfgParam cfg = *cfgParam;
-
-		if (!is_valid_max_size(cfg.inMaxWidth, cfg.inMaxHeight) || !is_valid_max_size(cfg.outMaxWidth, cfg.outMaxHeight) ||
-			cfg.inDepth != CELL_VPOST_PIC_DEPTH_8 || cfg.outDepth != CELL_VPOST_PIC_DEPTH_8 || cfg.inPicFmt != CELL_VPOST_PIC_FMT_IN_YUV420_PLANAR ||
-			(cfg.outPicFmt != CELL_VPOST_PIC_FMT_OUT_RGBA_ILV && cfg.outPicFmt != CELL_VPOST_PIC_FMT_OUT_YUV420_PLANAR))
-		{
-			return { CELL_VPOST_ERROR_O_ARG_CFG_INVALID, "in=%dx%d (depth=%d, fmt=%d), out=%dx%d (depth=%d, fmt=%d)",
-				cfg.inMaxWidth, cfg.inMaxHeight, cfg.inDepth, cfg.inPicFmt, cfg.outMaxWidth, cfg.outMaxHeight, cfg.outDepth, cfg.outPicFmt };
-		}
-
-		if (cfg.outPicFmt != CELL_VPOST_PIC_FMT_OUT_RGBA_ILV)
-		{
-			cellVpost.todo("YUV420 output is not implemented, RGBA is written instead");
-		}
-
-		const u32 id = idm::make<VpostInstance>(cfg.outPicFmt == CELL_VPOST_PIC_FMT_OUT_RGBA_ILV,
-			picture_limits{cfg.inMaxWidth, cfg.inMaxHeight, cfg.outMaxWidth, cfg.outMaxHeight});
-
-		if (!id)
-		{
-			return CELL_VPOST_ERROR_O_FATAL_CREATEMON_FAIL;
-		}
-
-		*handle = id;
-		return CELL_OK;
-	}
-}
-
-using namespace vpost_internal;
-
 error_code cellVpostQueryAttr(vm::cptr<CellVpostCfgParam> cfgParam, vm::ptr<CellVpostAttr> attr)
 {
 	cellVpost.warning("cellVpostQueryAttr(cfgParam=*0x%x, attr=*0x%x)", cfgParam, attr);
@@ -327,14 +352,14 @@ error_code cellVpostExec(u32 handle, vm::cptr<u8> inPicBuff, vm::cptr<CellVpostC
 			vpost->limits.in_max_width, vpost->limits.in_max_height, vpost->limits.out_max_width, vpost->limits.out_max_height };
 	}
 
-	if (!vm::check_addr(inPicBuff.addr(), vm::page_readable, layout->in_size))
+	if (!vm::check_addr(inPicBuff.addr(), vm::page_readable, layout.in_size))
 	{
-		return { CELL_VPOST_ERROR_E_ARG_INPICBUF_INVALID, "inPicBuff=*0x%x, size=0x%x", inPicBuff, layout->in_size };
+		return { CELL_VPOST_ERROR_E_ARG_INPICBUF_INVALID, "inPicBuff=*0x%x, size=0x%x", inPicBuff, layout.in_size };
 	}
 
-	if (!vm::check_addr(outPicBuff.addr(), vm::page_writable, layout->out_size))
+	if (!vm::check_addr(outPicBuff.addr(), vm::page_writable, layout.out_size))
 	{
-		return { CELL_VPOST_ERROR_E_ARG_OUTPICBUF_INVALID, "outPicBuff=*0x%x, size=0x%x", outPicBuff, layout->out_size };
+		return { CELL_VPOST_ERROR_E_ARG_OUTPICBUF_INVALID, "outPicBuff=*0x%x, size=0x%x", outPicBuff, layout.out_size };
 	}
 
 	picInfo->inWidth = w; // copy
@@ -367,11 +392,11 @@ error_code cellVpostExec(u32 handle, vm::cptr<u8> inPicBuff, vm::cptr<CellVpostC
 	constexpr usz padding = 64;
 	const u32 y_size = w * h;
 
-	vpost->in_buf.resize(layout->in_size + padding);
+	vpost->in_buf.resize(layout.in_size + padding);
 	vpost->alpha_buf.resize(y_size + padding);
-	vpost->out_buf.resize(layout->out_size + padding);
+	vpost->out_buf.resize(layout.out_size + padding);
 
-	std::memcpy(vpost->in_buf.data(), vm::_ptr<const u8>(inPicBuff.addr()), layout->in_size);
+	std::memcpy(vpost->in_buf.data(), vm::_ptr<const u8>(inPicBuff.addr()), layout.in_size);
 	std::memset(vpost->alpha_buf.data(), ctrl.outAlpha, y_size);
 
 	vpost->sws = sws_getCachedContext(vpost->sws, w, h, AV_PIX_FMT_YUVA420P, ow, oh, AV_PIX_FMT_RGBA, SWS_BILINEAR, nullptr, nullptr, nullptr);
@@ -392,7 +417,7 @@ error_code cellVpostExec(u32 handle, vm::cptr<u8> inPicBuff, vm::cptr<CellVpostC
 		return { CELL_VPOST_ERROR_E_ARG_CTRL_INVALID, "sws_scale failed (in=%dx%d, out=%dx%d, ret=%d)", w, h, ow, oh, ret };
 	}
 
-	std::memcpy(vm::_ptr<u8>(outPicBuff.addr()), vpost->out_buf.data(), layout->out_size);
+	std::memcpy(vm::_ptr<u8>(outPicBuff.addr()), vpost->out_buf.data(), layout.out_size);
 	return CELL_OK;
 }
 

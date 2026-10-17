@@ -306,6 +306,7 @@ struct CellFontImageTransInfo
 	be_t<u32> surfWidthByte;
 };
 
+// Guest-resident font handle.
 struct CellFont
 {
 	be_t<float> scale_x;
@@ -315,8 +316,7 @@ struct CellFont
 
 	be_t<u32> fontdata_addr;
 	be_t<u32> origin;
-	struct stbtt_fontinfo* stbfont;
-	// hack: don't place anything after pointer
+	be_t<u32> host_id;         // Opaque ID to the host objects.
 };
 
 struct CellFontRendererConfig

@@ -1,12 +1,121 @@
 #include "stdafx.h"
 #include "Emu/VFS.h"
+#include "Emu/IdManager.h"
 #include "Emu/Cell/PPUModule.h"
+#include "Emu/savestate_utils.hpp"
 
 #include <stb_truetype.h>
 
 #include "cellFont.h"
 
 LOG_CHANNEL(cellFont);
+
+namespace font_internal
+{
+	// HLE-exclusive font state.
+	// stb_truetype's stbtt_fontinfo carries native pointers so it must never cross into guest memory.
+	class CellFontInstance
+	{
+	public:
+		static constexpr u32 id_base = 1;
+		static constexpr u32 id_step = 1;
+		static constexpr u32 id_count = 1024;
+		SAVESTATE_INIT_POS(48);
+
+		CellFontInstance(u32 font_addr, u32 fontdata_addr, bool owns_fontdata)
+			: font_addr(font_addr), fontdata_addr(fontdata_addr), owns_fontdata(owns_fontdata)
+		{
+		}
+
+		CellFontInstance(utils::serial& ar);
+		void save(utils::serial& ar);
+
+		// Builds the stbtt_fontinfo from the guest-resident font data. Returns false if stb rejects it.
+		bool init()
+		{
+			info = {};
+			initialized = fontdata_addr && vm::check_addr(fontdata_addr, vm::page_readable) &&
+				stbtt_InitFont(&info, vm::_ptr<unsigned char>(fontdata_addr), 0) != 0;
+			return initialized;
+		}
+
+		const u32 font_addr;       // Address of the guest CellFont object, used to verify ownership
+		const u32 fontdata_addr;   // Address of the font file in guest memory
+		const bool owns_fontdata;  // Whether closing this font should free fontdata_addr (false for instances)
+
+		stbtt_fontinfo info{};     // Host-owned; never exposed to the guest
+		bool initialized = false;
+	};
+
+	CellFontInstance::CellFontInstance(utils::serial& ar)
+		: font_addr(ar.pop<u32>())
+		, fontdata_addr(ar.pop<u32>())
+		, owns_fontdata(ar.pop<bool>())
+	{
+		// The font data lives in guest memory, which is restored with the savestate, so rebuild stb's state
+		init();
+	}
+
+	void CellFontInstance::save(utils::serial& ar)
+	{
+		ar(font_addr, fontdata_addr, owns_fontdata);
+	}
+
+	// Returns the host object of a font handle.
+	static std::pair<u32, stx::shared_ptr<CellFontInstance>> get_font(vm::ptr<CellFont> font)
+	{
+		if (!font || !vm::check_addr(font.addr(), vm::page_readable, sizeof(CellFont)))
+		{
+			return {};
+		}
+
+		const u32 id = font->host_id;
+		if (auto instance = idm::get_unlocked<CellFontInstance>(id); instance && instance->font_addr == font.addr())
+		{
+			return { id, std::move(instance) };
+		}
+
+		// If the guest overwrote the ID, fall back to a lookup by the handle's address.
+		u32 found_id = 0;
+		auto found = idm::select<CellFontInstance>([&](u32 id, CellFontInstance& instance) -> bool
+		{
+			if (instance.font_addr != font.addr())
+			{
+				return false;
+			}
+
+			found_id = id;
+			return true;
+		});
+
+		return { found_id, std::move(found.ptr) };
+	}
+
+	// Creates a host font object for a handle, replacing any previous object bound to the same handle address.
+	static stx::shared_ptr<CellFontInstance> open_font(vm::ptr<CellFont> font, u32 fontdata_addr, bool owns_fontdata)
+	{
+		if (const auto [old_id, old_instance] = get_font(font); old_instance)
+		{
+			idm::remove_verify<CellFontInstance>(old_id, old_instance);
+		}
+
+		const u32 host_id = idm::make<CellFontInstance>(font.addr(), fontdata_addr, owns_fontdata);
+		if (!host_id)
+		{
+			return {};
+		}
+
+		auto instance = idm::get_unlocked<CellFontInstance>(host_id);
+		if (!instance->init())
+		{
+			idm::remove<CellFontInstance>(host_id);
+			return {};
+		}
+
+		font->host_id = host_id;
+		return instance;
+	}
+}
 
 template <>
 void fmt_class_string<CellFontError>::format(std::string& out, u64 arg)
@@ -135,9 +244,7 @@ error_code cellFontOpenFontMemory(vm::ptr<CellFontLibrary> library, u32 fontAddr
 
 	// TODO
 
-	font->stbfont = vm::_ptr<stbtt_fontinfo>(font.addr() + font.size()); // hack: use next bytes of the struct
-
-	if (!stbtt_InitFont(font->stbfont, vm::_ptr<unsigned char>(fontAddr), 0))
+	if (!font_internal::open_font(font, fontAddr, true))
 	{
 		return CELL_FONT_ERROR_FONT_OPEN_FAILED;
 	}
@@ -319,11 +426,22 @@ error_code cellFontOpenFontInstance(vm::ptr<CellFont> openedFont, vm::ptr<CellFo
 
 	// TODO
 
+	const auto src = font_internal::get_font(openedFont).second;
+	if (!src)
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
+	if (!font_internal::open_font(font, src->fontdata_addr, false))
+	{
+		return CELL_FONT_ERROR_FONT_OPEN_FAILED;
+	}
+
 	font->renderer_addr = openedFont->renderer_addr;
 	font->scale_x = openedFont->scale_x;
 	font->scale_y = openedFont->scale_y;
 	font->slant = openedFont->slant;
-	font->stbfont = openedFont->stbfont;
+	font->fontdata_addr = src->fontdata_addr;
 	font->origin = CELL_FONT_OPEN_FONT_INSTANCE;
 
 	return CELL_OK;
@@ -549,9 +667,15 @@ error_code cellFontGetHorizontalLayout(vm::ptr<CellFont> font, vm::ptr<CellFontH
 		return CELL_FONT_ERROR_INVALID_PARAMETER;
 	}
 
+	const auto instance = font_internal::get_font(font).second;
+	if (!instance || !instance->initialized)
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
 	s32 ascent, descent, lineGap;
-	const f32 scale = stbtt_ScaleForPixelHeight(font->stbfont, font->scale_y);
-	stbtt_GetFontVMetrics(font->stbfont, &ascent, &descent, &lineGap);
+	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font->scale_y);
+	stbtt_GetFontVMetrics(&instance->info, &ascent, &descent, &lineGap);
 
 	layout->baseLineY = ascent * scale;
 	layout->lineHeight = (ascent-descent+lineGap) * scale;
@@ -707,10 +831,16 @@ error_code cellFontRenderCharGlyphImage(vm::ptr<CellFont> font, u32 code, vm::pt
 		return CELL_FONT_ERROR_RENDERER_UNBIND;
 	}
 
+	const auto instance = font_internal::get_font(font).second;
+	if (!instance || !instance->initialized)
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
 	// Render the character
 	s32 width, height, xoff, yoff;
-	const f32 scale = stbtt_ScaleForPixelHeight(font->stbfont, font->scale_y);
-	unsigned char* box = stbtt_GetCodepointBitmap(font->stbfont, scale, scale, code, &width, &height, &xoff, &yoff);
+	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font->scale_y);
+	unsigned char* box = stbtt_GetCodepointBitmap(&instance->info, scale, scale, code, &width, &height, &xoff, &yoff);
 
 	if (!box)
 	{
@@ -719,7 +849,7 @@ error_code cellFontRenderCharGlyphImage(vm::ptr<CellFont> font, u32 code, vm::pt
 
 	// Get the baseLineY value
 	s32 ascent, descent, lineGap;
-	stbtt_GetFontVMetrics(font->stbfont, &ascent, &descent, &lineGap);
+	stbtt_GetFontVMetrics(&instance->info, &ascent, &descent, &lineGap);
 	const s32 baseLineY = static_cast<int>(ascent * scale); // ???
 
 	// Move the rendered character to the surface
@@ -855,11 +985,16 @@ error_code cellFontCloseFont(vm::ptr<CellFont> font)
 		return CELL_FONT_ERROR_INVALID_PARAMETER;
 	}
 
-	if (font->origin == CELL_FONT_OPEN_FONTSET ||
-		font->origin == CELL_FONT_OPEN_FONT_FILE ||
-		font->origin == CELL_FONT_OPEN_MEMORY)
+	const auto [id, instance] = font_internal::get_font(font);
+	if (instance)
 	{
-		vm::dealloc(font->fontdata_addr, vm::main);
+		// Use the host object's record of the data address, not the guest-writable handle fields
+		if (instance->owns_fontdata && instance->fontdata_addr)
+		{
+			vm::dealloc(instance->fontdata_addr, vm::main);
+		}
+
+		idm::remove_verify<font_internal::CellFontInstance>(id, instance);
 	}
 
 	return CELL_OK;
@@ -884,11 +1019,17 @@ error_code cellFontGetCharGlyphMetrics(vm::ptr<CellFont> font, u32 code, vm::ptr
 		return CELL_FONT_ERROR_NO_SUPPORT_CODE;
 	}
 
+	const auto instance = font_internal::get_font(font).second;
+	if (!instance || !instance->initialized)
+	{
+		return CELL_FONT_ERROR_INVALID_PARAMETER;
+	}
+
 	s32 x0, y0, x1, y1;
 	s32 advanceWidth, leftSideBearing;
-	const f32 scale = stbtt_ScaleForPixelHeight(font->stbfont, font->scale_y);
-	stbtt_GetCodepointBox(font->stbfont, code, &x0, &y0, &x1, &y1);
-	stbtt_GetCodepointHMetrics(font->stbfont, code, &advanceWidth, &leftSideBearing);
+	const f32 scale = stbtt_ScaleForPixelHeight(&instance->info, font->scale_y);
+	stbtt_GetCodepointBox(&instance->info, code, &x0, &y0, &x1, &y1);
+	stbtt_GetCodepointHMetrics(&instance->info, code, &advanceWidth, &leftSideBearing);
 
 	// TODO: Add the rest of the information
 	metrics->width = (x1-x0) * scale;

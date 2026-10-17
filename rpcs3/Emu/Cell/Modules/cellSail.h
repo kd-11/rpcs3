@@ -885,7 +885,7 @@ struct CellSailRendererVideoFuncs
 struct CellSailRendererVideoAttribute
 {
 	be_t<u32> thisSize;
-	CellSailVideoFormat *pPreferredFormat;
+	CellSailVideoFormat pPreferredFormat;
 };
 
 struct CellSailRendererVideo

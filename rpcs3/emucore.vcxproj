@@ -959,6 +959,7 @@
     <ClInclude Include="Emu\Cell\Modules\cellGifDec.h" />
     <ClInclude Include="Emu\Cell\Modules\cellImeJp.h" />
     <ClInclude Include="Emu\Cell\Modules\cellJpgDec.h" />
+    <ClInclude Include="Emu\Cell\Modules\img_dec_common.h" />
     <ClInclude Include="Emu\Cell\Modules\cellKb.h" />
     <ClInclude Include="Emu\Cell\Modules\cellL10n.h" />
     <ClInclude Include="Emu\Cell\Modules\cellMic.h" />

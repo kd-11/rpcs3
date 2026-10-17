@@ -6,7 +6,6 @@
 // STB_IMAGE_IMPLEMENTATION is already defined in stb_image.cpp
 #include <stb_image.h>
 
-#include "Emu/Cell/lv2/sys_fs.h"
 #include "cellJpgDec.h"
 
 LOG_CHANNEL(cellJpgDec);
@@ -51,38 +50,92 @@ error_code cellJpgDecDestroy(u32 mainHandle)
 	return CELL_OK;
 }
 
+namespace jpg_dec_internal
+{
+	jpg_stream::jpg_stream(utils::serial& ar)
+		: image_stream(ar)
+	{
+		img_dec_internal::serialize_bytes(ar, info);
+		img_dec_internal::serialize_bytes(ar, out_param);
+
+		if (!can_read())
+		{
+			cellJpgDec.error("The file of an open JPG stream could not be reopened after loading the savestate (file=%s). Decoding it will fail", file_name);
+		}
+	}
+
+	void jpg_stream::save(utils::serial& ar)
+	{
+		image_stream::save(ar);
+		img_dec_internal::serialize_bytes(ar, info);
+		img_dec_internal::serialize_bytes(ar, out_param);
+	}
+}
+
+using namespace jpg_dec_internal;
+
 error_code cellJpgDecOpen(u32 mainHandle, vm::ptr<u32> subHandle, vm::ptr<CellJpgDecSrc> src, vm::ptr<CellJpgDecOpnInfo> openInfo)
 {
 	cellJpgDec.warning("cellJpgDecOpen(mainHandle=0x%x, subHandle=*0x%x, src=*0x%x, openInfo=*0x%x)", mainHandle, subHandle, src, openInfo);
 
-	CellJpgDecSubHandle current_subHandle;
+	if (!subHandle || !src)
+	{
+		return CELL_JPGDEC_ERROR_ARG;
+	}
 
-	current_subHandle.fd = 0;
-	current_subHandle.src = *src;
+	// Read the source description once
+	const CellJpgDecSrc source = *src;
+	u32 id = 0;
 
-	switch (src->srcSelect)
+	switch (source.srcSelect)
 	{
 	case CELL_JPGDEC_BUFFER:
-		current_subHandle.fileSize = src->streamSize;
-		break;
+	{
+		if (source.streamSize > img_dec_internal::MAX_SOURCE_SIZE)
+		{
+			return { CELL_JPGDEC_ERROR_ARG, "streamSize=0x%x", source.streamSize };
+		}
 
+		id = idm::make<jpg_stream>(source.streamPtr, source.streamSize);
+		break;
+	}
 	case CELL_JPGDEC_FILE:
 	{
-		// Get file descriptor and size
-		const std::string real_path = vfs::get(src->fileName.get_ptr());
-		fs::file file_s(real_path);
-		if (!file_s) return CELL_JPGDEC_ERROR_OPEN_FILE;
+		if (!source.fileName)
+		{
+			return CELL_JPGDEC_ERROR_OPEN_FILE;
+		}
 
-		current_subHandle.fileSize = file_s.size();
-		current_subHandle.fd = idm::make<lv2_fs_object, lv2_file>(src->fileName.get_ptr(), std::move(file_s), 0, 0, real_path);
+		std::string file_name = source.fileName.get_ptr();
+		fs::file file(vfs::get(file_name));
+
+		if (!file)
+		{
+			return CELL_JPGDEC_ERROR_OPEN_FILE;
+		}
+
+		const u64 file_size = file.size();
+
+		if (file_size > img_dec_internal::MAX_SOURCE_SIZE)
+		{
+			return { CELL_JPGDEC_ERROR_ARG, "file=%s, size=0x%llx", file_name, file_size };
+		}
+
+		id = idm::make<jpg_stream>(std::move(file_name), std::move(file), static_cast<u32>(file_size));
 		break;
 	}
-	default: break; // TODO
+	default:
+	{
+		return { CELL_JPGDEC_ERROR_ARG, "srcSelect=%d", source.srcSelect };
+	}
 	}
 
-	// From now, every u32 subHandle argument is a pointer to a CellJpgDecSubHandle struct.
-	*subHandle = idm::make<CellJpgDecSubHandle>(current_subHandle);
+	if (!id)
+	{
+		return CELL_JPGDEC_ERROR_FATAL;
+	}
 
+	*subHandle = id;
 	return CELL_OK;
 }
 
@@ -94,17 +147,13 @@ error_code cellJpgDecExtOpen()
 
 error_code cellJpgDecClose(u32 mainHandle, u32 subHandle)
 {
-	cellJpgDec.warning("cellJpgDecOpen(mainHandle=0x%x, subHandle=0x%x)", mainHandle, subHandle);
+	cellJpgDec.warning("cellJpgDecClose(mainHandle=0x%x, subHandle=0x%x)", mainHandle, subHandle);
 
-	const auto subHandle_data = idm::get_unlocked<CellJpgDecSubHandle>(subHandle);
-
-	if (!subHandle_data)
+	// The host object owns the file. An operation still running on another thread keeps it alive until it returns.
+	if (!idm::remove<jpg_stream>(subHandle))
 	{
 		return CELL_JPGDEC_ERROR_FATAL;
 	}
-
-	idm::remove<lv2_fs_object, lv2_file>(subHandle_data->fd);
-	idm::remove<CellJpgDecSubHandle>(subHandle);
 
 	return CELL_OK;
 }
@@ -113,68 +162,72 @@ error_code cellJpgDecReadHeader(u32 mainHandle, u32 subHandle, vm::ptr<CellJpgDe
 {
 	cellJpgDec.trace("cellJpgDecReadHeader(mainHandle=0x%x, subHandle=0x%x, info=*0x%x)", mainHandle, subHandle, info);
 
-	const auto subHandle_data = idm::get_unlocked<CellJpgDecSubHandle>(subHandle);
+	if (!info)
+	{
+		return CELL_JPGDEC_ERROR_ARG;
+	}
 
-	if (!subHandle_data)
+	const auto stream = idm::get_unlocked<jpg_stream>(subHandle);
+
+	if (!stream)
 	{
 		return CELL_JPGDEC_ERROR_FATAL;
 	}
 
-	const u32 fd = subHandle_data->fd;
-	const u64 fileSize = subHandle_data->fileSize;
-	CellJpgDecInfo& current_info = subHandle_data->info;
+	std::lock_guard lock(stream->mutex);
+
+	const u32 fileSize = stream->stream_size;
+	CellJpgDecInfo& current_info = stream->info;
 
 	// Write the header to buffer
 	std::vector<u8> buffer(fileSize);
 
-	switch (subHandle_data->src.srcSelect)
+	if (!stream->read(buffer.data(), fileSize))
 	{
-	case CELL_JPGDEC_BUFFER:
-		std::memcpy(buffer.data(), vm::base(subHandle_data->src.streamPtr), fileSize);
-		break;
-
-	case CELL_JPGDEC_FILE:
-	{
-		auto file = idm::get_unlocked<lv2_fs_object, lv2_file>(fd);
-		file->file.seek(0);
-		file->file.read(buffer.data(), fileSize);
-		break;
-	}
-	default: break; // TODO
+		return { CELL_JPGDEC_ERROR_HEADER, "The stream is unreadable (size=0x%x)", fileSize };
 	}
 
-	if (read_from_ptr<le_t<u32>>(buffer, 0) != 0xE0FFD8FF || // Error: Not a valid SOI header
-		read_from_ptr<u32>(buffer, 6) != "JFIF"_u32)   // Error: Not a valid JFIF string
+	if (fileSize < 10 ||                                   // Error: Too short for the SOI and APP0 markers
+		read_from_ptr<le_t<u32>>(buffer, 0) != 0xE0FFD8FF || // Error: Not a valid SOI header
+		read_from_ptr<u32>(buffer, 6) != "JFIF"_u32)        // Error: Not a valid JFIF string
 	{
 		return CELL_JPGDEC_ERROR_HEADER;
 	}
 
 	u32 i = 4;
 
-	if (i >= fileSize)
-		return CELL_JPGDEC_ERROR_HEADER;
-
-	u16 block_length = ::at32(buffer, i) * 0xFF + ::at32(buffer, i + 1);
+	u16 block_length = buffer[i] * 0xFF + buffer[i + 1];
 
 	while (true)
 	{
 		i += block_length;                                  // Increase the file index to get to the next block
-		if (i >= fileSize ||                                // Check to protect against segmentation faults
+		if (u64{i} + 1 >= fileSize ||                       // Check to protect against segmentation faults
 			buffer[i] != 0xFF)                              // Check that we are truly at the start of another block
 		{
 			return CELL_JPGDEC_ERROR_HEADER;
 		}
 
-		const u8 next = ::at32(buffer, i + 1);
+		const u8 next = buffer[i + 1];
 		if (next == 0xC0)
 			break;                                          // 0xFFC0 is the "Start of frame" marker which contains the file size
 
 		i += 2;                                             // Skip the block marker
-		block_length = ::at32(buffer, i) * 0xFF + next;     // Go to the next block
+		if (i >= fileSize)
+		{
+			return CELL_JPGDEC_ERROR_HEADER;
+		}
+
+		block_length = buffer[i] * 0xFF + next;             // Go to the next block
 	}
 
-	current_info.imageWidth    = ::at32(buffer, i + 7) * 0x100 + ::at32(buffer, i + 8);
-	current_info.imageHeight   = ::at32(buffer, i + 5) * 0x100 + ::at32(buffer, i + 6);
+	// The start of frame segment holds the height and the width at offsets 5 to 8
+	if (u64{i} + 8 >= fileSize)
+	{
+		return CELL_JPGDEC_ERROR_HEADER;
+	}
+
+	current_info.imageWidth    = buffer[i + 7] * 0x100 + buffer[i + 8];
+	current_info.imageHeight   = buffer[i + 5] * 0x100 + buffer[i + 6];
 	current_info.numComponents = 3; // Unimplemented
 	current_info.colorSpace    = CELL_JPG_RGB;
 
@@ -193,43 +246,44 @@ error_code cellJpgDecDecodeData(u32 mainHandle, u32 subHandle, vm::ptr<u8> data,
 {
 	cellJpgDec.trace("cellJpgDecDecodeData(mainHandle=0x%x, subHandle=0x%x, data=*0x%x, dataCtrlParam=*0x%x, dataOutInfo=*0x%x)", mainHandle, subHandle, data, dataCtrlParam, dataOutInfo);
 
+	if (!dataOutInfo || !dataCtrlParam)
+	{
+		return CELL_JPGDEC_ERROR_ARG;
+	}
+
 	dataOutInfo->status = CELL_JPGDEC_DEC_STATUS_STOP;
 
-	const auto subHandle_data = idm::get_unlocked<CellJpgDecSubHandle>(subHandle);
+	const auto stream = idm::get_unlocked<jpg_stream>(subHandle);
 
-	if (!subHandle_data)
+	if (!stream)
 	{
 		return CELL_JPGDEC_ERROR_FATAL;
 	}
 
-	const u32& fd = subHandle_data->fd;
-	const u64& fileSize = subHandle_data->fileSize;
-	const CellJpgDecOutParam& current_outParam = subHandle_data->outParam;
+	// Read the guest parameter once
+	const u64 bytes_per_line = dataCtrlParam->outputBytesPerLine;
+
+	std::lock_guard lock(stream->mutex);
+
+	const CellJpgDecOutParam& current_outParam = stream->out_param;
+	const u32 color_space = current_outParam.outputColorSpace;
 
 	//Copy the JPG file to a buffer
-	std::unique_ptr<u8[]> jpg(new u8[fileSize]);
+	std::vector<u8> jpg(stream->stream_size);
 
-	switch (subHandle_data->src.srcSelect)
+	if (!stream->read(jpg.data(), stream->stream_size))
 	{
-	case CELL_JPGDEC_BUFFER:
-		std::memcpy(jpg.get(), vm::base(subHandle_data->src.streamPtr), fileSize);
-		break;
+		return { CELL_JPGDEC_ERROR_STREAM_FORMAT, "The stream is unreadable (size=0x%x)", stream->stream_size };
+	}
 
-	case CELL_JPGDEC_FILE:
-	{
-		auto file = idm::get_unlocked<lv2_fs_object, lv2_file>(fd);
-		file->file.seek(0);
-		file->file.read(jpg.get(), fileSize);
-		break;
-	}
-	default: break; // TODO
-	}
+	// RGB is decoded with 3 components, so that its rows are packed
+	const int nComponents = color_space == CELL_JPG_RGB ? 3 : 4;
 
 	//Decode JPG file. (TODO: Is there any faster alternative? Can we do it without external libraries?)
 	int width = 0, height = 0, actual_components = 0;
 	auto image = std::unique_ptr<unsigned char,decltype(&::free)>
 		(
-			stbi_load_from_memory(jpg.get(), ::narrow<int>(fileSize), &width, &height, &actual_components, 4),
+			stbi_load_from_memory(jpg.data(), static_cast<int>(jpg.size()), &width, &height, &actual_components, nComponents),
 			&::free
 		);
 
@@ -237,69 +291,24 @@ error_code cellJpgDecDecodeData(u32 mainHandle, u32 subHandle, vm::ptr<u8> data,
 		return CELL_JPGDEC_ERROR_STREAM_FORMAT;
 
 	const bool flip = current_outParam.outputMode == CELL_JPGDEC_BOTTOM_TO_TOP;
-	const int bytesPerLine = static_cast<int>(dataCtrlParam->outputBytesPerLine);
-	usz image_size = width * height;
+	u64 image_size = u64{static_cast<u32>(width)} * static_cast<u32>(height);
 
-	switch(current_outParam.outputColorSpace)
+	switch (color_space)
 	{
 	case CELL_JPG_RGB:
 	case CELL_JPG_RGBA:
-	{
-		const char nComponents = current_outParam.outputColorSpace == CELL_JPG_RGBA ? 4 : 3;
-		image_size *= nComponents;
-		if (bytesPerLine > width * nComponents || flip) //check if we need padding
-		{
-			const int linesize = std::min(bytesPerLine, width * nComponents);
-			for (int i = 0; i < height; i++)
-			{
-				const int dstOffset = i * bytesPerLine;
-				const int srcOffset = width * nComponents * (flip ? height - i - 1 : i);
-				memcpy(&data[dstOffset], &image.get()[srcOffset], linesize);
-			}
-		}
-		else
-		{
-			memcpy(data.get_ptr(), image.get(), image_size);
-		}
-		break;
-	}
 	case CELL_JPG_ARGB:
 	{
-		constexpr int nComponents = 4;
 		image_size *= nComponents;
-		if (bytesPerLine > width * nComponents || flip) //check if we need padding
+
+		const auto layout = img_dec_internal::get_output_layout(bytes_per_line, static_cast<u32>(width), static_cast<u32>(height), static_cast<u32>(nComponents));
+
+		if (!layout || !vm::check_addr(data.addr(), vm::page_writable, layout->size))
 		{
-			//TODO: Find out if we can't do padding without an extra copy
-			const int linesize = std::min(bytesPerLine, width * nComponents);
-			std::vector<char> output(image_size);
-			for (int i = 0; i < height; i++)
-			{
-				const int dstOffset = i * bytesPerLine;
-				const int srcOffset = width * nComponents * (flip ? height - i - 1 : i);
-				for (int j = 0; j < linesize; j += nComponents)
-				{
-					output[j + 0] = image.get()[srcOffset + j + 3];
-					output[j + 1] = image.get()[srcOffset + j + 0];
-					output[j + 2] = image.get()[srcOffset + j + 1];
-					output[j + 3] = image.get()[srcOffset + j + 2];
-				}
-				std::memcpy(&data[dstOffset], output.data(), linesize);
-			}
+			return { CELL_JPGDEC_ERROR_ARG, "The output doesn't fit (data=*0x%x, outputBytesPerLine=0x%llx, width=%d, height=%d)", data, bytes_per_line, width, height };
 		}
-		else
-		{
-			std::vector<u32> img(image_size);
-			const u32* source_current = reinterpret_cast<const u32*>(image.get());
-			u32* dest_current = img.data();
-			for (u32 i = 0; i < image_size / nComponents; i++)
-			{
-				const u32 val = *source_current;
-				*dest_current = (val >> 24) | (val << 8); // set alpha (A8) as leftmost byte
-				source_current++;
-				dest_current++;
-			}
-			std::memcpy(data.get_ptr(), img.data(), image_size);
-		}
+
+		img_dec_internal::write_rows(vm::_ptr<u8>(data.addr()), *layout, image.get(), static_cast<u32>(height), color_space == CELL_JPG_ARGB, flip);
 		break;
 	}
 	case CELL_JPG_GRAYSCALE:
@@ -307,7 +316,7 @@ error_code cellJpgDecDecodeData(u32 mainHandle, u32 subHandle, vm::ptr<u8> data,
 	case CELL_JPG_UPSAMPLE_ONLY:
 	case CELL_JPG_GRAYSCALE_TO_ALPHA_RGBA:
 	case CELL_JPG_GRAYSCALE_TO_ALPHA_ARGB:
-		cellJpgDec.error("cellJpgDecDecodeData: Unsupported color space (%d)", current_outParam.outputColorSpace);
+		cellJpgDec.error("cellJpgDecDecodeData: Unsupported color space (%d)", color_space);
 		break;
 
 	default:
@@ -316,8 +325,8 @@ error_code cellJpgDecDecodeData(u32 mainHandle, u32 subHandle, vm::ptr<u8> data,
 
 	dataOutInfo->status = CELL_JPGDEC_DEC_STATUS_FINISH;
 
-	if (dataCtrlParam->outputBytesPerLine)
-		dataOutInfo->outputLines = static_cast<u32>(image_size / dataCtrlParam->outputBytesPerLine);
+	if (bytes_per_line)
+		dataOutInfo->outputLines = static_cast<u32>(image_size / bytes_per_line);
 
 	return CELL_OK;
 }
@@ -332,20 +341,30 @@ error_code cellJpgDecSetParameter(u32 mainHandle, u32 subHandle, vm::cptr<CellJp
 {
 	cellJpgDec.trace("cellJpgDecSetParameter(mainHandle=0x%x, subHandle=0x%x, inParam=*0x%x, outParam=*0x%x)", mainHandle, subHandle, inParam, outParam);
 
-	const auto subHandle_data = idm::get_unlocked<CellJpgDecSubHandle>(subHandle);
+	if (!inParam || !outParam)
+	{
+		return CELL_JPGDEC_ERROR_ARG;
+	}
 
-	if (!subHandle_data)
+	const auto stream = idm::get_unlocked<jpg_stream>(subHandle);
+
+	if (!stream)
 	{
 		return CELL_JPGDEC_ERROR_FATAL;
 	}
 
-	CellJpgDecInfo& current_info = subHandle_data->info;
-	CellJpgDecOutParam& current_outParam = subHandle_data->outParam;
+	// Read the guest parameters once
+	const CellJpgDecInParam in = *inParam;
+
+	std::lock_guard lock(stream->mutex);
+
+	const CellJpgDecInfo& current_info = stream->info;
+	CellJpgDecOutParam current_outParam = stream->out_param;
 
 	current_outParam.outputWidthByte  = (current_info.imageWidth * current_info.numComponents);
 	current_outParam.outputWidth      = current_info.imageWidth;
 	current_outParam.outputHeight     = current_info.imageHeight;
-	current_outParam.outputColorSpace = inParam->outputColorSpace;
+	current_outParam.outputColorSpace = in.outputColorSpace;
 
 	switch (current_outParam.outputColorSpace)
 	{
@@ -364,10 +383,11 @@ error_code cellJpgDecSetParameter(u32 mainHandle, u32 subHandle, vm::cptr<CellJp
 	default: return CELL_JPGDEC_ERROR_ARG; // Not supported color space
 	}
 
-	current_outParam.outputMode     = inParam->outputMode;
-	current_outParam.downScale      = inParam->downScale;
+	current_outParam.outputMode     = in.outputMode;
+	current_outParam.downScale      = in.downScale;
 	current_outParam.useMemorySpace = 0; // Unimplemented
 
+	stream->out_param = current_outParam;
 	*outParam = current_outParam;
 
 	return CELL_OK;

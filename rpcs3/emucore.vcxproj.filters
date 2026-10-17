@@ -1887,6 +1887,9 @@
     <ClInclude Include="Emu\Cell\Modules\cellJpgDec.h">
       <Filter>Emu\Cell\Modules</Filter>
     </ClInclude>
+    <ClInclude Include="Emu\Cell\Modules\img_dec_common.h">
+      <Filter>Emu\Cell\Modules</Filter>
+    </ClInclude>
     <ClInclude Include="Emu\Cell\Modules\cellKb.h">
       <Filter>Emu\Cell\Modules</Filter>
     </ClInclude>

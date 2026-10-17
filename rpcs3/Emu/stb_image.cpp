@@ -2,6 +2,9 @@
 // Defines STB_IMAGE_IMPLEMENTATION *once* for stb_image.h includes (Should this be placed somewhere else?)
 #define STB_IMAGE_IMPLEMENTATION
 
+// Cap the decoded image size. The HLE GIF/JPG decoders feed it guest data, and 16384 still covers the 8K images the overlays may load.
+#define STBI_MAX_DIMENSIONS 16384
+
 // Sneak in truetype as well.
 #define STB_TRUETYPE_IMPLEMENTATION
 

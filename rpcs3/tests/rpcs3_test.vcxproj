@@ -118,6 +118,7 @@
     <ClCompile Include="test_pair.cpp" />
     <ClCompile Include="test_types_util.cpp" />
     <ClCompile Include="test_vpost.cpp" />
+    <ClCompile Include="test_img_dec.cpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" Condition="'$(GTestInstalled)' == 'true'">

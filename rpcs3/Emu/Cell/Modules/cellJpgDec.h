@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Emu/Memory/vm_ptr.h"
+#include "img_dec_common.h"
+
 //Return Codes
 enum CellJpgDecError : u32
 {
@@ -104,17 +107,23 @@ struct CellJpgDecDataOutInfo
 	be_t<u32> status;
 };
 
-// Custom structs
-struct CellJpgDecSubHandle
+namespace jpg_dec_internal
 {
-	static const u32 id_base = 1;
-	static const u32 id_step = 1;
-	static const u32 id_count = 1023;
-	SAVESTATE_INIT_POS(35);
+	// HLE exclusive, state of a sub handle. The guest only gets the ID of this host object.
+	class jpg_stream : public img_dec_internal::image_stream
+	{
+	public:
+		static const u32 id_base = 1;
+		static const u32 id_step = 1;
+		static const u32 id_count = 1023;
+		SAVESTATE_INIT_POS(35);
 
-	u32 fd;
-	u64 fileSize;
-	CellJpgDecInfo info;
-	CellJpgDecOutParam outParam;
-	CellJpgDecSrc src;
-};
+		CellJpgDecInfo info{};
+		CellJpgDecOutParam out_param{};
+
+		using image_stream::image_stream;
+
+		explicit jpg_stream(utils::serial& ar);
+		void save(utils::serial& ar);
+	};
+}

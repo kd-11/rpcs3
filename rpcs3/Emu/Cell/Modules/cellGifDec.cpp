@@ -6,7 +6,6 @@
 // STB_IMAGE_IMPLEMENTATION is already defined in stb_image.cpp
 #include <stb_image.h>
 
-#include "Emu/Cell/lv2/sys_fs.h"
 #include "cellGifDec.h"
 
 LOG_CHANNEL(cellGifDec);
@@ -97,9 +96,115 @@ error_code cellGifDecExtCreate(vm::ptr<GifDecoder> mainHandle, vm::cptr<CellGifD
 	return CELL_OK;
 }
 
-error_code cellGifDecOpen(vm::ptr<GifDecoder> mainHandle, vm::pptr<GifStream> subHandle, vm::cptr<CellGifDecSrc> src, vm::ptr<CellGifDecOpnInfo> openInfo)
+namespace gif_dec_internal
 {
-	cellGifDec.warning("cellGifDecOpen(mainHandle=*0x%x, subHandle=**0x%x, src=*0x%x, openInfo=*0x%x)", mainHandle, subHandle, src, openInfo);
+	gif_stream::gif_stream(utils::serial& ar)
+		: image_stream(ar)
+	{
+		img_dec_internal::serialize_bytes(ar, info);
+		img_dec_internal::serialize_bytes(ar, out_param);
+
+		if (!can_read())
+		{
+			cellGifDec.error("The file of an open GIF stream could not be reopened after loading the savestate (file=%s). Decoding it will fail", file_name);
+		}
+	}
+
+	void gif_stream::save(utils::serial& ar)
+	{
+		image_stream::save(ar);
+		img_dec_internal::serialize_bytes(ar, info);
+		img_dec_internal::serialize_bytes(ar, out_param);
+	}
+
+	static error_code open_stream(vm::ptr<u32> subHandle, vm::cptr<CellGifDecSrc> src)
+	{
+		// Read the source description once
+		const CellGifDecSrc source = *src;
+		u32 id = 0;
+
+		switch (source.srcSelect)
+		{
+		case CELL_GIFDEC_BUFFER:
+		{
+			if (!source.streamPtr || !source.streamSize)
+			{
+				return CELL_GIFDEC_ERROR_ARG;
+			}
+
+			if (source.streamSize > img_dec_internal::MAX_SOURCE_SIZE)
+			{
+				return { CELL_GIFDEC_ERROR_ARG, "streamSize=0x%x", source.streamSize };
+			}
+
+			id = idm::make<gif_stream>(source.streamPtr.addr(), source.streamSize);
+			break;
+		}
+		case CELL_GIFDEC_FILE:
+		{
+			if (!source.fileName)
+			{
+				return CELL_GIFDEC_ERROR_OPEN_FILE;
+			}
+
+			std::string file_name = source.fileName.get_ptr();
+			fs::file file(vfs::get(file_name));
+
+			if (!file)
+			{
+				return CELL_GIFDEC_ERROR_OPEN_FILE;
+			}
+
+			if (source.fileOffset < 0)
+			{
+				return CELL_GIFDEC_ERROR_ARG;
+			}
+
+			const u64 file_size = file.size();
+
+			if (file_size > img_dec_internal::MAX_SOURCE_SIZE)
+			{
+				return { CELL_GIFDEC_ERROR_ARG, "file=%s, size=0x%llx", file_name, file_size };
+			}
+
+			id = idm::make<gif_stream>(std::move(file_name), std::move(file), static_cast<u32>(file_size));
+			break;
+		}
+		default:
+		{
+			return CELL_GIFDEC_ERROR_ARG;
+		}
+		}
+
+		if (!id)
+		{
+			return CELL_GIFDEC_ERROR_FATAL;
+		}
+
+		*subHandle = id;
+		return CELL_OK;
+	}
+
+	static void set_parameter(gif_stream& stream, s32 color_space)
+	{
+		CellGifDecInfo& current_info = stream.info;
+		CellGifDecOutParam& current_outParam = stream.out_param;
+
+		current_outParam.outputWidthByte  = (current_info.SWidth * current_info.SColorResolution * 3) / 8;
+		current_outParam.outputWidth      = current_info.SWidth;
+		current_outParam.outputHeight     = current_info.SHeight;
+		current_outParam.outputColorSpace = color_space;
+		current_outParam.outputComponents = 4;
+		current_outParam.outputBitDepth = 0;   // Unimplemented
+		current_outParam.useMemorySpace = 0;   // Unimplemented
+	}
+}
+
+using namespace gif_dec_internal;
+
+error_code cellGifDecOpen(vm::ptr<GifDecoder> mainHandle, vm::ptr<u32> subHandle, vm::cptr<CellGifDecSrc> src, vm::ptr<CellGifDecOpnInfo> openInfo)
+{
+	cellGifDec.warning("cellGifDecOpen(mainHandle=*0x%x, subHandle=*0x%x, src=*0x%x, openInfo=*0x%x)", mainHandle, subHandle, src, openInfo);
 
 	if (!mainHandle || !subHandle)
 	{
@@ -116,60 +221,10 @@ error_code cellGifDecOpen(vm::ptr<GifDecoder> mainHandle, vm::pptr<GifStream> su
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	GifStream current_subHandle{};
-	current_subHandle.fd = 0;
-	current_subHandle.src = *src;
-
-	switch (src->srcSelect)
-	{
-	case CELL_GIFDEC_BUFFER:
-	{
-		if (!src->streamPtr || !src->streamSize)
-		{
-			return CELL_GIFDEC_ERROR_ARG;
-		}
-
-		current_subHandle.fileSize = src->streamSize;
-		break;
-	}
-	case CELL_GIFDEC_FILE:
-	{
-		if (!src->fileName)
-		{
-			return CELL_GIFDEC_ERROR_OPEN_FILE;
-		}
-
-		// Get file descriptor and size
-		const std::string real_path = vfs::get(src->fileName.get_ptr());
-		fs::file file_s(real_path);
-		if (!file_s)
-		{
-			return CELL_GIFDEC_ERROR_OPEN_FILE;
-		}
-
-		if (src->fileOffset < 0)
-		{
-			return CELL_GIFDEC_ERROR_ARG;
-		}
-
-		current_subHandle.fileSize = file_s.size();
-		current_subHandle.fd = idm::make<lv2_fs_object, lv2_file>(src->fileName.get_ptr(), std::move(file_s), 0, 0, real_path);
-		break;
-	}
-	default:
-	{
-		return CELL_GIFDEC_ERROR_ARG;
-	}
-	}
-
-	subHandle->set(vm::alloc(sizeof(GifStream), vm::main));
-
-	**subHandle = current_subHandle;
-
-	return CELL_OK;
+	return open_stream(subHandle, src);
 }
 
-error_code cellGifDecExtOpen(vm::ptr<GifDecoder> mainHandle, vm::pptr<GifStream> subHandle, vm::cptr<CellGifDecSrc> src, vm::ptr<CellGifDecOpnInfo> openInfo, vm::cptr<CellGifDecCbCtrlStrm> cbCtrlStrm)
+error_code cellGifDecExtOpen(vm::ptr<GifDecoder> mainHandle, vm::ptr<u32> subHandle, vm::cptr<CellGifDecSrc> src, vm::ptr<CellGifDecOpnInfo> openInfo, vm::cptr<CellGifDecCbCtrlStrm> cbCtrlStrm)
 {
 	cellGifDec.todo("cellGifDecExtOpen(mainHandle=*0x%x, subHandle=*0x%x, src=*0x%x, openInfo=*0x%x, cbCtrlStrm=*0x%x)", mainHandle, subHandle, src, openInfo, cbCtrlStrm);
 
@@ -188,58 +243,13 @@ error_code cellGifDecExtOpen(vm::ptr<GifDecoder> mainHandle, vm::pptr<GifStream>
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	GifStream current_subHandle{};
-	current_subHandle.fd = 0;
-	current_subHandle.src = *src;
-
-	switch (src->srcSelect)
-	{
-	case CELL_GIFDEC_BUFFER:
-	{
-		if (!src->streamPtr || !src->streamSize)
-		{
-			return CELL_GIFDEC_ERROR_ARG;
-		}
-
-		current_subHandle.fileSize = src->streamSize;
-		break;
-	}
-	case CELL_GIFDEC_FILE:
-	{
-		if (!src->fileName)
-		{
-			return CELL_GIFDEC_ERROR_OPEN_FILE;
-		}
-
-		// Get file descriptor and size
-		const std::string real_path = vfs::get(src->fileName.get_ptr());
-		fs::file file_s(real_path);
-		if (!file_s)
-		{
-			return CELL_GIFDEC_ERROR_OPEN_FILE;
-		}
-
-		if (src->fileOffset < 0)
-		{
-			return CELL_GIFDEC_ERROR_ARG;
-		}
-
-		current_subHandle.fileSize = file_s.size();
-		current_subHandle.fd = idm::make<lv2_fs_object, lv2_file>(src->fileName.get_ptr(), std::move(file_s), 0, 0, real_path);
-		break;
-	}
-	default:
-	{
-		return CELL_GIFDEC_ERROR_ARG;
-	}
-	}
-
-	return CELL_OK;
+	// TODO: cbCtrlStrm
+	return open_stream(subHandle, src);
 }
 
-error_code cellGifDecReadHeader(vm::ptr<GifDecoder> mainHandle, vm::ptr<GifStream> subHandle, vm::ptr<CellGifDecInfo> info)
+error_code cellGifDecReadHeader(vm::ptr<GifDecoder> mainHandle, u32 subHandle, vm::ptr<CellGifDecInfo> info)
 {
-	cellGifDec.warning("cellGifDecReadHeader(mainHandle=*0x%x, subHandle=*0x%x, info=*0x%x)", mainHandle, subHandle, info);
+	cellGifDec.warning("cellGifDecReadHeader(mainHandle=*0x%x, subHandle=0x%x, info=*0x%x)", mainHandle, subHandle, info);
 
 	if (!mainHandle)
 	{
@@ -256,37 +266,26 @@ error_code cellGifDecReadHeader(vm::ptr<GifDecoder> mainHandle, vm::ptr<GifStrea
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	if (false) // TODO: check sub handle
-	{
-		return CELL_GIFDEC_ERROR_SEQ;
-	}
-
 	if (!info)
 	{
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	const u32 fd = subHandle->fd;
-	CellGifDecInfo& current_info = subHandle->info;
+	const auto stream = idm::get_unlocked<gif_stream>(subHandle);
+
+	if (!stream)
+	{
+		return CELL_GIFDEC_ERROR_ARG;
+	}
+
+	std::lock_guard lock(stream->mutex);
 
 	// Write the header to buffer
 	u8 buffer[13];
 
-	switch (subHandle->src.srcSelect)
+	if (!stream->read(buffer, sizeof(buffer)))
 	{
-	case CELL_GIFDEC_BUFFER:
-	{
-		std::memcpy(buffer, subHandle->src.streamPtr.get_ptr(), sizeof(buffer));
-		break;
-	}
-	case CELL_GIFDEC_FILE:
-	{
-		auto file = idm::get_unlocked<lv2_fs_object, lv2_file>(fd);
-		file->file.seek(0);
-		file->file.read(buffer, sizeof(buffer));
-		break;
-	}
-	default: break; // TODO
+		return { CELL_GIFDEC_ERROR_STREAM_FORMAT, "The stream is shorter than the header or unreadable (size=0x%x)", stream->stream_size };
 	}
 
 	if (read_from_ptr<be_t<u32>>(buffer, 0) != 0x47494638u ||
@@ -294,6 +293,8 @@ error_code cellGifDecReadHeader(vm::ptr<GifDecoder> mainHandle, vm::ptr<GifStrea
 	{
 		return CELL_GIFDEC_ERROR_STREAM_FORMAT; // Surprisingly there is no error code related with headerss
 	}
+
+	CellGifDecInfo& current_info = stream->info;
 
 	const u8 packedField = buffer[10];
 	current_info.SWidth                  = buffer[6] + buffer[7] * 0x100;
@@ -310,9 +311,9 @@ error_code cellGifDecReadHeader(vm::ptr<GifDecoder> mainHandle, vm::ptr<GifStrea
 	return CELL_OK;
 }
 
-error_code cellGifDecExtReadHeader(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifStream> subHandle, vm::ptr<CellGifDecInfo> info, vm::ptr<CellGifDecExtInfo> extInfo)
+error_code cellGifDecExtReadHeader(vm::ptr<GifDecoder> mainHandle, u32 subHandle, vm::ptr<CellGifDecInfo> info, vm::ptr<CellGifDecExtInfo> extInfo)
 {
-	cellGifDec.todo("cellGifDecExtReadHeader(mainHandle=*0x%x, subHandle=*0x%x, info=*0x%x, extInfo=*0x%x)", mainHandle, subHandle, info, extInfo);
+	cellGifDec.todo("cellGifDecExtReadHeader(mainHandle=*0x%x, subHandle=0x%x, info=*0x%x, extInfo=*0x%x)", mainHandle, subHandle, info, extInfo);
 
 	if (!mainHandle)
 	{
@@ -342,9 +343,9 @@ error_code cellGifDecExtReadHeader(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifS
 	return CELL_OK;
 }
 
-error_code cellGifDecSetParameter(vm::ptr<GifDecoder> mainHandle, vm::ptr<GifStream> subHandle, vm::cptr<CellGifDecInParam> inParam, vm::ptr<CellGifDecOutParam> outParam)
+error_code cellGifDecSetParameter(vm::ptr<GifDecoder> mainHandle, u32 subHandle, vm::cptr<CellGifDecInParam> inParam, vm::ptr<CellGifDecOutParam> outParam)
 {
-	cellGifDec.warning("cellGifDecSetParameter(mainHandle=*0x%x, subHandle=*0x%x, inParam=*0x%x, outParam=*0x%x)", mainHandle, subHandle, inParam, outParam);
+	cellGifDec.warning("cellGifDecSetParameter(mainHandle=*0x%x, subHandle=0x%x, inParam=*0x%x, outParam=*0x%x)", mainHandle, subHandle, inParam, outParam);
 
 	if (!mainHandle)
 	{
@@ -361,40 +362,39 @@ error_code cellGifDecSetParameter(vm::ptr<GifDecoder> mainHandle, vm::ptr<GifStr
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	if (false) // TODO: check sub handle
-	{
-		return CELL_GIFDEC_ERROR_SEQ;
-	}
-
 	if (!inParam || !outParam)
 	{
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	CellGifDecInfo& current_info = subHandle->info;
-	CellGifDecOutParam& current_outParam = subHandle->outParam;
+	const auto stream = idm::get_unlocked<gif_stream>(subHandle);
 
-	current_outParam.outputWidthByte  = (current_info.SWidth * current_info.SColorResolution * 3) / 8;
-	current_outParam.outputWidth      = current_info.SWidth;
-	current_outParam.outputHeight     = current_info.SHeight;
-	current_outParam.outputColorSpace = inParam->colorSpace;
-	switch (current_outParam.outputColorSpace)
+	if (!stream)
+	{
+		return CELL_GIFDEC_ERROR_ARG;
+	}
+
+	const s32 color_space = inParam->colorSpace;
+
+	switch (color_space)
 	{
 	case CELL_GIFDEC_RGBA:
-	case CELL_GIFDEC_ARGB: current_outParam.outputComponents = 4; break;
+	case CELL_GIFDEC_ARGB: break;
 	default: return CELL_GIFDEC_ERROR_ARG; // Not supported color space
 	}
-	current_outParam.outputBitDepth = 0;   // Unimplemented
-	current_outParam.useMemorySpace = 0;   // Unimplemented
 
-	*outParam = current_outParam;
+	std::lock_guard lock(stream->mutex);
+
+	set_parameter(*stream, color_space);
+
+	*outParam = stream->out_param;
 
 	return CELL_OK;
 }
 
-error_code cellGifDecExtSetParameter(vm::ptr<GifDecoder> mainHandle, vm::ptr<GifStream> subHandle, vm::cptr<CellGifDecInParam> inParam, vm::ptr<CellGifDecOutParam> outParam, vm::cptr<CellGifDecExtInParam> extInParam, vm::ptr<CellGifDecExtOutParam> extOutParam)
+error_code cellGifDecExtSetParameter(vm::ptr<GifDecoder> mainHandle, u32 subHandle, vm::cptr<CellGifDecInParam> inParam, vm::ptr<CellGifDecOutParam> outParam, vm::cptr<CellGifDecExtInParam> extInParam, vm::ptr<CellGifDecExtOutParam> extOutParam)
 {
-	cellGifDec.todo("cellGifDecExtSetParameter(mainHandle=*0x%x, subHandle=*0x%x, inParam=*0x%x, outParam=*0x%x, extInParam=*0x%x, extOutParam=*0x%x)", mainHandle, subHandle, inParam, outParam, extInParam, extOutParam);
+	cellGifDec.todo("cellGifDecExtSetParameter(mainHandle=*0x%x, subHandle=0x%x, inParam=*0x%x, outParam=*0x%x, extInParam=*0x%x, extOutParam=*0x%x)", mainHandle, subHandle, inParam, outParam, extInParam, extOutParam);
 
 	if (!mainHandle)
 	{
@@ -411,33 +411,34 @@ error_code cellGifDecExtSetParameter(vm::ptr<GifDecoder> mainHandle, vm::ptr<Gif
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	if (false) // TODO: check sub handle
-	{
-		return CELL_GIFDEC_ERROR_SEQ;
-	}
-
 	if (!inParam || !outParam)
 	{
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	CellGifDecInfo& current_info = subHandle->info;
-	CellGifDecOutParam& current_outParam = subHandle->outParam;
+	const auto stream = idm::get_unlocked<gif_stream>(subHandle);
 
-	current_outParam.outputWidthByte  = (current_info.SWidth * current_info.SColorResolution * 3) / 8;
-	current_outParam.outputWidth      = current_info.SWidth;
-	current_outParam.outputHeight     = current_info.SHeight;
-	current_outParam.outputColorSpace = inParam->colorSpace;
-	switch (current_outParam.outputColorSpace)
+	if (!stream)
+	{
+		return CELL_GIFDEC_ERROR_ARG;
+	}
+
+	const s32 color_space = inParam->colorSpace;
+
+	switch (color_space)
 	{
 	case CELL_GIFDEC_RGBA:
-	case CELL_GIFDEC_ARGB: current_outParam.outputComponents = 4; break;
+	case CELL_GIFDEC_ARGB: break;
 	default: return CELL_GIFDEC_ERROR_ARG; // Not supported color space
 	}
-	current_outParam.outputBitDepth = 0;   // Unimplemented
-	current_outParam.useMemorySpace = 0;   // Unimplemented
 
-	*outParam = current_outParam;
+	{
+		std::lock_guard lock(stream->mutex);
+
+		set_parameter(*stream, color_space);
+
+		*outParam = stream->out_param;
+	}
 
 	if (!extInParam || extInParam->bufferMode != CELL_GIFDEC_LINE_MODE || !extOutParam)
 	{
@@ -447,9 +448,9 @@ error_code cellGifDecExtSetParameter(vm::ptr<GifDecoder> mainHandle, vm::ptr<Gif
 	return CELL_OK;
 }
 
-error_code cellGifDecDecodeData(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifStream> subHandle, vm::ptr<u8> data, vm::cptr<CellGifDecDataCtrlParam> dataCtrlParam, vm::ptr<CellGifDecDataOutInfo> dataOutInfo)
+error_code cellGifDecDecodeData(vm::ptr<GifDecoder> mainHandle, u32 subHandle, vm::ptr<u8> data, vm::cptr<CellGifDecDataCtrlParam> dataCtrlParam, vm::ptr<CellGifDecDataOutInfo> dataOutInfo)
 {
-	cellGifDec.warning("cellGifDecDecodeData(mainHandle=*0x%x, subHandle=*0x%x, data=*0x%x, dataCtrlParam=*0x%x, dataOutInfo=*0x%x)", mainHandle, subHandle, data, dataCtrlParam, dataOutInfo);
+	cellGifDec.warning("cellGifDecDecodeData(mainHandle=*0x%x, subHandle=0x%x, data=*0x%x, dataCtrlParam=*0x%x, dataOutInfo=*0x%x)", mainHandle, subHandle, data, dataCtrlParam, dataOutInfo);
 
 	if (!mainHandle)
 	{
@@ -466,117 +467,59 @@ error_code cellGifDecDecodeData(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifStre
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	if (false) // TODO: check sub handle
+	if (!dataOutInfo || !dataCtrlParam)
 	{
-		return CELL_GIFDEC_ERROR_SEQ;
+		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	if (!dataOutInfo || !dataCtrlParam)
+	const auto stream = idm::get_unlocked<gif_stream>(subHandle);
+
+	if (!stream)
 	{
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
 	dataOutInfo->status = CELL_GIFDEC_DEC_STATUS_STOP;
 
-	const u32 fd = subHandle->fd;
-	const u64 fileSize = subHandle->fileSize;
-	const CellGifDecOutParam& current_outParam = subHandle->outParam;
+	// Read the guest parameter once
+	const u64 bytes_per_line = dataCtrlParam->outputBytesPerLine;
 
-	//Copy the GIF file to a buffer
-	std::unique_ptr<u8[]> gif(new u8[fileSize]);
+	std::lock_guard lock(stream->mutex);
 
-	switch (subHandle->src.srcSelect)
+	// Copy the GIF file to a buffer
+	std::vector<u8> gif(stream->stream_size);
+
+	if (!stream->read(gif.data(), stream->stream_size))
 	{
-	case CELL_GIFDEC_BUFFER:
-		std::memcpy(gif.get(), subHandle->src.streamPtr.get_ptr(), fileSize);
-		break;
-
-	case CELL_GIFDEC_FILE:
-	{
-		auto file = idm::get_unlocked<lv2_fs_object, lv2_file>(fd);
-		file->file.seek(0);
-		file->file.read(gif.get(), fileSize);
-		break;
-	}
-	default: break; // TODO
+		return { CELL_GIFDEC_ERROR_STREAM_FORMAT, "The stream is unreadable (size=0x%x)", stream->stream_size };
 	}
 
 	//Decode GIF file. (TODO: Is there any faster alternative? Can we do it without external libraries?)
 	int width = 0, height = 0, actual_components = 0;
 	auto image = std::unique_ptr<u8, decltype(&::free)>
 		(
-			stbi_load_from_memory(gif.get(), ::narrow<int>(fileSize), &width, &height, &actual_components, 4),
+			stbi_load_from_memory(gif.data(), static_cast<int>(gif.size()), &width, &height, &actual_components, 4),
 			&::free
 		);
 
 	if (!image)
 		return CELL_GIFDEC_ERROR_STREAM_FORMAT;
 
-	const int bytesPerLine = static_cast<int>(dataCtrlParam->outputBytesPerLine);
-	constexpr char nComponents = 4;
-	const u32 image_size = width * height * nComponents;
-	u8* src = image.get();
+	const s32 color_space = stream->out_param.outputColorSpace;
 
-	switch(current_outParam.outputColorSpace)
+	if (color_space != CELL_GIFDEC_RGBA && color_space != CELL_GIFDEC_ARGB)
 	{
-	case CELL_GIFDEC_RGBA:
-	{
-		if (bytesPerLine > width * nComponents) // Check if we need padding
-		{
-			const int linesize = std::min(bytesPerLine, width * nComponents);
-			for (int i = 0; i < height; i++)
-			{
-				const int dstOffset = i * bytesPerLine;
-				const int srcOffset = width * nComponents * i;
-				std::memcpy(&data[dstOffset], &src[srcOffset], linesize);
-			}
-		}
-		else
-		{
-			std::memcpy(data.get_ptr(), src, image_size);
-		}
-		break;
-	}
-	case CELL_GIFDEC_ARGB:
-	{
-		if (bytesPerLine > width * nComponents) // Check if we need padding
-		{
-			//TODO: find out if we can't do padding without an extra copy
-			const int linesize = std::min(bytesPerLine, width * nComponents);
-			const auto output = std::make_unique<char[]>(linesize);
-			for (int i = 0; i < height; i++)
-			{
-				const int dstOffset = i * bytesPerLine;
-				const int srcOffset = width * nComponents * i;
-				for (int j = 0; j < linesize; j += nComponents)
-				{
-					output[j + 0] = src[srcOffset + j + 3];
-					output[j + 1] = src[srcOffset + j + 0];
-					output[j + 2] = src[srcOffset + j + 1];
-					output[j + 3] = src[srcOffset + j + 2];
-				}
-				std::memcpy(&data[dstOffset], output.get(), linesize);
-			}
-		}
-		else
-		{
-			const auto img = std::make_unique<uint[]>(image_size);
-			uint* source_current = reinterpret_cast<uint*>(src);
-			uint* dest_current = img.get();
-			for (uint i = 0; i < image_size / nComponents; i++)
-			{
-				uint val = *source_current;
-				*dest_current = (val >> 24) | (val << 8); // set alpha (A8) as leftmost byte
-				source_current++;
-				dest_current++;
-			}
-			std::memcpy(data.get_ptr(), img.get(), image_size);
-		}
-		break;
-	}
-	default:
 		return CELL_GIFDEC_ERROR_ARG;
 	}
+
+	const auto layout = img_dec_internal::get_output_layout(bytes_per_line, static_cast<u32>(width), static_cast<u32>(height), 4);
+
+	if (!layout || !vm::check_addr(data.addr(), vm::page_writable, layout->size))
+	{
+		return { CELL_GIFDEC_ERROR_ARG, "The output doesn't fit (data=*0x%x, outputBytesPerLine=0x%llx, width=%d, height=%d)", data, bytes_per_line, width, height };
+	}
+
+	img_dec_internal::write_rows(vm::_ptr<u8>(data.addr()), *layout, image.get(), static_cast<u32>(height), color_space == CELL_GIFDEC_ARGB, false);
 
 	dataOutInfo->status = CELL_GIFDEC_DEC_STATUS_FINISH;
 	dataOutInfo->recordType = CELL_GIFDEC_RECORD_TYPE_IMAGE_DESC;
@@ -584,9 +527,9 @@ error_code cellGifDecDecodeData(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifStre
 	return CELL_OK;
 }
 
-error_code cellGifDecExtDecodeData(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifStream> subHandle, vm::ptr<u8> data, vm::cptr<CellGifDecDataCtrlParam> dataCtrlParam, vm::ptr<CellGifDecDataOutInfo> dataOutInfo, vm::cptr<CellGifDecCbCtrlDisp> cbCtrlDisp, vm::ptr<CellGifDecDispParam> dispParam)
+error_code cellGifDecExtDecodeData(vm::ptr<GifDecoder> mainHandle, u32 subHandle, vm::ptr<u8> data, vm::cptr<CellGifDecDataCtrlParam> dataCtrlParam, vm::ptr<CellGifDecDataOutInfo> dataOutInfo, vm::cptr<CellGifDecCbCtrlDisp> cbCtrlDisp, vm::ptr<CellGifDecDispParam> dispParam)
 {
-	cellGifDec.todo("cellGifDecExtDecodeData(mainHandle=*0x%x, subHandle=*0x%x, data=*0x%x, dataCtrlParam=*0x%x, dataOutInfo=*0x%x, cbCtrlDisp=*0x%x, dispParam=*0x%x)", mainHandle, subHandle, data, dataCtrlParam, dataOutInfo, cbCtrlDisp, dispParam);
+	cellGifDec.todo("cellGifDecExtDecodeData(mainHandle=*0x%x, subHandle=0x%x, data=*0x%x, dataCtrlParam=*0x%x, dataOutInfo=*0x%x, cbCtrlDisp=*0x%x, dispParam=*0x%x)", mainHandle, subHandle, data, dataCtrlParam, dataOutInfo, cbCtrlDisp, dispParam);
 
 	if (!mainHandle)
 	{
@@ -616,9 +559,9 @@ error_code cellGifDecExtDecodeData(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifS
 	return CELL_OK;
 }
 
-error_code cellGifDecClose(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifStream> subHandle)
+error_code cellGifDecClose(vm::ptr<GifDecoder> mainHandle, u32 subHandle)
 {
-	cellGifDec.warning("cellGifDecClose(mainHandle=*0x%x, subHandle=*0x%x)", mainHandle, subHandle);
+	cellGifDec.warning("cellGifDecClose(mainHandle=*0x%x, subHandle=0x%x)", mainHandle, subHandle);
 
 	if (!mainHandle)
 	{
@@ -635,9 +578,11 @@ error_code cellGifDecClose(vm::ptr<GifDecoder> mainHandle, vm::cptr<GifStream> s
 		return CELL_GIFDEC_ERROR_ARG;
 	}
 
-	idm::remove<lv2_fs_object, lv2_file>(subHandle->fd);
-
-	vm::dealloc(subHandle.addr());
+	// The host object owns the file. An operation still running on another thread keeps it alive until it returns.
+	if (!idm::remove<gif_stream>(subHandle))
+	{
+		return CELL_GIFDEC_ERROR_ARG;
+	}
 
 	return CELL_OK;
 }

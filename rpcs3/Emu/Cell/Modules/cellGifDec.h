@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Emu/Memory/vm_ptr.h"
+#include "img_dec_common.h"
 
 // Return Codes
 enum CellGifDecError : u32
@@ -238,11 +239,23 @@ struct GifDecoder
 {
 };
 
-struct GifStream
+namespace gif_dec_internal
 {
-	u32 fd{};
-	u64 fileSize{};
-	CellGifDecInfo info{};
-	CellGifDecOutParam outParam{};
-	CellGifDecSrc src{};
-};
+	// HLE exclusive, state of a sub handle. The guest only gets the ID of this host object.
+	class gif_stream : public img_dec_internal::image_stream
+	{
+	public:
+		static const u32 id_base = 1;
+		static const u32 id_step = 1;
+		static const u32 id_count = 1023;
+		SAVESTATE_INIT_POS(34);
+
+		CellGifDecInfo info{};
+		CellGifDecOutParam out_param{};
+
+		using image_stream::image_stream;
+
+		explicit gif_stream(utils::serial& ar);
+		void save(utils::serial& ar);
+	};
+}

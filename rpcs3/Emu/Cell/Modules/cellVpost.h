@@ -1,5 +1,10 @@
 #pragma once
 
+#include "Utilities/mutex.h"
+
+#include <optional>
+#include <vector>
+
 #ifdef _MSC_VER
 #pragma warning(push, 0)
 #else
@@ -334,6 +339,58 @@ struct CellVpostPictureInfo
 	be_t<u32> reserved2;
 };
 
+namespace vpost_internal
+{
+	// Safety cap on picture dimensions. PS3 video is at most 1920x1080, so this only rejects sizes no title can use
+	constexpr u32 MAX_PICTURE_DIMENSION = 4096;
+
+	// The maximum picture sizes the instance was opened with
+	struct picture_limits
+	{
+		u32 in_max_width;
+		u32 in_max_height;
+		u32 out_max_width;
+		u32 out_max_height;
+	};
+
+	struct picture_layout
+	{
+		u32 in_size;  // YUV420 planar input: the Y plane followed by the quarter-size U and V planes
+		u32 out_size; // RGBA output
+	};
+
+	constexpr bool is_valid_max_size(u32 width, u32 height)
+	{
+		return width && height && width <= MAX_PICTURE_DIMENSION && height <= MAX_PICTURE_DIMENSION;
+	}
+
+	// Returns the extents of the input and output pictures, or nothing if the sizes don't fit the limits
+	constexpr std::optional<picture_layout> get_picture_layout(const picture_limits& limits, u32 in_width, u32 in_height, u32 out_width, u32 out_height)
+	{
+		if (!is_valid_max_size(in_width, in_height) || !is_valid_max_size(out_width, out_height))
+		{
+			return std::nullopt;
+		}
+
+		if (in_width > limits.in_max_width || in_height > limits.in_max_height || out_width > limits.out_max_width || out_height > limits.out_max_height)
+		{
+			return std::nullopt;
+		}
+
+		// The chroma planes are subsampled by 2 in both directions
+		if (in_width % 2 || in_height % 2)
+		{
+			return std::nullopt;
+		}
+
+		// Both fit in 32 bits because of the dimension cap
+		const u64 in_size = u64{in_width} * in_height * 3 / 2;
+		const u64 out_size = u64{out_width} * out_height * 4;
+
+		return picture_layout{static_cast<u32>(in_size), static_cast<u32>(out_size)};
+	}
+}
+
 class VpostInstance
 {
 public:
@@ -343,11 +400,21 @@ public:
 	SAVESTATE_INIT_POS(23);
 
 	const bool to_rgba;
+	const vpost_internal::picture_limits limits;
+
+	// Guards the members below: the guest can call cellVpostExec on the same handle from several threads
+	shared_mutex mutex;
 
 	SwsContext* sws{};
 
-	VpostInstance(bool rgba)
+	// Host staging buffers, so that swscale never touches guest memory
+	std::vector<u8> in_buf;
+	std::vector<u8> alpha_buf;
+	std::vector<u8> out_buf;
+
+	VpostInstance(bool rgba, const vpost_internal::picture_limits& limits)
 		: to_rgba(rgba)
+		, limits(limits)
 	{
 	}
 

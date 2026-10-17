@@ -53,6 +53,59 @@ constexpr int averror_eof = AVERROR_EOF; // workaround for old-style-cast error
 
 LOG_CHANNEL(cellVdec);
 
+namespace vdec_internal
+{
+	picture_layout get_picture_layout(u32 format_type, s32 width, s32 height)
+	{
+		if (width <= 0 || height <= 0)
+		{
+			return {};
+		}
+
+		const u64 w = static_cast<u64>(width);
+		const u64 h = static_cast<u64>(height);
+
+		u64 size = 0;
+		u64 u_offset = 0;
+		u64 v_offset = 0;
+
+		switch (format_type)
+		{
+		case CELL_VDEC_PICFMT_ARGB32_ILV:
+		case CELL_VDEC_PICFMT_RGBA32_ILV:
+		{
+			size = w * h * 4;
+			break;
+		}
+		case CELL_VDEC_PICFMT_UYVY422_ILV:
+		{
+			// 4 bytes per pair of pixels, the line is rounded up to a whole pair
+			size = (w + 1) / 2 * 4 * h;
+			break;
+		}
+		case CELL_VDEC_PICFMT_YUV420_PLANAR:
+		{
+			// The chroma planes have half the width and height, rounded up. The V plane starts at 5/4 of the Y plane size.
+			u_offset = w * h;
+			v_offset = w * h * 5 / 4;
+			size = v_offset + (w + 1) / 2 * ((h + 1) / 2);
+			break;
+		}
+		default:
+		{
+			return {};
+		}
+		}
+
+		if (size > u32{umax})
+		{
+			return {};
+		}
+
+		return picture_layout(static_cast<u32>(size), static_cast<u32>(u_offset), static_cast<u32>(v_offset));
+	}
+}
+
 // Checks whether the AU holds a header that tells the decoder the picture size:
 // MPEG-2: sequence header; MPEG-4 Part 2: Video Object Layer header, or a short video header (H.263 picture start code) at the start of the AU
 static bool au_has_sequence_header(AVCodecID codec_id, const u8* data, u32 size)
@@ -230,6 +283,7 @@ struct vdec_context final
 	const AVCodecDescriptor* codec_desc{};
 	AVCodecContext* ctx{};
 	SwsContext* sws{};
+	shared_mutex sws_mutex; // Guards sws: the guest can call cellVdecGetPicture on one handle from several threads
 
 	shared_mutex mutex; // Used for 'out' queue (TODO)
 
@@ -492,7 +546,8 @@ struct vdec_context final
 					}
 					else if (int ret = avcodec_send_packet(ctx, drain ? nullptr : &packet); ret < 0)
 					{
-						fmt::throw_exception("AU queuing error (handle=0x%x, seq_id=%d, cmd_id=%d, error=0x%x): %s", handle, cmd->seq_id, cmd->id, ret, utils::av_error_to_string(ret));
+						// The AU comes from the guest: drop a malformed one instead of stopping the emulation
+						cellVdec.error("AU queuing error, the AU is dropped (handle=0x%x, seq_id=%d, cmd_id=%d, error=0x%x): %s", handle, cmd->seq_id, cmd->id, ret, utils::av_error_to_string(ret));
 					}
 					else
 					{
@@ -519,7 +574,9 @@ struct vdec_context final
 								break;
 							}
 
-							fmt::throw_exception("AU decoding error (handle=0x%x, seq_id=%d, cmd_id=%d, error=0x%x): %s", handle, cmd->seq_id, cmd->id, ret, utils::av_error_to_string(ret));
+							// The stream comes from the guest: drop a malformed picture instead of stopping the emulation
+							cellVdec.error("AU decoding error, the picture is dropped (handle=0x%x, seq_id=%d, cmd_id=%d, error=0x%x): %s", handle, cmd->seq_id, cmd->id, ret, utils::av_error_to_string(ret));
+							break;
 						}
 
 #if LIBAVCODEC_VERSION_INT < AV_VERSION_INT(60, 31, 102)
@@ -542,7 +599,8 @@ struct vdec_context final
 
 						if (frame->repeat_pict)
 						{
-							fmt::throw_exception("Repeated frames not supported (handle=0x%x, seq_id=%d, cmd_id=%d, repear_pict=0x%x)", handle, cmd->seq_id, cmd->id, frame->repeat_pict);
+							// Set by the stream: output the picture once
+							cellVdec.todo("Repeated frames not supported (handle=0x%x, seq_id=%d, cmd_id=%d, repeat_pict=0x%x)", handle, cmd->seq_id, cmd->id, frame->repeat_pict);
 						}
 
 						if (frame->pts != smin)
@@ -1476,7 +1534,7 @@ static error_code vdecOpen(ppu_thread& ppu, T type, U res, vm::cptr<CellVdecCb> 
 	}
 
 	if (!res->memAddr || res->ppuThreadPriority + 0u >= 3072 || res->spuThreadPriority + 0u >= 256 || res->ppuThreadStackSize < 4096
-		|| type->codecType + 0u >= 0xe)
+		|| !check_codec_type(type->codecType))
 	{
 		return { CELL_VDEC_ERROR_ARG, "memAddr=%d, ppuThreadPriority=%d, spuThreadPriority=%d, ppuThreadStackSize=%d, codecType=%d",
 		                              res->memAddr, res->ppuThreadPriority, res->spuThreadPriority, res->ppuThreadStackSize, type->codecType };
@@ -1514,9 +1572,12 @@ static error_code vdecOpen(ppu_thread& ppu, T type, U res, vm::cptr<CellVdecCb> 
 		return {};
 	}
 
-	const u32 vid = idm::last_id();
+	if (!vdec)
+	{
+		return { CELL_VDEC_ERROR_FATAL, "Too many open decoders" };
+	}
 
-	ensure(vdec);
+	const u32 vid = idm::last_id();
 	vdec->handle = vid;
 
 	// Run thread
@@ -1708,6 +1769,57 @@ error_code cellVdecEndSeq(ppu_thread& ppu, u32 handle)
 	return CELL_OK;
 }
 
+namespace vdec_internal
+{
+	// Validates an AU and queues it for decoding. The caller read the AU description once.
+	static error_code queue_au(vdec_context& vdec, u32 handle, CellVdecDecodeMode mode, const CellVdecAuInfo& au)
+	{
+		if (!au.size || !au.startAddr)
+		{
+			return { CELL_VDEC_ERROR_ARG, "size=%d, startAddr=0x%x", au.size, au.startAddr };
+		}
+
+		{
+			std::lock_guard lock{vdec.mutex};
+
+			if (vdec.seq_state != sequence_state::ready)
+			{
+				return { CELL_VDEC_ERROR_SEQ, vdec.seq_state.load() };
+			}
+		}
+
+		if (mode < 0 || mode > (CELL_VDEC_DEC_MODE_B_SKIP | CELL_VDEC_DEC_MODE_PB_SKIP))
+		{
+			return { CELL_VDEC_ERROR_ARG, "mode=%d", +mode };
+		}
+
+		if ((mode == (CELL_VDEC_DEC_MODE_B_SKIP | CELL_VDEC_DEC_MODE_PB_SKIP) && vdec.type != CELL_VDEC_CODEC_TYPE_VC1) ||
+			(mode == CELL_VDEC_DEC_MODE_PB_SKIP && vdec.type != CELL_VDEC_CODEC_TYPE_AVC))
+		{
+			return { CELL_VDEC_ERROR_ARG, "mode=%d, type=%d", +mode, vdec.type };
+		}
+
+		// The AU is copied when it is queued, so the whole range has to be readable now
+		if (au.size > MAX_AU_SIZE || !vm::check_addr(au.startAddr, vm::page_readable, au.size))
+		{
+			return { CELL_VDEC_ERROR_ARG, "The AU is unreadable or too large (startAddr=0x%x, size=0x%x)", au.startAddr, au.size };
+		}
+
+		if (!vdec.au_count.try_inc(4))
+		{
+			// The AU queue is full: BUSY asks the caller to retry, it is not an error
+			return not_an_error(CELL_VDEC_ERROR_BUSY);
+		}
+
+		const u64 seq_id = vdec.seq_id;
+		const u64 cmd_id = vdec.next_cmd_id++;
+		cellVdec.trace("Adding decode cmd (handle=0x%x, seq_id=%d, cmd_id=%d)", handle, seq_id, cmd_id);
+
+		vdec.in_cmd.push(vdec_cmd(vdec_cmd_type::au_decode, seq_id, cmd_id, mode, au));
+		return CELL_OK;
+	}
+}
+
 error_code cellVdecDecodeAu(ppu_thread& ppu, u32 handle, CellVdecDecodeMode mode, vm::cptr<CellVdecAuInfo> auInfo)
 {
 	ppu.state += cpu_flag::wait;
@@ -1716,44 +1828,15 @@ error_code cellVdecDecodeAu(ppu_thread& ppu, u32 handle, CellVdecDecodeMode mode
 
 	const auto vdec = idm::get_unlocked<vdec_context>(handle);
 
-	if (!vdec || !auInfo || !auInfo->size || !auInfo->startAddr)
+	if (!vdec || !auInfo)
 	{
-		return { CELL_VDEC_ERROR_ARG, "vdec=%d, auInfo=%d, size=%d, startAddr=0x%x", !!vdec, !!auInfo, auInfo ? auInfo->size.value() : 0, auInfo ? auInfo->startAddr.value() : 0 };
+		return { CELL_VDEC_ERROR_ARG, "vdec=%d, auInfo=%d", !!vdec, !!auInfo };
 	}
 
-	{
-		std::lock_guard lock{vdec->mutex};
+	// Read the AU description once: the guest can change it while the AU is queued
+	const CellVdecAuInfo au_info = *auInfo;
 
-		if (vdec->seq_state != sequence_state::ready)
-		{
-			return { CELL_VDEC_ERROR_SEQ, vdec->seq_state.load() };
-		}
-	}
-
-	if (mode < 0 || mode > (CELL_VDEC_DEC_MODE_B_SKIP | CELL_VDEC_DEC_MODE_PB_SKIP))
-	{
-		return { CELL_VDEC_ERROR_ARG, "mode=%d", +mode };
-	}
-
-	if ((mode == (CELL_VDEC_DEC_MODE_B_SKIP | CELL_VDEC_DEC_MODE_PB_SKIP) && vdec->type != CELL_VDEC_CODEC_TYPE_VC1) ||
-		(mode == CELL_VDEC_DEC_MODE_PB_SKIP && vdec->type != CELL_VDEC_CODEC_TYPE_AVC))
-	{
-		return { CELL_VDEC_ERROR_ARG, "mode=%d, type=%d", +mode, vdec->type };
-	}
-
-	if (!vdec->au_count.try_inc(4))
-	{
-		// The AU queue is full: BUSY asks the caller to retry, it is not an error
-		return not_an_error(CELL_VDEC_ERROR_BUSY);
-	}
-
-	const u64 seq_id = vdec->seq_id;
-	const u64 cmd_id = vdec->next_cmd_id++;
-	cellVdec.trace("Adding decode cmd (handle=0x%x, seq_id=%d, cmd_id=%d)", handle, seq_id, cmd_id);
-
-	// TODO: check info
-	vdec->in_cmd.push(vdec_cmd(vdec_cmd_type::au_decode, seq_id, cmd_id, mode, *auInfo));
-	return CELL_OK;
+	return vdec_internal::queue_au(*vdec, handle, mode, au_info);
 }
 
 error_code cellVdecDecodeAuEx2(ppu_thread& ppu, u32 handle, CellVdecDecodeMode mode, vm::cptr<CellVdecAuInfoEx2> auInfo)
@@ -1764,52 +1847,23 @@ error_code cellVdecDecodeAuEx2(ppu_thread& ppu, u32 handle, CellVdecDecodeMode m
 
 	const auto vdec = idm::get_unlocked<vdec_context>(handle);
 
-	if (!vdec || !auInfo || !auInfo->size || !auInfo->startAddr)
+	if (!vdec || !auInfo)
 	{
-		return { CELL_VDEC_ERROR_ARG, "vdec=%d, auInfo=%d, size=%d, startAddr=0x%x", !!vdec, !!auInfo, auInfo ? auInfo->size.value() : 0, auInfo ? auInfo->startAddr.value() : 0 };
+		return { CELL_VDEC_ERROR_ARG, "vdec=%d, auInfo=%d", !!vdec, !!auInfo };
 	}
 
-	{
-		std::lock_guard lock{vdec->mutex};
-
-		if (vdec->seq_state != sequence_state::ready)
-		{
-			return { CELL_VDEC_ERROR_SEQ, vdec->seq_state.load() };
-		}
-	}
-
-	if (mode < 0 || mode > (CELL_VDEC_DEC_MODE_B_SKIP | CELL_VDEC_DEC_MODE_PB_SKIP))
-	{
-		return { CELL_VDEC_ERROR_ARG, "mode=%d", +mode };
-	}
-
-	if ((mode == (CELL_VDEC_DEC_MODE_B_SKIP | CELL_VDEC_DEC_MODE_PB_SKIP) && vdec->type != CELL_VDEC_CODEC_TYPE_VC1) ||
-		(mode == CELL_VDEC_DEC_MODE_PB_SKIP && vdec->type != CELL_VDEC_CODEC_TYPE_AVC))
-	{
-		return { CELL_VDEC_ERROR_ARG, "mode=%d, type=%d", +mode, vdec->type };
-	}
-
-	if (!vdec->au_count.try_inc(4))
-	{
-		// The AU queue is full: BUSY asks the caller to retry, it is not an error
-		return not_an_error(CELL_VDEC_ERROR_BUSY);
-	}
+	// Read the AU description once: the guest can change it while the AU is queued
+	const CellVdecAuInfoEx2 info = *auInfo;
 
 	CellVdecAuInfo au_info{};
-	au_info.startAddr = auInfo->startAddr;
-	au_info.size = auInfo->size;
-	au_info.pts = auInfo->pts;
-	au_info.dts = auInfo->dts;
-	au_info.userData = auInfo->userData;
-	au_info.codecSpecificData = auInfo->codecSpecificData;
+	au_info.startAddr = info.startAddr;
+	au_info.size = info.size;
+	au_info.pts = info.pts;
+	au_info.dts = info.dts;
+	au_info.userData = info.userData;
+	au_info.codecSpecificData = info.codecSpecificData;
 
-	const u64 seq_id = vdec->seq_id;
-	const u64 cmd_id = vdec->next_cmd_id++;
-	cellVdec.trace("Adding decode cmd (handle=0x%x, seq_id=%d, cmd_id=%d)", handle, seq_id, cmd_id);
-
-	// TODO: check info
-	vdec->in_cmd.push(vdec_cmd(vdec_cmd_type::au_decode, seq_id, cmd_id, mode, au_info));
-	return CELL_OK;
+	return vdec_internal::queue_au(*vdec, handle, mode, au_info);
 }
 
 error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecPicFormat2> format, vm::ptr<u8> outBuff, u32 arg4)
@@ -1825,6 +1879,9 @@ error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecP
 		return { CELL_VDEC_ERROR_ARG, "vdec=%d, format=%d", !!vdec, !!format };
 	}
 
+	// Read the format once: the guest can change it while the picture is converted
+	const CellVdecPicFormat2 pic_format = *format;
+
 	{
 		std::lock_guard lock{vdec->mutex};
 
@@ -1834,9 +1891,9 @@ error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecP
 		}
 	}
 
-	if (format->formatType > 4 || (format->formatType <= CELL_VDEC_PICFMT_RGBA32_ILV && format->colorMatrixType > CELL_VDEC_COLOR_MATRIX_TYPE_BT709))
+	if (pic_format.formatType > 4 || (pic_format.formatType <= CELL_VDEC_PICFMT_RGBA32_ILV && pic_format.colorMatrixType > CELL_VDEC_COLOR_MATRIX_TYPE_BT709))
 	{
-		return {CELL_VDEC_ERROR_ARG, "formatType=%d, colorMatrixType=%d", +format->formatType, +format->colorMatrixType};
+		return {CELL_VDEC_ERROR_ARG, "formatType=%d, colorMatrixType=%d", +pic_format.formatType, +pic_format.colorMatrixType};
 	}
 
 	if (arg4 && arg4 != 8 && arg4 != 0xc)
@@ -1844,14 +1901,21 @@ error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecP
 		return { CELL_VDEC_ERROR_ARG, "arg4=0x%x", arg4 };
 	}
 
-	if (arg4 || format->unk0 || format->unk1)
+	if (arg4 || pic_format.unk0 || pic_format.unk1)
 	{
-		cellVdec.todo("cellVdecGetPictureExt: Unknown arguments (arg4=*0x%x, unk0=0x%x, unk1=0x%x)", arg4, format->unk0, format->unk1);
+		cellVdec.todo("cellVdecGetPictureExt: Unknown arguments (arg4=*0x%x, unk0=0x%x, unk1=0x%x)", arg4, pic_format.unk0, pic_format.unk1);
+	}
+
+	if (outBuff && pic_format.formatType > CELL_VDEC_PICFMT_YUV420_PLANAR)
+	{
+		// Accepted by the check above, but not implemented
+		return { CELL_VDEC_ERROR_ARG, "Unsupported formatType=%d", +pic_format.formatType };
 	}
 
 	vdec_frame frame;
 	bool notify = false;
 	u64 sequence_id{};
+	vdec_internal::picture_layout layout{};
 
 	{
 		std::lock_guard lock(vdec->mutex);
@@ -1859,6 +1923,18 @@ error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecP
 		if (vdec->out_queue.empty())
 		{
 			return CELL_VDEC_ERROR_EMPTY;
+		}
+
+		if (outBuff)
+		{
+			// Check the output before taking the picture, so that a bad buffer doesn't lose it
+			const AVFrame& next = *vdec->out_queue.front().avf;
+			layout = vdec_internal::get_picture_layout(pic_format.formatType, next.width, next.height);
+
+			if (!layout || !vm::check_addr(outBuff.addr(), vm::page_writable, layout.size))
+			{
+				return { CELL_VDEC_ERROR_ARG, "The picture doesn't fit (outBuff=*0x%x, formatType=%d, width=%d, height=%d)", outBuff, +pic_format.formatType, next.width, next.height };
+			}
 		}
 
 		frame = std::move(vdec->out_queue.front());
@@ -1891,25 +1967,22 @@ error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecP
 		thread_local u8 alpha = 0;
 		bool use_alpha = false;
 
-		switch (const u32 type = format->formatType)
+		switch (pic_format.formatType)
 		{
 		case CELL_VDEC_PICFMT_ARGB32_ILV: out_f = AV_PIX_FMT_ARGB; use_alpha = true; break;
 		case CELL_VDEC_PICFMT_RGBA32_ILV: out_f = AV_PIX_FMT_RGBA; use_alpha = true; break;
 		case CELL_VDEC_PICFMT_UYVY422_ILV: out_f = AV_PIX_FMT_UYVY422; break;
 		case CELL_VDEC_PICFMT_YUV420_PLANAR: out_f = AV_PIX_FMT_YUV420P; break;
-		default:
-		{
-			fmt::throw_exception("cellVdecGetPictureExt: Unknown formatType (handle=0x%x, seq_id=%d, cmd_id=%d, type=%d)", handle, frame.seq_id, frame.cmd_id, type);
-		}
+		default: return { CELL_VDEC_ERROR_ARG, "Unsupported formatType=%d", +pic_format.formatType }; // Checked above
 		}
 
 		// TODO: color matrix
 
-		if (use_alpha && (alpha != format->alpha || static_cast<s32>(alpha_plane.size()) != w * h))
+		if (use_alpha && (alpha != pic_format.alpha || static_cast<s32>(alpha_plane.size()) != w * h))
 		{
-			alpha = format->alpha;
+			alpha = pic_format.alpha;
 			alpha_plane.resize(w * h, alpha);
-			std::memset(alpha_plane.data(), format->alpha, alpha_plane.size());
+			std::memset(alpha_plane.data(), pic_format.alpha, alpha_plane.size());
 		}
 
 		AVPixelFormat in_f = AV_PIX_FMT_YUV420P;
@@ -1923,16 +1996,27 @@ error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecP
 			in_f = false ? AV_PIX_FMT_YUVA420P : static_cast<AVPixelFormat>(frame->format);
 			break;
 		default:
-			fmt::throw_exception("cellVdecGetPictureExt: Unknown frame format (%d)", frame->format);
+			// Set by the stream
+			return { CELL_VDEC_ERROR_FATAL, "cellVdecGetPictureExt: Unknown frame format (%d)", frame->format };
 		}
 
-		cellVdec.trace("cellVdecGetPictureExt: handle=0x%x, seq_id=%d, cmd_id=%d, w=%d, h=%d, frameFormat=%d, formatType=%d, in_f=%d, out_f=%d, use_alpha=%d, alpha=%d, colorMatrixType=%d", handle, frame.seq_id, frame.cmd_id, w, h, frame->format, format->formatType, +in_f, +out_f, use_alpha, format->alpha, format->colorMatrixType);
+		cellVdec.trace("cellVdecGetPictureExt: handle=0x%x, seq_id=%d, cmd_id=%d, w=%d, h=%d, frameFormat=%d, formatType=%d, in_f=%d, out_f=%d, use_alpha=%d, alpha=%d, colorMatrixType=%d", handle, frame.seq_id, frame.cmd_id, w, h, frame->format, pic_format.formatType, +in_f, +out_f, use_alpha, pic_format.alpha, pic_format.colorMatrixType);
+
+		std::lock_guard lock(vdec->sws_mutex);
 
 		vdec->sws = sws_getCachedContext(vdec->sws, w, h, in_f, w, h, out_f, SWS_POINT, nullptr, nullptr, nullptr);
 
+		if (!vdec->sws)
+		{
+			return { CELL_VDEC_ERROR_FATAL, "cellVdecGetPictureExt: sws_getCachedContext failed (w=%d, h=%d, in_f=%d, out_f=%d)", w, h, +in_f, +out_f };
+		}
+
+		// The whole output range was checked above
+		u8* const out = vm::_ptr<u8>(outBuff.addr());
+
 		const u8* in_data[4] = { frame->data[0], frame->data[1], frame->data[2], use_alpha ? alpha_plane.data() : nullptr };
 		const int in_line[4] = { frame->linesize[0], frame->linesize[1], frame->linesize[2], w * 1 };
-		u8* out_data[4] = { outBuff.get_ptr() };
+		u8* out_data[4] = { out };
 		int out_line[4] = { w * 4 }; // RGBA32 or ARGB32
 
 		// TODO:
@@ -1942,12 +2026,15 @@ error_code cellVdecGetPictureExt(ppu_thread& ppu, u32 handle, vm::cptr<CellVdecP
 		if (!use_alpha)
 		{
 			// YUV420P or UYVY422
-			out_data[1] = out_data[0] + w * h;
-			out_data[2] = out_data[0] + w * h * 5 / 4;
+			if (out_f == AV_PIX_FMT_YUV420P)
+			{
+				out_data[1] = out + layout.u_offset;
+				out_data[2] = out + layout.v_offset;
+			}
 
 			if (const int ret = av_image_fill_linesizes(out_line, out_f, w); ret < 0)
 			{
-				fmt::throw_exception("cellVdecGetPictureExt: av_image_fill_linesizes failed (handle=0x%x, seq_id=%d, cmd_id=%d, ret=0x%x): %s", handle, frame.seq_id, frame.cmd_id, ret, utils::av_error_to_string(ret));
+				return { CELL_VDEC_ERROR_FATAL, "cellVdecGetPictureExt: av_image_fill_linesizes failed (handle=0x%x, seq_id=%d, cmd_id=%d, ret=0x%x): %s", handle, frame.seq_id, frame.cmd_id, ret, utils::av_error_to_string(ret) };
 			}
 		}
 

@@ -813,3 +813,38 @@ constexpr std::array VDEC_SCE_DECODER_UNK_MAP =
 };
 
 error_code cellVdecQueryAttrEx(ppu_thread& ppu, vm::cptr<CellVdecTypeEx> type, vm::ptr<CellVdecAttr> attr);
+
+namespace vdec_internal
+{
+	// Largest AU the HLE decoder accepts. A safety cap on the host copy of the AU: PS3 video AUs are a few MiB at most.
+	constexpr u32 MAX_AU_SIZE = 64 * 1024 * 1024;
+
+	// Where cellVdecGetPicture writes the converted picture. A default constructed layout is invalid.
+	struct picture_layout
+	{
+		u32 size = 0;     // Extent of the output
+		u32 u_offset = 0; // YUV420 planar: offsets of the chroma planes
+		u32 v_offset = 0;
+
+		picture_layout() = default;
+
+		picture_layout(u32 size, u32 u_offset, u32 v_offset)
+			: size(size)
+			, u_offset(u_offset)
+			, v_offset(v_offset)
+			, m_invalid(false)
+		{
+		}
+
+		explicit operator bool() const
+		{
+			return !m_invalid;
+		}
+
+	private:
+		bool m_invalid = true;
+	};
+
+	// Returns the layout of a picture, or an invalid layout if the format is unknown or the picture doesn't fit in the guest address space
+	picture_layout get_picture_layout(u32 format_type, s32 width, s32 height);
+}

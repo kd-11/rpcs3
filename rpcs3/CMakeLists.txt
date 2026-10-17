@@ -221,6 +221,17 @@ if(BUILD_RPCS3_TESTS)
     include(GoogleTest)
     gtest_discover_tests(rpcs3_test)
 
+    # Spec 12 recurrence guard: fails if a guest-resident HLE struct regains trusted host state.
+    # Skipped when no Python interpreter is available; it is a static check, not a build dependency.
+    find_package(Python3 COMPONENTS Interpreter QUIET)
+    if(Python3_Interpreter_FOUND)
+        enable_testing()
+        add_test(NAME hle_guest_struct_guard_self_test
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/hle_guest_struct_guard.py --self-test)
+        add_test(NAME hle_guest_struct_guard
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/hle_guest_struct_guard.py ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    endif()
+
     if(RUN_RPCS3_TESTS)
         add_custom_target(run_tests
             ALL

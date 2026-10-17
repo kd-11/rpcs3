@@ -10,6 +10,8 @@
 # The escape-capable patterns this guard looks for are:
 #   - native pointers (Type*), which a guest can rewrite to any host address;
 #   - host-sized integers (usz / size_t / uintptr_t), used as offsets added to host pointers;
+#   - native-endian 64-bit integers (u64 / s64 not wrapped in be_t/le_t), which are not guest ABI data
+#     and can carry sizes or offsets beyond the 32-bit guest address space;
 #   - owning host containers and smart pointers (std::vector, std::unique_ptr, stx::shared_ptr, ...).
 #
 # This is a heuristic line scanner, NOT a parser. It cannot prove the boundary is safe: it does not
@@ -36,15 +38,21 @@ GUEST_RESIDENT = {
 }
 
 # (struct, member) -> reason it is safe despite matching a forbidden pattern.
-# Currently empty: every guest-resident struct was reworked to hold only IDs, ABI data and padding.
+# Every guest-resident struct was reworked to hold only IDs, ABI data and padding; the entries below are native
+# 64-bit values that never size, offset or select a host access.
 # Add an entry here only with a review note explaining why the member cannot select host state.
-ALLOWLIST = {}
+ALLOWLIST = {
+	("AtracXdecContext", "cmd_counter"): "debug counter, only incremented and printed in trace logs",
+	("LpcmDecContext", "cmd_counter"): "debug counter, only incremented and printed in trace logs",
+	("DmuxPamfContext", "au_queue_full_bitset"): "bit set of full AU queues, only bit-tested; bits are set with an es_index bounded below 64 (T-12.4)",
+}
 
 FORBIDDEN = [
 	# A native pointer member: a type token, then * and a member name at the end of the statement.
 	# vm:: pointers are excluded separately (they are 32-bit guest addresses).
 	(re.compile(r"[A-Za-z_][\w:<>,]*\s*\*\s*[A-Za-z_]\w*$"), "native pointer"),
 	(re.compile(r"\b(usz|size_t|uintptr_t|intptr_t|std::size_t)\b"), "host-sized integer"),
+	(re.compile(r"\b(u64|s64|std::u?int64_t|u?int64_t)\b"), "native 64-bit integer"),
 	(re.compile(r"\b(std::(vector|string|unique_ptr|shared_ptr|map|unordered_map|deque|list|function|span|optional)|stx::shared_ptr)\b"), "owning host container"),
 ]
 
@@ -77,6 +85,8 @@ def scan_struct(name, body):
 	for raw in body.splitlines():
 		# Strip line comments.
 		code = raw.split("//", 1)[0]
+		# Strip brace initializers ("u64 size{};", "T a{1, 2};") so they aren't mistaken for a method body.
+		code = re.sub(r"([\w\]])\s*\{[^{}]*\}(?=\s*[;,])", r"\1", code)
 		opens = code.count("{")
 		closes = code.count("}")
 		if depth > 0:
@@ -98,6 +108,10 @@ def scan_struct(name, body):
 			for pattern, reason in FORBIDDEN:
 				if reason == "native pointer":
 					if "vm::" in decl or not pattern.search(decl):
+						continue
+				elif reason == "native 64-bit integer":
+					# be_t<u64> / le_t<u64> are fixed-endian ABI fields, and so is the address type of a vm:: pointer
+					if not pattern.search(re.sub(r"\b(be_t|le_t|vm::\w+)\s*<[^;]*>", "", decl)):
 						continue
 				elif not pattern.search(line):
 					continue
@@ -135,6 +149,9 @@ SELF_TEST_CASES = [
 	("struct Bad4 { be_t<u32> a; ppu_thread* ppu = nullptr; vm::ptr<void> q; };", 1),
 	# vm:: pointers and nested ABI arrays are fine.
 	("struct Ok2 { vm::bcptr<u8, u64> addr; be_t<u64> size; std::array<u8, 0x10> info; };", 0),
+	# The pre-hardening guest-resident GifStream: a native u64 size drove a raw copy from guest memory.
+	("struct Bad5 { u32 fd{}; u64 fileSize{}; CellGifDecInfo info{}; };", 1),
+	("struct Ok3 { be_t<u64> userData; le_t<s64> pts; be_t<u32> host_id; };", 0),
 ]
 
 def self_test():
@@ -172,7 +189,7 @@ def main():
 	if findings:
 		print(f"{len(findings)} finding(s): a guest-resident struct holds trusted host state")
 		return 1
-	print("ok: no guest-resident struct holds a native pointer, host-sized integer or host container")
+	print("ok: no guest-resident struct holds a native pointer, host-sized or native 64-bit integer, or host container")
 	return 0
 
 if __name__ == "__main__":

@@ -663,7 +663,11 @@ VKGSRender::VKGSRender(utils::serial* ar) noexcept : GSRender(ar)
 
 	// NVIDIA has broken attribute interpolation
 	backend_config.supports_normalized_barycentrics = (
+#ifndef __APPLE__
 		!vk::is_NVIDIA(vk::get_driver_vendor()) ||
+#else
+		(vk::get_driver_vendor() != vk::driver_vendor::MVK) ||
+#endif
 		!m_device->get_barycoords_support() ||
 		g_cfg.video.shader_precision == gpu_preset_level::low);
 

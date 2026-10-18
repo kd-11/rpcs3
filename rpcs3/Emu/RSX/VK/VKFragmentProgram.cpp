@@ -129,7 +129,11 @@ void VKFragmentDecompilerThread::insertHeader(std::stringstream & OS)
 
 	if (m_prog.ctrl & RSX_SHADER_CONTROL_ATTRIBUTE_INTERPOLATION)
 	{
+#ifndef __APPLE__
 		required_extensions.emplace_back("GL_EXT_fragment_shader_barycentric");
+#else
+		required_extensions.emplace_back("GL_NV_fragment_shader_barycentric");
+#endif
 	}
 
 	OS << "#version 450\n";
@@ -147,7 +151,11 @@ void VKFragmentDecompilerThread::insertInputs(std::stringstream & OS)
 {
 	glsl::insert_fragment_shader_inputs_block(
 		OS,
+#ifndef __APPLE__
 		glsl::extension_flavour::EXT,
+#else
+		glsl::extension_flavour::NV,
+#endif
 		m_prog,
 		m_parr.params[PF_PARAM_IN],
 		{

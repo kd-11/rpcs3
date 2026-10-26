@@ -14,7 +14,7 @@ namespace rsx
 {
 	std::array<rsx_method_t, 0x10000 / 4> methods{};
 	std::array<u32, 0x10000 / 4> state_signals{};
-	std::array<u8, 0x10000 / 4> draw_state_signals{};
+	std::array<u8, draw_state_signals_count> draw_state_signals{};
 
 	void invalid_method(context* ctx, u32 reg, u32 arg)
 	{
@@ -705,6 +705,12 @@ namespace rsx
 
 		static_assert(static_cast<u32>(draw_state_t::group::decoded) <= 0xFF, "Signalled draw state groups must fit in draw_state_signals entries");
 
+		const auto signal = [](u32 reg, u8 groups)
+		{
+			ensure(reg < draw_state_signals_count, "Draw state register is outside of the signal table");
+			draw_state_signals[reg] |= groups;
+		};
+
 		for (const u32 reg :
 		{
 			NV4097_SET_CULL_FACE_ENABLE, NV4097_SET_CULL_FACE, NV4097_SET_FRONT_FACE, NV4097_SET_FRONT_POLYGON_MODE,
@@ -713,7 +719,7 @@ namespace rsx
 			NV4097_SET_POLYGON_OFFSET_SCALE_FACTOR, NV4097_SET_POLYGON_OFFSET_BIAS
 		})
 		{
-			draw_state_signals[reg] |= raster;
+			signal(reg, raster);
 		}
 
 		// SURFACE_FORMAT and CONTROL0 select the depth format that the depth bounds are saturated to
@@ -729,7 +735,7 @@ namespace rsx
 			NV4097_SET_BACK_STENCIL_OP_ZFAIL, NV4097_SET_BACK_STENCIL_OP_ZPASS
 		})
 		{
-			draw_state_signals[reg] |= depth_stencil;
+			signal(reg, depth_stencil);
 		}
 
 		// SURFACE_FORMAT selects the color mask remap and the blend constant color format
@@ -741,34 +747,34 @@ namespace rsx
 			NV4097_SET_BLEND_COLOR, NV4097_SET_BLEND_COLOR2
 		})
 		{
-			draw_state_signals[reg] |= blend;
+			signal(reg, blend);
 		}
 
 		// SURFACE_FORMAT holds the antialiasing mode
 		for (const u32 reg : { NV4097_SET_ANTI_ALIASING_CONTROL, NV4097_SET_SURFACE_FORMAT })
 		{
-			draw_state_signals[reg] |= multisample;
+			signal(reg, multisample);
 		}
 
 		for (const u32 reg : { NV4097_SET_SURFACE_CLIP_HORIZONTAL, NV4097_SET_SURFACE_CLIP_VERTICAL, NV4097_SET_CLIP_MIN, NV4097_SET_CLIP_MAX })
 		{
-			draw_state_signals[reg] |= viewport;
+			signal(reg, viewport);
 		}
 
 		// The restart index is only usable if it fits in the index type
 		for (const u32 reg : { NV4097_SET_RESTART_INDEX_ENABLE, NV4097_SET_RESTART_INDEX, NV4097_SET_INDEX_ARRAY_DMA })
 		{
-			draw_state_signals[reg] |= input_assembly;
+			signal(reg, input_assembly);
 		}
 
 		// The pattern is only decoded while stipple is enabled. Enabling it decodes the current pattern.
-		draw_state_signals[NV4097_SET_POLYGON_STIPPLE] |= stipple;
+		signal(NV4097_SET_POLYGON_STIPPLE, stipple);
 		for (u32 reg = NV4097_SET_POLYGON_STIPPLE_PATTERN; reg < NV4097_SET_POLYGON_STIPPLE_PATTERN + 32; ++reg)
 		{
-			draw_state_signals[reg] |= stipple;
+			signal(reg, stipple);
 		}
 
-		draw_state_signals[NV4097_SET_ALPHA_FUNC] |= fragment_env;
+		signal(NV4097_SET_ALPHA_FUNC, fragment_env);
 	}
 
 	static void init_state_signals()

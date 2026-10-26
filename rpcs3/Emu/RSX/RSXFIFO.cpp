@@ -978,7 +978,7 @@ namespace rsx
 			m_ctx->register_state->decode(reg, value);
 
 			const bool value_changed = m_ctx->register_state->latch != value;
-			if (value_changed)
+			if (value_changed && reg < draw_state_signals_count)
 			{
 				// Mark the decoded draw state that depends on this register. Applies to method registers too.
 				m_ctx->draw_state.pending |= draw_state_signals[reg];

@@ -16,6 +16,7 @@ namespace rsx
 		polygon_mode polygon_mode_front{};
 		polygon_mode polygon_mode_back{};
 
+		// Dynamic: line_width and the poly_offset_* fields
 		f32 line_width = 0.f;
 		bool line_smooth_enabled = false;
 
@@ -30,6 +31,7 @@ namespace rsx
 
 	struct stencil_face_state
 	{
+		// Dynamic: func_ref, func_mask and write_mask
 		comparison_function func{};
 		u8 func_ref = 0;
 		u8 func_mask = 0;
@@ -53,7 +55,7 @@ namespace rsx
 		bool depth_clip_enabled = false;
 
 		// Bounds are saturated into the range of the bound RSX depth format, as hardware does.
-		// Only decoded while the depth bounds test is enabled.
+		// Only decoded while the depth bounds test is enabled. Dynamic, along with the enable.
 		bool depth_bounds_test_enabled = false;
 		f32 depth_bounds_min = 0.f;
 		f32 depth_bounds_max = 0.f;
@@ -102,6 +104,8 @@ namespace rsx
 		blend_factor dfactor_a{};
 		blend_equation equation_rgb{};
 		blend_equation equation_a{};
+
+		// Dynamic
 		std::array<f32, 4> constant_color{};
 
 		bool operator==(const blend_state&) const = default;
@@ -210,6 +214,8 @@ namespace rsx
 	{
 		// Drawing state groups. A group's bit in 'dirty' is set when its contents changed since the backend last consumed them.
 		// Groups raised through draw_state_signals must fit in its u8 entries, so they use bits 0-7. Signal-only groups use the bits above.
+		// Fields marked dynamic are values that hosts usually set as dynamic state rather than bake into pipeline objects.
+		// A change to them raises the group's *_dynamic bit only, so that it does not invalidate host pipelines.
 		enum class group : u32
 		{
 			raster                       = (1 << 0),
@@ -243,12 +249,19 @@ namespace rsx
 			// Signal that the texture parameters block (coordinate scale/bias/clamp of the referenced textures) changed. Not used for state decode.
 			fragment_texture_env         = (1 << 15),
 
+			// Signal that the dynamic fields of a decoded group changed. Raised by the decoder, never through draw_state_signals.
+			raster_dynamic               = (1 << 16),
+			depth_stencil_dynamic        = (1 << 17),
+			blend_dynamic                = (1 << 18),
+
 			// Meta groups
 			decoded                      = raster | depth_stencil | blend | multisample | viewport | input_assembly | stipple | fragment_env,
+			dynamic                      = raster_dynamic | depth_stencil_dynamic | blend_dynamic,
 			programs                     = vertex_program | fragment_program,
 			constants                    = transform_constants | fragment_constants,
 			pipelines_dirty_vk           = raster | depth_stencil | blend | multisample | input_assembly | programs,
-			all                          = decoded | vertex_env | fragment_env | programs | scissor | depth_cyclic_barrier | constants | fragment_texture_env,
+			dynamic_state_dirty_vk       = raster_dynamic | depth_stencil_dynamic | viewport,
+			all                          = decoded | dynamic | vertex_env | fragment_env | programs | scissor | depth_cyclic_barrier | constants | fragment_texture_env,
 		};
 
 		bitmask_t<group> dirty{};

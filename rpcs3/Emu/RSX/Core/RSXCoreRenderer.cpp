@@ -298,6 +298,69 @@ namespace rsx
 		state.color_mask_full = full_mask;
 	}
 
+	// Copy the dynamic fields of a group (see draw_state_t)
+	static void copy_dynamic_fields(const raster_state& src, raster_state& dst)
+	{
+		dst.line_width = src.line_width;
+		dst.poly_offset_point_enabled = src.poly_offset_point_enabled;
+		dst.poly_offset_line_enabled = src.poly_offset_line_enabled;
+		dst.poly_offset_fill_enabled = src.poly_offset_fill_enabled;
+		dst.poly_offset_scale = src.poly_offset_scale;
+		dst.poly_offset_bias = src.poly_offset_bias;
+	}
+
+	static void copy_dynamic_fields(const stencil_face_state& src, stencil_face_state& dst)
+	{
+		dst.func_ref = src.func_ref;
+		dst.func_mask = src.func_mask;
+		dst.write_mask = src.write_mask;
+	}
+
+	static void copy_dynamic_fields(const depth_stencil_state& src, depth_stencil_state& dst)
+	{
+		dst.depth_bounds_test_enabled = src.depth_bounds_test_enabled;
+		dst.depth_bounds_min = src.depth_bounds_min;
+		dst.depth_bounds_max = src.depth_bounds_max;
+		copy_dynamic_fields(src.front, dst.front);
+		copy_dynamic_fields(src.back, dst.back);
+	}
+
+	static void copy_dynamic_fields(const blend_state& src, blend_state& dst)
+	{
+		dst.constant_color = src.constant_color;
+	}
+
+	// Store a decoded group. Returns the group bits for the parts that changed: the group itself for its static fields, dynamic_group for the dynamic ones.
+	template <typename T>
+	static rsx::flags32_t store_group(T& state, const T& decoded, draw_state_t::group group, draw_state_t::group dynamic_group)
+	{
+		// The decoded state with the previous dynamic values. It differs from the previous state only in the static fields.
+		T static_part = decoded;
+		copy_dynamic_fields(state, static_part);
+
+		rsx::flags32_t changed = 0;
+		if (!(static_part == state))
+		{
+			changed |= static_cast<rsx::flags32_t>(group);
+		}
+
+		if (!(decoded == static_part))
+		{
+			changed |= static_cast<rsx::flags32_t>(dynamic_group);
+		}
+
+		state = decoded;
+		return changed;
+	}
+
+	template <typename T>
+	static rsx::flags32_t store_group(T& state, const T& decoded, draw_state_t::group group)
+	{
+		const rsx::flags32_t changed = (decoded == state) ? 0 : static_cast<rsx::flags32_t>(group);
+		state = decoded;
+		return changed;
+	}
+
 #if defined(DRAW_STATE_DEBUG) && DRAW_STATE_DEBUG
 	// Full decode on top of the current state. Fields the decoders skip keep their current value, so only relevant fields are compared.
 	// A mismatch means a register feeding the group is missing from draw_state_signals.
@@ -467,8 +530,13 @@ namespace rsx
 			// The backend has resolved every texture unit the programs reference
 			m_ctx->textures.fragment_textures_dirty &= ~m_ctx->program.fp_metadata.referenced_textures_mask;
 			m_ctx->textures.vertex_textures_dirty &= ~m_ctx->program.vp_metadata.referenced_textures_mask;
-			m_ctx->graphics_state |= invalidated_programs;
 			update_volatile_texture_units();
+
+			// Atomic RMW. Rarely needed, so keep it off the common path.
+			if (invalidated_programs)
+			{
+				m_ctx->graphics_state |= invalidated_programs;
+			}
 		}
 
 		// Recheck the bits after the texture environment is loaded, since that can invalidate the programs as well
@@ -584,64 +652,74 @@ namespace rsx
 
 	void core_renderer::decode_draw_state()
 	{
+		using group = draw_state_t::group;
 		auto& state = m_ctx->draw_state;
 		const auto& regs = *REGS(m_ctx);
 
-		// Only groups whose source registers changed are decoded again
-		if (state.pending.test(draw_state_t::group::raster))
+		// Only groups whose source registers changed are decoded again.
+		// A group is only marked dirty if its decoded contents changed, so writes that decode to the same state never reach the backend.
+		if (state.pending.test(group::decoded))
 		{
-			decode_raster_state(regs, state.raster);
-			state.pending.clear(draw_state_t::group::raster);
-			state.dirty.set(draw_state_t::group::raster);
-		}
+			rsx::flags32_t changed = 0;
 
-		if (state.pending.test(draw_state_t::group::depth_stencil))
-		{
-			decode_depth_stencil_state(regs, state.depth_stencil);
-			state.pending.clear(draw_state_t::group::depth_stencil);
-			state.dirty.set(draw_state_t::group::depth_stencil);
-		}
+			if (state.pending.test(group::raster))
+			{
+				raster_state decoded = state.raster;
+				decode_raster_state(regs, decoded);
+				changed |= store_group(state.raster, decoded, group::raster, group::raster_dynamic);
+			}
 
-		if (state.pending.test(draw_state_t::group::blend))
-		{
-			decode_blend_state(regs, state.blend);
-			state.pending.clear(draw_state_t::group::blend);
-			state.dirty.set(draw_state_t::group::blend);
-		}
+			if (state.pending.test(group::depth_stencil))
+			{
+				depth_stencil_state decoded = state.depth_stencil;
+				decode_depth_stencil_state(regs, decoded);
+				changed |= store_group(state.depth_stencil, decoded, group::depth_stencil, group::depth_stencil_dynamic);
+			}
 
-		if (state.pending.test(draw_state_t::group::multisample))
-		{
-			decode_multisample_state(regs, state.multisample);
-			state.pending.clear(draw_state_t::group::multisample);
-			state.dirty.set(draw_state_t::group::multisample);
-		}
+			if (state.pending.test(group::blend))
+			{
+				blend_state decoded = state.blend;
+				decode_blend_state(regs, decoded);
+				changed |= store_group(state.blend, decoded, group::blend, group::blend_dynamic);
+			}
 
-		if (state.pending.test(draw_state_t::group::viewport))
-		{
-			decode_viewport_state(regs, state.viewport);
-			state.pending.clear(draw_state_t::group::viewport);
-			state.dirty.set(draw_state_t::group::viewport);
-		}
+			if (state.pending.test(group::multisample))
+			{
+				multisample_state decoded = state.multisample;
+				decode_multisample_state(regs, decoded);
+				changed |= store_group(state.multisample, decoded, group::multisample);
+			}
 
-		if (state.pending.test(draw_state_t::group::input_assembly))
-		{
-			decode_input_assembly_state(regs, state.input_assembly);
-			state.pending.clear(draw_state_t::group::input_assembly);
-			state.dirty.set(draw_state_t::group::input_assembly);
-		}
+			if (state.pending.test(group::viewport))
+			{
+				viewport_state decoded = state.viewport;
+				decode_viewport_state(regs, decoded);
+				changed |= store_group(state.viewport, decoded, group::viewport);
+			}
 
-		if (state.pending.test(draw_state_t::group::stipple))
-		{
-			decode_stipple_state(regs, state.stipple);
-			state.pending.clear(draw_state_t::group::stipple);
-			state.dirty.set(draw_state_t::group::stipple);
-		}
+			if (state.pending.test(group::input_assembly))
+			{
+				input_assembly_state decoded = state.input_assembly;
+				decode_input_assembly_state(regs, decoded);
+				changed |= store_group(state.input_assembly, decoded, group::input_assembly);
+			}
 
-		if (state.pending.test(draw_state_t::group::fragment_env))
-		{
-			decode_fragment_env_state(regs, state.fragment_env);
-			state.pending.clear(draw_state_t::group::fragment_env);
-			state.dirty.set(draw_state_t::group::fragment_env);
+			if (state.pending.test(group::stipple))
+			{
+				stipple_state decoded = state.stipple;
+				decode_stipple_state(regs, decoded);
+				changed |= store_group(state.stipple, decoded, group::stipple);
+			}
+
+			if (state.pending.test(group::fragment_env))
+			{
+				fragment_env_state decoded = state.fragment_env;
+				decode_fragment_env_state(regs, decoded);
+				changed |= store_group(state.fragment_env, decoded, group::fragment_env);
+			}
+
+			state.pending.clear(group::decoded);
+			state.dirty |= changed;
 		}
 
 #if defined(DRAW_STATE_DEBUG) && DRAW_STATE_DEBUG

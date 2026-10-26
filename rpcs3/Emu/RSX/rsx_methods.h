@@ -1365,6 +1365,8 @@ namespace rsx
 	extern std::array<rsx_method_t, 0x10000 / 4> methods;
 	extern std::array<u32, 0x10000 / 4> state_signals;
 
-	// Register -> draw_state_t::group bits whose decoded state depends on that register
-	extern std::array<u8, 0x10000 / 4> draw_state_signals;
+	// Register -> draw_state_t::group bits whose decoded state depends on that register.
+	// Every register the draw state decoders read is below this index, so the table only covers the low range to stay small in the FIFO loop.
+	constexpr u32 draw_state_signals_count = 0x800;
+	extern std::array<u8, draw_state_signals_count> draw_state_signals;
 }

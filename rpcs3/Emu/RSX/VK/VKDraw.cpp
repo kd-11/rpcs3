@@ -1373,10 +1373,9 @@ bool VKGSRender::end_draw()
 	u32 sub_index = 0;               // RSX subdraw ID
 	m_current_draw.subdraw_id = 0;   // Host subdraw ID. Invalid RSX subdraws do not increment this value
 
-	// Scissor changes request the reload themselves when they are applied (set_scissor)
-	if (m_ctx->draw_state.dirty.test(rsx::draw_state_t::group::raster) ||
-		m_ctx->draw_state.dirty.test(rsx::draw_state_t::group::depth_stencil) ||
-		m_ctx->draw_state.dirty.test(rsx::draw_state_t::group::viewport))
+	// Only the depth bias, depth bounds and viewport are gated by the reload. The stencil values are set on every draw.
+	// Scissor and framebuffer changes request the reload themselves when they are applied (set_scissor, set_viewport).
+	if (m_ctx->draw_state.dirty.test(rsx::draw_state_t::group::dynamic_state_dirty_vk))
 	{
 		m_current_command_buffer->flags |= vk::command_buffer::cb_reload_dynamic_state;
 	}

@@ -1838,6 +1838,7 @@ bool VKGSRender::load_program()
 	// TODO: EXT_dynamic_state should get rid of this sillyness soon (kd)
 	const auto vertex_state = vk::decode_vertex_input_assembly_state(m_ctx);
 
+	// The decoded groups only signal changes to their static fields here. Dynamic values (stencil reference, depth bias, etc.) do not affect the pipeline.
 	const bool pipeline_state_dirty =
 		m_ctx->draw_state.dirty.test(rsx::draw_state_t::group::pipelines_dirty_vk) ||
 		vk::get_renderpass_format_key(m_pipeline_properties.renderpass_key) != vk::get_renderpass_format_key(m_current_renderpass_key) || // We only care about RP format mismatch

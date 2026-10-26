@@ -1278,7 +1278,9 @@ namespace rsx
 
 		if (state != FIFO::state::lock_wait)
 		{
+			// This runs after every draw. Test before the exchange to avoid an atomic RMW when nothing was requested.
 			if (!m_ctx->in_begin_end &&
+				m_surface_write_back_requested.observe() &&
 				m_surface_write_back_requested.exchange(false))
 			{
 				flush_guest_data();
